@@ -1,11 +1,14 @@
-// ABOUTME: Global-hotkey registration. Default Cmd+Shift+G triggers overlay capture.
+// ABOUTME: Global-hotkey registration. Default Ctrl+Opt+Cmd+G triggers overlay capture.
 // ABOUTME: Configurable per-user in a later slice.
 
 use tauri::AppHandle;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 pub fn default_hotkey() -> Shortcut {
-    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyG)
+    Shortcut::new(
+        Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER),
+        Code::KeyG,
+    )
 }
 
 pub fn register(app: &AppHandle) -> anyhow::Result<()> {
