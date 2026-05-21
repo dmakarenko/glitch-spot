@@ -33,7 +33,59 @@ Two ways to think about it:
 
 ---
 
-## 3. Versions
+## 3. Components
+
+Three deployables in total. v0 ships only the first.
+
+| Component | What it is | Where it runs | v0 | v1 |
+|---|---|---|---|---|
+| **Desktop app** | The product. Screen capture, overlay + drawing, snapshot assembly, embedded MCP server, clipboard writer, relay client. | Each developer's machine. | ✅ macOS | ✅ macOS, Windows, Linux |
+| **Web SDK** (`@glitch-spot/web`) | npm package the host web app imports. Exposes `setContext()` for runtime-state injection, and a small local-WS endpoint the desktop app calls during snapshot assembly to read DOM path + component name. | Inside the host web app, in the browser. | — | ✅ |
+| **Relay** | Cloudflare Worker + R2. Hosts snapshots and rendered images for a TTL; serves a JSON-or-HTML view at `/s/{id}`. | Cloudflare edge. | — | ✅ |
+
+The MCP server is **not** a separate component — it lives inside the desktop app and is the desktop app's primary outbound interface to coding agents.
+
+```
+                         ┌──────────────────────┐
+                         │   Coding agent       │
+                         │   (Cursor / Claude   │
+                         │    Code / etc.)      │
+                         └────┬───────────┬─────┘
+                              │ MCP       │ HTTPS
+                              │ (local)   │ (cross-machine)
+                              ▼           ▼
+        ┌─────────────────────────┐   ┌──────────────────┐
+        │  Desktop app            │──▶│  Relay           │
+        │                         │   │  (Cloudflare)    │
+        │  • Screen capture       │   │                  │
+        │  • Overlay + drawing    │   │  • Snapshot KV   │
+        │  • Snapshot builder     │   │  • Image bucket  │
+        │  • MCP server           │   │  • HTML view     │
+        │  • Relay client         │   └──────────────────┘
+        │  • Clipboard writer     │
+        └────────────┬────────────┘
+                     │ Local WS
+                     │ (only when web SDK is present)
+                     ▼
+        ┌─────────────────────────┐
+        │  Host web app           │
+        │                         │
+        │  @glitch-spot/web       │
+        │   • setContext()        │
+        │   • DOM resolver        │
+        └─────────────────────────┘
+```
+
+Communication paths:
+
+- **Agent ↔ desktop app:** MCP (stdio or localhost HTTP) — for snapshot delivery and blocking `wait_for_snapshot`.
+- **Desktop app ↔ host web app:** local WebSocket on a fixed port, only invoked during snapshot assembly when the web SDK is detected.
+- **Desktop app → relay:** HTTPS POST (per-user API key) to upload snapshot JSON + clean/annotated images.
+- **Agent or teammate → relay:** HTTPS GET on `/s/{id}` (optionally with passcode) — returns JSON by default, HTML with `?view=html`.
+
+---
+
+## 4. Versions
 
 ### v0 — prototype (the only thing we build first)
 
@@ -73,7 +125,7 @@ Listed so we don't accidentally build them in v1:
 
 ---
 
-## 4. Out of scope (cut decisions)
+## 5. Out of scope (cut decisions)
 
 These are not "we'll get to them" — they are deliberate omissions for the working scope:
 
@@ -84,7 +136,7 @@ These are not "we'll get to them" — they are deliberate omissions for the work
 
 ---
 
-## 5. The snapshot object
+## 6. The snapshot object
 
 This is the contract. Everything else serves this.
 
@@ -145,7 +197,7 @@ In v0, `context.sdk` is always `null` and `images.{clean,annotated}` are absent 
 
 ---
 
-## 6. Capture modes
+## 7. Capture modes
 
 - **Screen / window** — works for any visible application. The default in v0. Glitch Spot uses OS screen-capture APIs (macOS: ScreenCaptureKit; Windows: Windows.Graphics.Capture; Linux: PipeWire/X11 fallback).
   - The overlay window is excluded from capture so the clean screenshot truly is clean.
@@ -154,7 +206,7 @@ In v0, `context.sdk` is always `null` and `images.{clean,annotated}` are absent 
 
 ---
 
-## 7. SDK surface (web, v1)
+## 8. SDK surface (web, v1)
 
 Minimal API. The SDK does not draw the overlay — the desktop app does. The SDK only exposes context and identifies DOM nodes when asked.
 
@@ -178,7 +230,7 @@ Capture happens through the desktop app, not the SDK. The SDK's job is to expose
 
 ---
 
-## 8. MCP server contract
+## 9. MCP server contract
 
 Local, runs inside the desktop app. Speaks the standard MCP protocol over stdio (for IDE-local agents) and a localhost HTTP transport (for browser-based agents).
 
@@ -195,7 +247,7 @@ Resources:
 
 ---
 
-## 9. Relay (v1)
+## 10. Relay (v1)
 
 - Cloudflare Worker + R2 (or D1 + R2). Snapshot JSON in KV/D1 keyed by `id`. Images in R2.
 - Upload from the desktop app over HTTPS using a per-team API key.
@@ -206,7 +258,7 @@ Resources:
 
 ---
 
-## 10. Tech-stack open questions
+## 11. Tech-stack open questions
 
 These need decisions before we start v0:
 
@@ -219,7 +271,7 @@ I have opinions on all of these but don't want to bake them in without your inpu
 
 ---
 
-## 11. Open product questions
+## 12. Open product questions
 
 - Should the overlay let you draw on top of the *live* app (where the app keeps responding to events behind the overlay), or does it freeze the visible content at activation time? Freeze is much simpler; live is nicer if you want to keep clicking around while annotating.
 - When you draw multiple rectangles, should each one get its own note input, or one shared note for the whole session? My current default is per-rectangle.
