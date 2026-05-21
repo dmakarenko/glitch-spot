@@ -91,7 +91,7 @@ Communication paths:
 
 Single-user, single-machine. macOS only. No backend. No web SDK. No relay.
 
-The stack is still chosen for eventual cross-platform reach (Electron — see §11), but Windows packaging/testing is deferred until v1.
+Stack: **Tauri 2** (chosen — see §11). Cross-platform from day one in code, but Windows packaging/testing is deferred until v1.
 
 - Desktop application (menu-bar resident) with a global hotkey.
 - Captures whole screen or active window using OS screen-capture APIs.
@@ -202,7 +202,7 @@ In v0, `context.sdk` is always `null` and `images.{clean,annotated}` are absent 
 
 ## 7. Capture modes
 
-- **Screen / window** — works for any visible application. The default in v0. Glitch Spot uses OS screen-capture APIs (macOS: ScreenCaptureKit; Windows: Windows.Graphics.Capture; Linux: PipeWire/X11 fallback).
+- **Screen / window** — works for any visible application. The default in v0.1. Glitch Spot uses OS screen-capture APIs via Rust bindings (macOS: ScreenCaptureKit via `screencapturekit` crate; Windows: Windows.Graphics.Capture via `windows-capture` crate; Linux: PipeWire — v1.5+).
   - The overlay window is excluded from capture so the clean screenshot truly is clean.
   - The annotated screenshot is rendered by compositing the clean shot with the annotation layer.
 - **Web** — only when `@glitch-spot/web` is installed in the host app and active in the current page. Lets us read DOM under each bounding box without round-tripping through the OS. Used as an enrichment, not a replacement — screen capture still produces the images.
@@ -261,17 +261,21 @@ Resources:
 
 ---
 
-## 11. Tech-stack open questions
+## 11. Tech-stack decisions
 
-These need decisions before we start v0.1. Even though v0.1 is macOS-only, Windows is a near-term requirement (v1) — so per-platform native (Swift/AppKit + WinUI) would mean rewriting for v1. The stack choice should clear both OSes.
+- **Desktop app stack — Tauri 2 (chosen).** Rust core, system webview for the UI. Lean binary (~3-10 MB), modern, and the right long-term posture even though screen capture isn't in core.
+  - Screen capture on macOS: `screencapturekit` Rust binding (or thin FFI over ScreenCaptureKit). Windows (v1): `windows-capture` crate or direct Windows.Graphics.Capture FFI. Linux (v1.5+): PipeWire.
+  - Overlay window: one borderless, transparent, always-on-top Tauri window per monitor, sized to the display. Drawing in the webview via HTML Canvas — Rust-side just owns the window lifecycle and screenshot capture.
+  - Frontend framework inside the webview: TBD (Svelte / Solid / vanilla — pick the lightest thing that gives us decent canvas ergonomics).
+  - Global hotkey: `tauri-plugin-global-shortcut`.
+  - Clipboard: `tauri-plugin-clipboard-manager`.
+- **MCP transport (v0.1):** long-running localhost HTTP server started by the desktop app. Fits the always-running desktop-app model and lets multiple agents subscribe simultaneously. Stdio support can come later if a specific IDE needs it.
+- **Local-WS bridge to web SDK (v1):** Rust-side `axum`/`tokio-tungstenite` WebSocket server on a fixed local port (e.g. 7821) listening for connections from `@glitch-spot/web` instances. Used only during snapshot assembly when the web SDK is detected.
 
-- **Desktop app stack — Tauri vs. Electron:**
-  - **Electron** has `desktopCapturer.getSources()` as a first-class, cross-platform screen-capture API. Transparent always-on-top windows, global shortcuts, and tray icons are all well-trodden. Heavy binary (~85 MB), but for an internal team tool that's a non-issue. Fastest path to a working v0.
-  - **Tauri 2.0** is leaner (~3-10 MB) and uses the system webview, but screen capture is not in the core API — we'd lean on platform-specific Rust crates (`screencapturekit-rs` on macOS, `windows-capture` on Windows) and write the glue. Better long-term posture; more v0 friction.
-  - **My recommendation:** Electron for v0 to unblock fast. Reassess in v1 once we know the actual capture/overlay shape and whether binary size matters for distribution to the team.
-- **Overlay rendering:** one borderless transparent always-on-top window per monitor, sized to the display, with a fullscreen canvas. Drawing primitives via HTML Canvas (Electron) or platform-native (Tauri).
-- **Hotkey registration:** a single global hotkey by default (configurable). Both Electron and Tauri have built-in global-shortcut support.
-- **MCP transport in v0:** stdio (started per-client) vs. a long-running localhost HTTP server (started by the desktop app). Localhost HTTP fits the always-running desktop-app model better and lets multiple agents subscribe simultaneously — leaning that way.
+Things to figure out as we go, not blockers:
+
+- Whether the overlay webview's transparency works cleanly across all macOS versions we care about (some past Tauri versions had quirks with `transparent: true` on macOS 14+).
+- How we handle multi-monitor: one window per display vs. one window spanning the virtual desktop. Per-display is likely simpler and gives crisper DPI handling.
 
 I have opinions on all of these but don't want to bake them in without your input — they're the next decisions on the table.
 
