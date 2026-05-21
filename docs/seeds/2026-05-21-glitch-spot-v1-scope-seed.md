@@ -266,7 +266,7 @@ Resources:
 - **Desktop app stack — Tauri 2 (chosen).** Rust core, system webview for the UI. Lean binary (~3-10 MB), modern, and the right long-term posture even though screen capture isn't in core.
   - Screen capture on macOS: `screencapturekit` Rust binding (or thin FFI over ScreenCaptureKit). Windows (v1): `windows-capture` crate or direct Windows.Graphics.Capture FFI. Linux (v1.5+): PipeWire.
   - Overlay window: one borderless, transparent, always-on-top Tauri window per monitor, sized to the display. Drawing in the webview via HTML Canvas — Rust-side just owns the window lifecycle and screenshot capture.
-  - Frontend framework inside the webview: TBD (Svelte / Solid / vanilla — pick the lightest thing that gives us decent canvas ergonomics).
+  - Frontend framework inside the webview: **React + Vite** (chosen). The overlay UI is tiny (toolbar, per-rectangle note input, undo button), so framework overhead is irrelevant; team familiarity wins. Canvas drawing uses raw `<canvas>` with `useRef`/`useEffect` rather than `react-konva` — we need pixel-precise control over a screenshot backdrop and the React-wrapper layer would just be friction.
   - Global hotkey: `tauri-plugin-global-shortcut`.
   - Clipboard: `tauri-plugin-clipboard-manager`.
 - **MCP transport (v0.1):** long-running localhost HTTP server started by the desktop app. Fits the always-running desktop-app model and lets multiple agents subscribe simultaneously. Stdio support can come later if a specific IDE needs it.
