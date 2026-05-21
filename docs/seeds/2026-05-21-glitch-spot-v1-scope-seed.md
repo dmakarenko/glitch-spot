@@ -1,180 +1,227 @@
-# Glitch Spot — Tighter v1.0 Scope (Counter-Proposal Seed)
+# Glitch Spot — Working Product Scope
 
 **Date:** 2026-05-21
-**Status:** Draft — counter-proposal to `2026-05-21-glitch-spot-seed.md`
-**Author:** Dmitry + Claude (critique session)
+**Status:** Draft — working scope, supersedes the v1-scope counter-proposal framing
+**Related:** original PRD at `2026-05-21-glitch-spot-seed.md`
 
 ---
 
-## 0. Why this file exists
+## 1. What we are building
 
-The original PRD (`2026-05-21-glitch-spot-seed.md`) promises three platforms, an AI synthesis engine, an MCP server, public shareable links with passcodes, automatic PII redaction, and live multi-turn AI debugging. It also picks a competitor set (Jam, Marker, Webvizio) that flatters the gap analysis.
+A tool the team uses during development to capture visual feedback against a running app and hand it to an AI coding agent — either directly through MCP on the same machine, or via a short-lived link the agent (or a teammate) can pull from.
 
-This seed sketches what a v1.0 would look like if we **picked the one defensible wedge** the original PRD buried in "Phase 1.5", went deep on it, and explicitly scoped out the parts that are either commoditizing fast (MCP) or strategically weak (cross-platform breadth, public shareable links, hand-wavy PII redaction).
+Two ways to think about it:
 
----
-
-## 1. The single thesis
-
-**Bounding-box-to-source-file is the only defensible primitive in this space right now.**
-
-Everything else in the PRD (annotation overlay, console capture, MCP server, prompt synthesis) is either already shipped by incumbents (Jam, Sentry) or trivially copy-able within a quarter. The hard, valuable thing — the thing that turns a screenshot into a *change* an AI agent can make — is the deterministic mapping from "this rectangle on screen" to "this React component in `apps/web/src/features/checkout/PriceLabel.tsx:42`."
-
-If we ship that well, we have a moat. If we don't, we're "Jam + MCP," which is a feature, not a company.
+- **For the human:** a global hotkey that pauses your screen, lets you draw rectangles and write notes on top of any running app, and produces a structured artifact when you're done.
+- **For the agent:** an MCP tool (`glitch_spot.wait_for_snapshot`) that blocks until the human finishes a capture session, then returns a rich object describing what they marked up and what context the app exposed.
 
 ---
 
-## 2. What we are NOT building in v1.0
+## 2. The main loop
 
-Cut ruthlessly. Each of these is a real cost, not a feature gap.
-
-| Cut | Why |
-|---|---|
-| **Mobile SDK (iOS/Android/RN/Flutter)** | Distribution is brutal (app review, security audits, app size). Defer to v1.5 once web wedge is proven. |
-| **Desktop overlay (Tauri/Electron, global click-through)** | Tiny target market, large platform engineering cost (accessibility entitlements per OS), unclear ICP. Kill or push to v2.0+. |
-| **Public shareable links with 4-digit passcodes** | Security model is a B2B blocker, not a footnote. Replace with workspace-scoped auth (see §5). |
-| **Automatic PII redaction at the text-node level** | This is a research problem, not a feature. Promising it in v1 invites security teams to tear the product apart. Ship without it; tell customers to use it on dev/staging only. |
-| **"LLM Prompt Synthesis Engine" that paraphrases human intent** | The PRD's own example ("reduce dimensions by approximately 15%") hallucinates specificity the user didn't give. v1 ships the user's *literal* annotation text, plus structured context. Let the IDE agent do the synthesis. |
-| **Multi-step undo** | Single-level undo is enough for a 30-second annotation session. |
-| **Free-form circles** | Rectangles only. One shape primitive. |
-| **Resizable/draggable annotations** | Draw-once. If you mis-drew, undo and redraw. |
-| **"60 FPS, <2% CPU overhead" NFRs** | Aspirational without engineering grounding. v1 ships with measured numbers, not promised ones. |
+1. The app being debugged is running. It can be a web app in a browser, a desktop app, a mobile simulator — anything visible on screen.
+2. An AI agent (Cursor / Claude Code / etc.) optionally launches the dev server itself, then calls `glitch_spot.wait_for_snapshot()`. The call blocks.
+3. The developer hits a global hotkey. Glitch Spot's overlay appears on top of the active window (or full screen).
+4. They draw one or more rectangles. Each rectangle can have a text note. They can edit / undo before finishing.
+5. They close the overlay (Done / Esc). Glitch Spot:
+    - Grabs a clean screenshot (without our overlay) and an annotated screenshot (with rectangles burned in).
+    - Assembles a JSON snapshot object (schema in §5).
+    - **Always:** copies the full snapshot JSON to the clipboard.
+    - **If relay configured:** uploads the snapshot to the relay, gets back a short URL with optional passcode, also copies that URL to the clipboard.
+    - **If an MCP client is waiting:** unblocks `wait_for_snapshot` and returns the snapshot.
+6. The agent now has either the JSON directly (via MCP) or a link to fetch it. The developer's job is done.
 
 ---
 
-## 3. What v1.0 IS
+## 3. Versions
 
-### 3.1 One platform: Web SDK + browser-side capture
+### v0 — prototype (the only thing we build first)
 
-- npm package, drop-in script tag, zero-config defaults.
-- Activated by keyboard shortcut (`Cmd+Shift+G` or similar) — no floating button cluttering the host app.
-- Draws one HTML5 canvas overlay. Rectangles only. One annotation per session can have a text note. That's it.
+Single-user, single-machine. macOS only. No backend. No web SDK. No relay.
 
-### 3.2 The core primitive: bounding box → source file + line
+- Desktop application (menu-bar resident) with a global hotkey.
+- Captures whole screen or active window using OS screen-capture APIs.
+- Overlay window for drawing rectangles + attaching text notes per rectangle.
+- Multi-step undo within a session; single-level redo is fine.
+- On finish: serialize the snapshot to JSON, copy to clipboard. Done.
+- Local MCP server (stdio or local HTTP) exposing `wait_for_snapshot`, `get_latest_snapshot`, `get_snapshot(id)`.
+- No SDK in any host app yet. Context is whatever we can read from the OS (window title, app name, screen size) — nothing app-internal.
 
-This is the work. Everything else is table stakes around it.
+This is enough to be useful to one person + one agent on one machine. Everything else is built on top.
 
-- During capture, walk the DOM under the bounding box and identify the **deepest React/Vue/Svelte component** that owns the box.
-- Use bundler source maps (Vite, Next.js, Webpack 5 with `devtool: 'source-map'`) to map that component back to a `file:line` in the user's repo.
-- Verify the mapping against the local git working tree (so we know if the file moved between capture and replay).
-- Output: `{ component: "PriceLabel", file: "apps/web/src/features/checkout/PriceLabel.tsx", line: 42, framework: "react", confidence: 0.94 }`.
+### v1 — usable with the team
 
-**This is the wedge.** Source maps for production bundles are fragile, but v1 only needs to work in **dev mode and Vercel/Netlify preview deploys** — which is where developers actually run the tool against bug reports.
+Adds cross-machine handoff and richer context for web hosts.
 
-### 3.3 Context payload (what the AI gets)
+- **Cloudflare-hosted relay.** Snapshots optionally upload to a Worker + R2 bucket (or equivalent). Short URL returned, copied to clipboard.
+  - URL format: `https://glitch-spot.app/s/{id}`. Default response: snapshot JSON. With `?view=html`: human-readable HTML page rendering the annotated screenshot, notes, and context.
+  - Optional 6-digit passcode per snapshot. Default TTL 15 min, max 24h.
+  - The two image URLs in the snapshot point at the same relay (`/i/{id}/clean.png`, `/i/{id}/annotated.png`).
+- **Web SDK** (`@glitch-spot/web`): drop-in npm package. When present in a web app, enriches the snapshot with DOM-path and framework-component info for each rectangle, plus app-injected custom context (see §7).
+- **Cross-platform desktop app:** Windows + Linux in addition to macOS.
 
-Structured JSON + a Markdown summary. No "synthesis." Just facts:
+### v1.5+ — explicitly deferred
+
+Listed so we don't accidentally build them in v1:
+
+- Source-map → file:line resolution.
+- Git-blame enrichment (last commit per file:line).
+- Mobile SDKs (iOS / Android / React Native / Flutter).
+- Multi-turn AI debugging (agent replying back into the overlay).
+- Automatic PII redaction.
+- Public anonymous shareable links.
+
+---
+
+## 4. Out of scope (cut decisions)
+
+These are not "we'll get to them" — they are deliberate omissions for the working scope:
+
+- Customer-facing bug reporting (production tool for non-developers). Glitch Spot is a dev-time tool.
+- Free-form circles / arrows / brushes. Rectangles only. One primitive.
+- Live AI annotations replying back onto the canvas. The agent reads, edits files, opens a PR — it does not write back to the overlay.
+- LLM "prompt synthesis" that paraphrases or numerically interprets the user's note. We pass the user's note verbatim. The IDE agent interprets it.
+
+---
+
+## 5. The snapshot object
+
+This is the contract. Everything else serves this.
 
 ```json
 {
-  "annotation": {
-    "shape": "rect",
-    "coords": { "x": 140, "y": 310, "w": 280, "h": 60 },
-    "note": "make this smaller and match the login button color"
+  "id": "snap_01HXYZABCD",
+  "createdAt": "2026-05-21T14:32:11Z",
+  "ttlSeconds": 900,
+  "annotations": [
+    {
+      "id": "anno_1",
+      "shape": "rect",
+      "coords": { "x": 140, "y": 310, "w": 280, "h": 60 },
+      "note": "make this smaller and match the login button color",
+      "domPath": null,
+      "component": null
+    }
+  ],
+  "context": {
+    "capture": {
+      "mode": "screen",                         // "screen" | "window" | "web"
+      "screen": { "w": 1440, "h": 900, "scale": 2 },
+      "window": { "title": "Checkout — localhost:3000", "appName": "Google Chrome" }
+    },
+    "sdk": null,                                 // populated when a Glitch Spot SDK is running
+    "os": { "platform": "macos", "version": "15.4.0" }
   },
-  "source": {
-    "component": "PriceLabel",
-    "file": "apps/web/src/features/checkout/PriceLabel.tsx",
-    "line": 42,
-    "framework": "react",
-    "confidence": 0.94
-  },
-  "page": {
-    "url": "http://localhost:3000/checkout",
-    "title": "Checkout",
-    "viewport": { "w": 1440, "h": 900 }
-  },
-  "console": [ /* last 50 lines */ ],
-  "network": [ /* last 20 requests, headers + status only, no bodies */ ],
-  "git": {
-    "branch": "feat/checkout-redesign",
-    "head": "a1b2c3d",
-    "dirty": true
+  "images": {
+    "clean":     "https://glitch-spot.app/i/snap_01HXYZABCD/clean.png",
+    "annotated": "https://glitch-spot.app/i/snap_01HXYZABCD/annotated.png"
   }
 }
 ```
 
-The user's note ships verbatim. The IDE agent (Cursor, Claude Code) decides how to interpret "smaller." We don't pretend to know.
+When the web SDK is present, `context.sdk` is populated:
 
-### 3.4 The handoff: MCP server, local-first
+```json
+"sdk": {
+  "appName": "checkout-frontend",
+  "route": "/checkout",
+  "viewport": { "w": 1280, "h": 800 },
+  "framework": "react",
+  "git": { "branch": "feat/checkout-redesign", "head": "a1b2c3d", "dirty": true },
+  "console": [ /* last 50 lines, trimmed */ ],
+  "network": [ /* last 20 requests, headers only */ ],
+  "custom": { /* whatever the app passed to glitchSpot.setContext(...) */ }
+}
+```
 
-- Lightweight local MCP server bundled with the SDK or run as a desktop helper.
-- Captures live in-memory; nothing leaves the developer's machine unless they explicitly share.
-- IDE agent queries `glitch-spot://snapshots/latest` and gets the payload above.
-- Same machine, same user — no auth ceremony, no link expiration, no passcode theatre.
+And each annotation gains DOM/component info:
 
-For team sharing (next section): an authenticated workspace sync, not public links.
+```json
+"domPath": "main > section.checkout > form > div.price-row > label.PriceLabel",
+"component": { "name": "PriceLabel", "framework": "react" }
+```
 
----
-
-## 4. The user motion (the only one we optimize for)
-
-1. Developer runs their app on localhost (or opens a Vercel preview).
-2. Sees a visual bug. Hits `Cmd+Shift+G`.
-3. Draws a rectangle. Types a one-line note.
-4. Glitch Spot captures payload locally.
-5. Switches to Cursor / Claude Code. Types: "Apply the latest Glitch Spot snapshot."
-6. Agent reads MCP, sees `file: ...PriceLabel.tsx:42`, opens the file, makes the change.
-
-**Time from bug → PR draft: under 60 seconds.** That's the demo, that's the pitch, that's the wedge.
-
----
-
-## 5. Security model (v1)
-
-- **No public shareable links.** Period.
-- **No cloud storage of payloads by default.** Snapshots live in `~/.glitch-spot/` on the developer's machine.
-- **Team sync (optional, opt-in):** OAuth against GitHub org. Snapshots sync to a workspace bucket scoped to that org. No public URLs ever — access is gated by GitHub org membership.
-- **Network payload capture:** headers + status only by default. Bodies are off by default and require explicit per-project opt-in via SDK config (`captureNetworkBodies: true`). Document loudly that this is for dev/staging only.
-- **Console capture:** last 50 lines, capped at 8KB total.
-- **PII redaction:** *not promised*. Documentation tells users: don't run this against production with real customer data. v1 is a developer tool for dev/staging, not a customer support tool.
-
-This is a much smaller security surface than the PRD describes, and it's defensible in an enterprise security review.
+In v0, `context.sdk` is always `null` and `images.{clean,annotated}` are absent (clipboard-only). v1 fills both in.
 
 ---
 
-## 6. "Why now?" — the actual argument
+## 6. Capture modes
 
-The original PRD doesn't make this case. Here's the honest one:
-
-1. **MCP adoption crossed a threshold.** Cursor, Claude Code, Windsurf, and Zed all support MCP as of late 2025 / early 2026. A tool whose output is "an MCP resource the agent already knows how to consume" has zero integration cost — that wasn't true a year ago.
-2. **Source maps in modern bundlers are reliable enough.** Vite, Next.js 14+, and Webpack 5 produce maps accurate enough to reverse-resolve a DOM node to a source line with >90% confidence in dev mode. The infra exists; nobody has packaged it for this use case.
-3. **Multimodal models are good enough that "what is shown" is no longer the bottleneck.** The bottleneck is "which file, which line, which component" — i.e., the deterministic mapping problem we're solving.
-
-These three trends together open a 12–18 month window. Beyond that, Cursor/Claude Code will likely ship something similar natively.
+- **Screen / window** — works for any visible application. The default in v0. Glitch Spot uses OS screen-capture APIs (macOS: ScreenCaptureKit; Windows: Windows.Graphics.Capture; Linux: PipeWire/X11 fallback).
+  - The overlay window is excluded from capture so the clean screenshot truly is clean.
+  - The annotated screenshot is rendered by compositing the clean shot with the annotation layer.
+- **Web** — only when `@glitch-spot/web` is installed in the host app and active in the current page. Lets us read DOM under each bounding box without round-tripping through the OS. Used as an enrichment, not a replacement — screen capture still produces the images.
 
 ---
 
-## 7. The hardest unresolved question
+## 7. SDK surface (web, v1)
 
-**Why doesn't Cursor / Claude Code just ship this themselves?**
+Minimal API. The SDK does not draw the overlay — the desktop app does. The SDK only exposes context and identifies DOM nodes when asked.
 
-Honest answer: they probably will, within 12–18 months. The play here is:
+```ts
+import { glitchSpot } from "@glitch-spot/web";
 
-- **Move first** and become the default verb ("just glitch-spot it") before they get there.
-- **Stay framework-agnostic.** Cursor's version will likely be tied to Cursor. Ours works in any IDE that speaks MCP — including the ones that don't exist yet.
-- **Accept that this might be an acquisition target, not a public-company outcome.** A clean, well-built primitive that Cursor/Anthropic/JetBrains might buy is a fine outcome, and one that requires we ship something genuinely good.
+glitchSpot.init({
+  appName: "checkout-frontend",
+  framework: "react"  // optional, auto-detected when possible
+});
 
-If we're not willing to be acquired and we're not willing to compete head-on with Cursor on their home turf, we shouldn't build this.
+// In any component / route handler, push state that should ride along on the next snapshot:
+glitchSpot.setContext({
+  current_view_controller: "ProductDetailsPage",
+  user_authentication_state: "logged_in",
+  active_experiments: ["new_checkout_flow_v2"]
+});
+```
+
+Capture happens through the desktop app, not the SDK. The SDK's job is to expose a small local websocket the desktop app talks to when a snapshot is being assembled — that's how DOM-path resolution happens.
 
 ---
 
-## 8. Open questions for Dmitry
+## 8. MCP server contract
 
-- Do we agree that bounding-box-to-source-file is the wedge, or is there a different defensible primitive we're missing?
-- Do we agree that mobile + desktop are wrong for v1, or is there a specific ICP for them I'm undervaluing?
-- Are we comfortable with the "dev/staging only, no PII promises" positioning? It cuts a market segment (QA tooling for prod) but de-risks security review massively.
-- Acquisition vs. independent-company framing — which one are we building toward? It changes a lot of downstream decisions (pricing, fundraising, how much we invest in the MCP server vs. tight IDE integrations).
-- Is there a competitor I'm missing that already does the bounding-box-to-source-file mapping? Builder.io's Visual Copilot is closest; need to check whether they expose it as a standalone primitive or only inside their builder.
+Local, runs inside the desktop app. Speaks the standard MCP protocol over stdio (for IDE-local agents) and a localhost HTTP transport (for browser-based agents).
+
+Tools:
+
+- `glitch_spot.wait_for_snapshot(timeout_seconds?: number)` — blocks until the next snapshot is finalized, returns the full snapshot JSON.
+- `glitch_spot.get_latest_snapshot()` — returns the most recently finalized snapshot (no block).
+- `glitch_spot.get_snapshot(id)` — returns a specific snapshot by ID.
+
+Resources:
+
+- `glitch-spot://snapshots/latest` — same content as `get_latest_snapshot`, but as an MCP resource.
+- `glitch-spot://snapshots/{id}` — same as `get_snapshot`.
 
 ---
 
-## 9. What this seed does NOT cover (yet)
+## 9. Relay (v1)
 
-- Pricing model
-- Specific GTM / first 10 customers
-- Engineering plan / staffing
-- Detailed source-map reverse-mapping algorithm (this is where the technical risk lives and deserves its own design doc)
-- Framework coverage matrix (React only? Vue? Svelte? what about RSC / Server Actions?)
+- Cloudflare Worker + R2 (or D1 + R2). Snapshot JSON in KV/D1 keyed by `id`. Images in R2.
+- Upload from the desktop app over HTTPS using a per-team API key.
+- TTL enforced at read time and via R2 lifecycle rules.
+- `GET /s/{id}` → JSON by default. `GET /s/{id}?view=html` → HTML view.
+- Passcode (when set) required as `?p=######` or `X-Glitch-Spot-Passcode` header.
+- The relay knows nothing about teams or auth in v0/v1 beyond "this API key is allowed to write." Team-level access control is a later concern.
 
-These should be follow-up seeds or design docs once we agree on the thesis above.
+---
+
+## 10. Tech-stack open questions
+
+These need decisions before we start v0:
+
+- **Desktop app stack:** native Swift / AppKit (fastest for macOS-only v0, but Mac-only) vs. Tauri (Rust + webview, lets us add Windows/Linux in v1 without a rewrite) vs. Electron (heaviest, but most familiar).
+- **Overlay rendering:** a fullscreen transparent NSWindow (or equivalent) on top of the screen, drawing via Canvas/CoreGraphics? Or a borderless click-through window per monitor?
+- **Hotkey registration:** a single global hotkey by default; configurable per-user.
+- **MCP transport in v0:** stdio (started per-client) vs. a long-running localhost HTTP server (started by the desktop app).
+
+I have opinions on all of these but don't want to bake them in without your input — they're the next decisions on the table.
+
+---
+
+## 11. Open product questions
+
+- Should the overlay let you draw on top of the *live* app (where the app keeps responding to events behind the overlay), or does it freeze the visible content at activation time? Freeze is much simpler; live is nicer if you want to keep clicking around while annotating.
+- When you draw multiple rectangles, should each one get its own note input, or one shared note for the whole session? My current default is per-rectangle.
+- Should the annotated image render note text next to each rectangle, or just the rectangles (text only in JSON)? Embedding text in the image makes the HTML view nicer but the rectangles uglier.
+- For the `wait_for_snapshot` MCP tool: what's a sensible default timeout? Suggesting 10 minutes — long enough to switch context, short enough not to leak forever.
