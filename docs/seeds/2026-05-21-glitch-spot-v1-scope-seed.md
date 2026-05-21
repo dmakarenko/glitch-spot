@@ -39,7 +39,7 @@ Three deployables in total. v0 ships only the first.
 
 | Component | What it is | Where it runs | v0 | v1 |
 |---|---|---|---|---|
-| **Desktop app** | The product. Screen capture, overlay + drawing, snapshot assembly, embedded MCP server, clipboard writer, relay client. | Each developer's machine. | ✅ macOS | ✅ macOS, Windows, Linux |
+| **Desktop app** | The product. Screen capture, overlay + drawing, snapshot assembly, embedded MCP server, clipboard writer, relay client. | Each developer's machine. | ✅ macOS | ✅ macOS + Windows |
 | **Web SDK** (`@glitch-spot/web`) | npm package the host web app imports. Exposes `setContext()` for runtime-state injection, and a small local-WS endpoint the desktop app calls during snapshot assembly to read DOM path + component name. | Inside the host web app, in the browser. | — | ✅ |
 | **Relay** | Cloudflare Worker + R2. Hosts snapshots and rendered images for a TTL; serves a JSON-or-HTML view at `/s/{id}`. | Cloudflare edge. | — | ✅ |
 
@@ -87,9 +87,11 @@ Communication paths:
 
 ## 4. Versions
 
-### v0 — prototype (the only thing we build first)
+### v0.1 — prototype (the only thing we build first)
 
 Single-user, single-machine. macOS only. No backend. No web SDK. No relay.
+
+The stack is still chosen for eventual cross-platform reach (Electron — see §11), but Windows packaging/testing is deferred until v1.
 
 - Desktop application (menu-bar resident) with a global hotkey.
 - Captures whole screen or active window using OS screen-capture APIs.
@@ -103,19 +105,20 @@ This is enough to be useful to one person + one agent on one machine. Everything
 
 ### v1 — usable with the team
 
-Adds cross-machine handoff and richer context for web hosts.
+Adds cross-machine handoff, richer context for web hosts, and the second OS.
 
+- **Windows** support for the desktop app (macOS shipped in v0.1).
 - **Cloudflare-hosted relay.** Snapshots optionally upload to a Worker + R2 bucket (or equivalent). Short URL returned, copied to clipboard.
   - URL format: `https://glitch-spot.app/s/{id}`. Default response: snapshot JSON. With `?view=html`: human-readable HTML page rendering the annotated screenshot, notes, and context.
   - Optional 6-digit passcode per snapshot. Default TTL 15 min, max 24h.
   - The two image URLs in the snapshot point at the same relay (`/i/{id}/clean.png`, `/i/{id}/annotated.png`).
-- **Web SDK** (`@glitch-spot/web`): drop-in npm package. When present in a web app, enriches the snapshot with DOM-path and framework-component info for each rectangle, plus app-injected custom context (see §7).
-- **Cross-platform desktop app:** Windows + Linux in addition to macOS.
+- **Web SDK** (`@glitch-spot/web`): drop-in npm package. When present in a web app, enriches the snapshot with DOM-path and framework-component info for each rectangle, plus app-injected custom context (see §8).
 
 ### v1.5+ — explicitly deferred
 
 Listed so we don't accidentally build them in v1:
 
+- **Linux** support for the desktop app.
 - Source-map → file:line resolution.
 - Git-blame enrichment (last commit per file:line).
 - Mobile SDKs (iOS / Android / React Native / Flutter).
@@ -260,12 +263,15 @@ Resources:
 
 ## 11. Tech-stack open questions
 
-These need decisions before we start v0:
+These need decisions before we start v0.1. Even though v0.1 is macOS-only, Windows is a near-term requirement (v1) — so per-platform native (Swift/AppKit + WinUI) would mean rewriting for v1. The stack choice should clear both OSes.
 
-- **Desktop app stack:** native Swift / AppKit (fastest for macOS-only v0, but Mac-only) vs. Tauri (Rust + webview, lets us add Windows/Linux in v1 without a rewrite) vs. Electron (heaviest, but most familiar).
-- **Overlay rendering:** a fullscreen transparent NSWindow (or equivalent) on top of the screen, drawing via Canvas/CoreGraphics? Or a borderless click-through window per monitor?
-- **Hotkey registration:** a single global hotkey by default; configurable per-user.
-- **MCP transport in v0:** stdio (started per-client) vs. a long-running localhost HTTP server (started by the desktop app).
+- **Desktop app stack — Tauri vs. Electron:**
+  - **Electron** has `desktopCapturer.getSources()` as a first-class, cross-platform screen-capture API. Transparent always-on-top windows, global shortcuts, and tray icons are all well-trodden. Heavy binary (~85 MB), but for an internal team tool that's a non-issue. Fastest path to a working v0.
+  - **Tauri 2.0** is leaner (~3-10 MB) and uses the system webview, but screen capture is not in the core API — we'd lean on platform-specific Rust crates (`screencapturekit-rs` on macOS, `windows-capture` on Windows) and write the glue. Better long-term posture; more v0 friction.
+  - **My recommendation:** Electron for v0 to unblock fast. Reassess in v1 once we know the actual capture/overlay shape and whether binary size matters for distribution to the team.
+- **Overlay rendering:** one borderless transparent always-on-top window per monitor, sized to the display, with a fullscreen canvas. Drawing primitives via HTML Canvas (Electron) or platform-native (Tauri).
+- **Hotkey registration:** a single global hotkey by default (configurable). Both Electron and Tauri have built-in global-shortcut support.
+- **MCP transport in v0:** stdio (started per-client) vs. a long-running localhost HTTP server (started by the desktop app). Localhost HTTP fits the always-running desktop-app model better and lets multiple agents subscribe simultaneously — leaning that way.
 
 I have opinions on all of these but don't want to bake them in without your input — they're the next decisions on the table.
 
