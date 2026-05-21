@@ -25,13 +25,11 @@ pub fn spike_capture() -> Result<String, String> {
         .with_excluding_windows(&[])
         .build();
 
-    let image =
-        SCScreenshotManager::capture_image(&filter, &config).map_err(|e| format!("capture: {e:?}"))?;
+    let image = SCScreenshotManager::capture_image(&filter, &config)
+        .map_err(|e| format!("capture: {e:?}"))?;
 
     let out = PathBuf::from("/tmp/glitch-spot-spike.png");
-    image
-        .save_png(&out)
-        .map_err(|e| format!("save: {e:?}"))?;
+    image.save_png(&out).map_err(|e| format!("save: {e:?}"))?;
 
     Ok(out.display().to_string())
 }
