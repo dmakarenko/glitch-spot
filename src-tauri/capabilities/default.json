@@ -7,6 +7,7 @@
     "overlay"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "global-shortcut:default"
   ]
 }

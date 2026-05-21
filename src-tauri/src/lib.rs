@@ -1,6 +1,7 @@
 // ABOUTME: Entry point for the Glitch Spot Tauri 2 application library.
 // ABOUTME: Builds and runs the Tauri app with registered Tauri commands.
 mod capture;
+mod hotkey;
 mod overlay;
 mod spike_capture;
 
@@ -11,9 +12,7 @@ async fn capture_active_monitor(app: tauri::AppHandle) -> Result<capture::Captur
 
 #[tauri::command]
 async fn open_overlay_with_capture(app: tauri::AppHandle) -> Result<(), String> {
-    let frame = capture::capture_active_monitor(&app).map_err(|e| e.to_string())?;
-    overlay::show_over_active_monitor(&app, &frame).map_err(|e| e.to_string())?;
-    Ok(())
+    trigger_overlay(&app).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -21,8 +20,19 @@ async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
     overlay::hide(&app).map_err(|e| e.to_string())
 }
 
+pub(crate) async fn trigger_overlay(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    let frame = capture::capture_active_monitor(app)?;
+    overlay::show_over_active_monitor(app, &frame)?;
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .setup(|app| {
+            hotkey::register(app.handle())?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             capture_active_monitor,
             open_overlay_with_capture,
