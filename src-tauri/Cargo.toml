@@ -1,0 +1,21 @@
+# ABOUTME: Cargo manifest for the Tauri 2 backend of Glitch Spot.
+# ABOUTME: Declares the glitch_spot crate with lib and binary targets.
+[package]
+name = "glitch_spot"
+version = "0.1.0"
+description = "Glitch Spot – Tauri 2 backend"
+authors = []
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "glitch_spot"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
