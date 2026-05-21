@@ -10,8 +10,10 @@ async fn capture_active_monitor(app: tauri::AppHandle) -> Result<capture::Captur
 }
 
 #[tauri::command]
-async fn show_overlay(app: tauri::AppHandle) -> Result<(), String> {
-    overlay::show_over_active_monitor(&app).map_err(|e| e.to_string())
+async fn open_overlay_with_capture(app: tauri::AppHandle) -> Result<(), String> {
+    let frame = capture::capture_active_monitor(&app).map_err(|e| e.to_string())?;
+    overlay::show_over_active_monitor(&app, &frame).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -23,7 +25,7 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             capture_active_monitor,
-            show_overlay,
+            open_overlay_with_capture,
             hide_overlay,
             spike_capture::spike_capture,
         ])

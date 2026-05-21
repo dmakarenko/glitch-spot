@@ -1,7 +1,8 @@
 // ABOUTME: Overlay window lifecycle: position over active monitor, show, hide.
 // ABOUTME: Reads cursor position to pick the monitor, then sizes the "overlay" window to it.
 
-use tauri::{Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
+use crate::capture::CapturedFrame;
+use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
 
 const OVERLAY_LABEL: &str = "overlay";
 
@@ -15,7 +16,10 @@ pub enum OverlayError {
     Tauri(#[from] tauri::Error),
 }
 
-pub fn show_over_active_monitor(app: &tauri::AppHandle) -> Result<(), OverlayError> {
+pub fn show_over_active_monitor(
+    app: &tauri::AppHandle,
+    frame: &CapturedFrame,
+) -> Result<(), OverlayError> {
     let window: WebviewWindow = app
         .get_webview_window(OVERLAY_LABEL)
         .ok_or(OverlayError::WindowMissing)?;
@@ -45,6 +49,9 @@ pub fn show_over_active_monitor(app: &tauri::AppHandle) -> Result<(), OverlayErr
     ))?;
     window.show()?;
     window.set_focus()?;
+
+    // Emit the captured frame to the overlay window only.
+    window.emit("glitch-spot://frame", frame)?;
     Ok(())
 }
 

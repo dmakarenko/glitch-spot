@@ -34,22 +34,6 @@ export function App() {
     }
   }
 
-  async function showOverlay() {
-    try {
-      await invoke("show_overlay");
-    } catch (e) {
-      setResult(`Failed: ${e}`);
-    }
-  }
-
-  async function hideOverlay() {
-    try {
-      await invoke("hide_overlay");
-    } catch (e) {
-      setResult(`Failed: ${e}`);
-    }
-  }
-
   return (
     <main style={{ padding: "2rem", fontFamily: "system-ui" }}>
       <h1>Glitch Spot</h1>
@@ -57,10 +41,22 @@ export function App() {
       <button onClick={runSpike} style={{ marginLeft: 8 }}>
         Run spike (file)
       </button>
-      <button onClick={showOverlay} style={{ marginLeft: 8 }}>
-        Show overlay
+      <button
+        onClick={() =>
+          invoke("open_overlay_with_capture").catch((e) =>
+            setResult(`Failed: ${e}`)
+          )
+        }
+        style={{ marginLeft: 8 }}
+      >
+        Open overlay
       </button>
-      <button onClick={hideOverlay} style={{ marginLeft: 8 }}>
+      <button
+        onClick={() =>
+          invoke("hide_overlay").catch((e) => setResult(`Failed: ${e}`))
+        }
+        style={{ marginLeft: 8 }}
+      >
         Hide overlay
       </button>
       <pre>{result}</pre>
