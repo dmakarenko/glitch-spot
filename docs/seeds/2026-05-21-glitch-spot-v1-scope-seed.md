@@ -20,16 +20,24 @@ Two ways to think about it:
 ## 2. The main loop
 
 1. The app being debugged is running. It can be a web app in a browser, a desktop app, a mobile simulator — anything visible on screen.
-2. An AI agent (Cursor / Claude Code / etc.) optionally launches the dev server itself, then calls `glitch_spot.wait_for_snapshot()`. The call blocks.
-3. The developer hits a global hotkey. Glitch Spot's overlay appears on top of the active window (or full screen).
-4. They draw one or more rectangles. Each rectangle can have a text note. They can edit / undo before finishing.
-5. They close the overlay (Done / Esc). Glitch Spot:
-    - Grabs a clean screenshot (without our overlay) and an annotated screenshot (with rectangles burned in).
-    - Assembles a JSON snapshot object (schema in §5).
-    - **Always:** copies the full snapshot JSON to the clipboard.
-    - **If relay configured:** uploads the snapshot to the relay, gets back a short URL with optional passcode, also copies that URL to the clipboard.
+2. *(Optional)* An AI agent (Cursor / Claude Code / etc.) launches the dev server, then calls `glitch_spot.wait_for_snapshot()` via MCP. The call blocks.
+3. The developer hits the global hotkey (default `Cmd+Shift+G`).
+    - Glitch Spot **captures a screenshot of the active monitor** (the display the cursor is on) immediately — this becomes the `clean` image in the snapshot.
+    - A transparent always-on-top **overlay window** appears covering the active monitor. The overlay is mostly transparent so the underlying app remains visible (and keeps rendering — animations, async updates), but the overlay **captures all input** so clicks do not reach the underlying app.
+4. The developer draws one or more rectangles on the overlay. After each rectangle finishes, a **floating note input appears inline next to it** (auto-positioned to stay on screen). The note is multi-line, plain text. Rectangles can be deleted; the last action can be undone (Cmd+Z).
+5. The developer ends the session one of two ways:
+    - **Save** — `Cmd+Return` or the "Save" button on the floating toolbar. Finalizes the snapshot.
+    - **Cancel / dismiss** — `Esc`:
+        - If no rectangles have been drawn → overlay dismisses immediately.
+        - If at least one rectangle exists → a small confirmation modal asks "Discard or save?" with two buttons.
+6. On finalize, Glitch Spot:
+    - Composes the JSON snapshot per §6.
+    - Generates `annotated.png` by compositing the hotkey-time `clean.png` with the rectangles + **note text labels** rendered next to each rect.
+    - Writes `{clean.png, annotated.png, snapshot.json}` to `~/.glitch-spot/snapshots/{id}/`.
+    - **Always:** copies the snapshot JSON to the clipboard.
+    - **If relay is configured (v1+):** uploads to the relay, gets back a short URL with optional passcode, copies that URL too.
     - **If an MCP client is waiting:** unblocks `wait_for_snapshot` and returns the snapshot.
-6. The agent now has either the JSON directly (via MCP) or a link to fetch it. The developer's job is done.
+7. The agent now has either the JSON directly (via MCP) or a link to fetch it. The developer's job is done.
 
 ---
 
@@ -281,9 +289,13 @@ I have opinions on all of these but don't want to bake them in without your inpu
 
 ---
 
-## 12. Open product questions
+## 12. Locked UX defaults
 
-- Should the overlay let you draw on top of the *live* app (where the app keeps responding to events behind the overlay), or does it freeze the visible content at activation time? Freeze is much simpler; live is nicer if you want to keep clicking around while annotating.
-- When you draw multiple rectangles, should each one get its own note input, or one shared note for the whole session? My current default is per-rectangle.
-- Should the annotated image render note text next to each rectangle, or just the rectangles (text only in JSON)? Embedding text in the image makes the HTML view nicer but the rectangles uglier.
-- For the `wait_for_snapshot` MCP tool: what's a sensible default timeout? Suggesting 10 minutes — long enough to switch context, short enough not to leak forever.
+- **Overlay behavior:** transparent, always-on-top, captures all input. The underlying app remains visible and keeps rendering, but the user cannot click through.
+- **Capture target:** active monitor only (the display the cursor is on at hotkey time).
+- **Capture moment:** the `clean` screenshot is captured at hotkey press, before the overlay appears.
+- **Per-rectangle note placement:** floating inline next to the rectangle, auto-positioned.
+- **Annotated PNG content:** rectangles + note text labels rendered next to each rect.
+- **End-of-session affordances:** `Cmd+Return` or "Save" button to finalize; `Esc` to cancel with a discard/save modal if content exists.
+- **`wait_for_snapshot` default timeout:** 600s (10 min). Max 1800s.
+- **Local snapshot retention:** 24h auto-cleanup of `~/.glitch-spot/snapshots/`.
