@@ -21,7 +21,7 @@
 
 ## Open questions / known deferrals
 
-- **Overlay above menu bar (macOS):** v0.1 uses work-area positioning, excluding menu bar and dock. Clicks pass through to those strips. Fixing requires NSWindow level above `NSStatusWindowLevel` via private API.
+- **Overlay above menu bar (macOS):** _Won't fix._ Work-area positioning is the accepted design — clicks on the menu bar / dock pass through to the system surfaces and that is intentional. Decided 2026-05-22.
 - **Esc dismissal:** borderless transparent NSWindows don't always become the key window; Esc may not fire. Click-anywhere-to-dismiss is the reliable v0.1 path.
 - **Hotkey conflict handling:** if a default hotkey is taken by another app, registration panics at startup. Needs graceful UX in a later slice (v0.4 or v1.0).
 - **"No monitor at cursor" inconsistency:** capture falls back to display 0; overlay returns `NoMonitor` error. Picked: reconcile when revisiting work-area code.
