@@ -12,6 +12,7 @@ export const initialState: AnnotationsState = {
   rects: [],
   history: [],
   draggingId: null,
+  lastCreatedId: null,
 };
 
 export function reducer(
@@ -34,7 +35,7 @@ export function reducer(
         ...state.history,
         { kind: "create", id: action.id },
       ];
-      return { rects: [...state.rects, rect], history, draggingId: action.id };
+      return { rects: [...state.rects, rect], history, draggingId: action.id, lastCreatedId: action.id };
     }
 
     case "DRAG_TO": {
@@ -89,6 +90,7 @@ export function reducer(
             ...state,
             rects: state.rects.filter((r) => r.id !== last.id),
             history,
+            lastCreatedId: last.id === state.lastCreatedId ? null : state.lastCreatedId,
           };
         case "delete": {
           const rects = [...state.rects];

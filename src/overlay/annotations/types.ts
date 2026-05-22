@@ -19,6 +19,7 @@ export type AnnotationsState = {
   history: HistoryEntry[];
   // The id of the rectangle currently being dragged into existence, if any.
   draggingId: string | null;
+  lastCreatedId: string | null;
 };
 
 export type HistoryEntry =

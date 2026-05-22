@@ -1,8 +1,9 @@
 // ABOUTME: Mouse-driven drawing layer. Click-drag to draw rectangles; renders all
 // ABOUTME: rectangles as absolutely-positioned DOM divs the parent can wire to notes.
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AnnotationsAction, AnnotationsState } from "./types";
+import { RectangleNote } from "./RectangleNote";
 
 const RECT_BORDER = "2px solid #ff3b30";
 const RECT_FILL = "rgba(255, 59, 48, 0.08)";
@@ -19,6 +20,16 @@ type Props = {
 
 export function DrawingLayer({ state, dispatch }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
+
+  const [containerHeight, setContainerHeight] = useState<number>(
+    typeof window !== "undefined" ? window.innerHeight : 0
+  );
+
+  useEffect(() => {
+    const update = () => setContainerHeight(window.innerHeight);
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   const onMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -82,6 +93,15 @@ export function DrawingLayer({ state, dispatch }: Props) {
             pointerEvents: "none",
             boxSizing: "border-box",
           }}
+        />
+      ))}
+      {state.rects.map((r) => (
+        <RectangleNote
+          key={`${r.id}-note`}
+          rect={r}
+          containerHeight={containerHeight}
+          autoFocus={r.id === state.lastCreatedId}
+          onChange={(note) => dispatch({ type: "SET_NOTE", id: r.id, note })}
         />
       ))}
     </div>

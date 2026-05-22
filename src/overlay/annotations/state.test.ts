@@ -4,7 +4,12 @@ import { reducer, initialState } from "./state";
 
 describe("annotations reducer", () => {
   it("starts with no rects, no history, no drag", () => {
-    expect(initialState).toEqual({ rects: [], history: [], draggingId: null });
+    expect(initialState).toEqual({
+      rects: [],
+      history: [],
+      draggingId: null,
+      lastCreatedId: null,
+    });
   });
 
   it("BEGIN_DRAG creates a zero-size rect anchored at the start point", () => {
@@ -38,6 +43,11 @@ describe("annotations reducer", () => {
   it("DRAG_TO is a no-op when there is no active drag", () => {
     const s = reducer(initialState, { type: "DRAG_TO", x: 10, y: 10 });
     expect(s).toEqual(initialState);
+  });
+
+  it("BEGIN_DRAG sets lastCreatedId so the new rect's note can auto-focus", () => {
+    const s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 0, y: 0 });
+    expect(s.lastCreatedId).toBe("r1");
   });
 });
 
@@ -119,5 +129,12 @@ describe("undo", () => {
     s = reducer(s, { type: "SET_NOTE", id: "r1", note: "later" });
     s = reducer(s, { type: "UNDO" });
     expect(s.rects[0].note).toBe("");
+  });
+
+  it("UNDO of a create clears lastCreatedId when undoing the most recent create", () => {
+    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 0, y: 0 });
+    s = reducer(s, { type: "END_DRAG" });
+    s = reducer(s, { type: "UNDO" });
+    expect(s.lastCreatedId).toBeNull();
   });
 });
