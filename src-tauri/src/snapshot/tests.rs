@@ -164,10 +164,7 @@ fn solid_white_png(width: u32, height: u32) -> Vec<u8> {
         image::ImageBuffer::from_pixel(width, height, Rgba([255u8, 255, 255, 255]));
     let mut out = Vec::new();
     image::DynamicImage::ImageRgba8(img)
-        .write_to(
-            &mut std::io::Cursor::new(&mut out),
-            image::ImageFormat::Png,
-        )
+        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
         .unwrap();
     out
 }

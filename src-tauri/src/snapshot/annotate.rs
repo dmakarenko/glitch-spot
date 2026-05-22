@@ -35,8 +35,8 @@ pub fn render_annotated_png(
     annotations: &[Annotation],
     scale_factor: f32,
 ) -> Result<Vec<u8>, AnnotateError> {
-    let mut img = image::load_from_memory_with_format(clean_png, image::ImageFormat::Png)?
-        .to_rgba8();
+    let mut img =
+        image::load_from_memory_with_format(clean_png, image::ImageFormat::Png)?.to_rgba8();
     let font = FontRef::try_from_slice(FONT_BYTES).map_err(|_| AnnotateError::Font)?;
     let font_px = BASE_FONT_PX * (scale_factor / 2.0).max(0.5);
     let scale = PxScale::from(font_px);
@@ -49,10 +49,8 @@ pub fn render_annotated_png(
     }
 
     let mut out = Vec::new();
-    image::DynamicImage::ImageRgba8(img).write_to(
-        &mut std::io::Cursor::new(&mut out),
-        image::ImageFormat::Png,
-    )?;
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)?;
     Ok(out)
 }
 
