@@ -43,13 +43,21 @@ export function App() {
       </button>
       <button
         onClick={() =>
-          invoke("open_overlay_with_capture").catch((e) =>
+          invoke("open_overlay_live").catch((e) => setResult(`Failed: ${e}`))
+        }
+        style={{ marginLeft: 8 }}
+      >
+        Open overlay (live)
+      </button>
+      <button
+        onClick={() =>
+          invoke("open_overlay_frozen").catch((e) =>
             setResult(`Failed: ${e}`)
           )
         }
         style={{ marginLeft: 8 }}
       >
-        Open overlay
+        Open overlay (frozen)
       </button>
       <button
         onClick={() =>

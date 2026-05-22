@@ -54,9 +54,15 @@ pub(super) fn capture_active_monitor(
     let displays = content.displays();
     let display = displays.get(display_index).ok_or(CaptureError::NoDisplay)?;
 
+    // Capture at full physical-pixel monitor resolution; we'll crop to the work
+    // area (excluding macOS menu bar) after the capture completes. Doing the
+    // crop in `image` rather than via SCStreamConfiguration::source_rect keeps
+    // this independent of the crate's optional features.
+    let monitor = &monitors[display_index];
+    let monitor_size = monitor.size();
     let config = SCStreamConfiguration::new()
-        .with_width(display.width())
-        .with_height(display.height());
+        .with_width(monitor_size.width)
+        .with_height(monitor_size.height);
 
     let filter = SCContentFilter::create()
         .with_display(display)
@@ -80,19 +86,30 @@ pub(super) fn capture_active_monitor(
     let img = RgbaImage::from_raw(pixel_width, pixel_height, rgba)
         .ok_or_else(|| CaptureError::Encoding("rgba buffer size mismatch".into()))?;
 
+    // Crop to the monitor's work area (skips the menu bar at the top, and any
+    // dock area at the bottom if visible).
+    let work_area = monitor.work_area();
+    let work_pos = work_area.position;
+    let work_size = work_area.size;
+    let crop_x = work_pos.x.saturating_sub(monitor.position().x).max(0) as u32;
+    let crop_y = work_pos.y.saturating_sub(monitor.position().y).max(0) as u32;
+    let crop_w = work_size.width.min(pixel_width.saturating_sub(crop_x));
+    let crop_h = work_size.height.min(pixel_height.saturating_sub(crop_y));
+    let cropped = image::imageops::crop_imm(&img, crop_x, crop_y, crop_w, crop_h).to_image();
+
     let mut png_bytes: Vec<u8> = Vec::new();
     PngEncoder::new(&mut png_bytes)
         .write_image(
-            img.as_raw(),
-            pixel_width,
-            pixel_height,
+            cropped.as_raw(),
+            crop_w,
+            crop_h,
             image::ColorType::Rgba8.into(),
         )
         .map_err(|e| CaptureError::Encoding(format!("png encode: {e}")))?;
 
     Ok(CapturedFrame {
-        width: pixel_width,
-        height: pixel_height,
+        width: crop_w,
+        height: crop_h,
         scale_factor,
         png: png_bytes,
         display_index,

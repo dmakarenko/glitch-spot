@@ -1,5 +1,5 @@
-// ABOUTME: Overlay window component that renders a captured screenshot as a full-screen backdrop.
-// ABOUTME: Pulls the latest frame on mount, listens for fresh frames, dismisses on Esc or click.
+// ABOUTME: Overlay window component. Supports a live transparent overlay (default)
+// ABOUTME: and a frozen mode that displays a captured screenshot as backdrop.
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -12,6 +12,18 @@ type Frame = {
   display_index: number;
 };
 
+type Mode = "live" | "frozen";
+
+// Photoshop-style transparency checker drawn at low opacity so the overlay is
+// visually distinguishable from the real desktop without obscuring it.
+const CHECKER_BG =
+  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'>" +
+  "<rect width='10' height='10' fill='%23999999'/>" +
+  "<rect x='10' y='10' width='10' height='10' fill='%23999999'/>" +
+  "<rect x='10' y='0' width='10' height='10' fill='%23ffffff'/>" +
+  "<rect x='0' y='10' width='10' height='10' fill='%23ffffff'/>" +
+  "</svg>\")";
+
 function frameToObjectUrl(frame: Frame): string {
   const bytes = new Uint8Array(frame.png);
   const blob = new Blob([bytes], { type: "image/png" });
@@ -19,38 +31,54 @@ function frameToObjectUrl(frame: Frame): string {
 }
 
 export function Overlay() {
+  // The Rust side calls __glitchSpotPresent via WebviewWindow::eval before
+  // showing the window, so by the time we render the first frame for a new
+  // session the mode is correct and imageUrl is clean.
+  const [mode, setMode] = useState<Mode>("live");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let currentUrl: string | null = null;
-    const setFrame = (frame: Frame) => {
-      const next = frameToObjectUrl(frame);
+
+    (
+      window as unknown as { __glitchSpotPresent?: (mode: Mode) => void }
+    ).__glitchSpotPresent = (newMode) => {
       if (currentUrl) URL.revokeObjectURL(currentUrl);
-      currentUrl = next;
-      setImageUrl(next);
+      currentUrl = null;
+      setImageUrl(null);
+      setMode(newMode);
     };
 
-    // Pull the cached frame BEFORE wiring the listener. On the first hotkey
-    // press the Rust side emits `glitch-spot://frame` while the webview is
-    // still loading — that event would be dropped — so the backend also
-    // caches the frame and we read it here.
+    const setFrame = (frame: Frame) => {
+      const next = frameToObjectUrl(frame);
+      // Decode off-screen before swapping the visible background so the new
+      // image appears atomically rather than after a perceptible decode delay.
+      const img = new window.Image();
+      img.onload = () => {
+        if (currentUrl) URL.revokeObjectURL(currentUrl);
+        currentUrl = next;
+        setImageUrl(next);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(next);
+      };
+      img.src = next;
+    };
+
     invoke<Frame | null>("get_latest_frame")
       .then((frame) => {
         if (frame) setFrame(frame);
       })
       .catch(() => {
-        // No frame cached yet; the listener below will pick up the next one.
+        /* no cached frame yet; the listener below picks up the next one */
       });
 
     const unlisten = listen<Frame>("glitch-spot://frame", (event) => {
       setFrame(event.payload);
     });
 
-    const dismiss = () => {
-      invoke("hide_overlay");
-    };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") dismiss();
+      if (e.key === "Escape") invoke("hide_overlay");
     };
     window.addEventListener("keydown", onKey);
 
@@ -58,17 +86,22 @@ export function Overlay() {
       unlisten.then((fn) => fn());
       window.removeEventListener("keydown", onKey);
       if (currentUrl) URL.revokeObjectURL(currentUrl);
+      delete (window as unknown as { __glitchSpotPresent?: (mode: Mode) => void })
+        .__glitchSpotPresent;
     };
   }, []);
 
-  // TODO(v0.1-followup): borderless transparent NSWindows on macOS may not
-  // become the key window, which would prevent the Esc keydown handler above
-  // from firing. Click-anywhere-to-dismiss is the reliable mouse-driven path
-  // for v0.1; revisit by either flipping the NSWindow style mask or by adding
-  // a Rust-side activate-and-makeKey call after `show()`.
   const onClick = () => {
     invoke("hide_overlay");
   };
+
+  // In live mode, the body stays transparent — the user sees the real desktop
+  // through the overlay. In frozen mode, the cropped screenshot fills the
+  // overlay 1:1 (capture is sized to the work area).
+  const backdrop =
+    mode === "frozen" && imageUrl
+      ? `center / 100% 100% no-repeat url(${imageUrl})`
+      : "transparent";
 
   return (
     <div
@@ -76,10 +109,19 @@ export function Overlay() {
       style={{
         position: "fixed",
         inset: 0,
-        background: imageUrl
-          ? `center / cover no-repeat url(${imageUrl})`
-          : "rgba(0,0,0,0.05)",
+        background: backdrop,
       }}
-    />
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: CHECKER_BG,
+          backgroundRepeat: "repeat",
+          opacity: 0.12,
+          pointerEvents: "none",
+        }}
+      />
+    </div>
   );
 }
