@@ -2,6 +2,7 @@
 // ABOUTME: Builds and runs the Tauri app with registered Tauri commands.
 mod capture;
 mod hotkey;
+pub mod mcp;
 mod overlay;
 pub mod snapshot;
 mod spike_capture;
