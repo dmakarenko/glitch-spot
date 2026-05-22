@@ -31,41 +31,36 @@ Surface a Glitch Spot annotation snapshot in the current CC session.
 
 When notified that the `glitch-spot-waiter` background agent completed:
 
-1. Parse the agent's output as JSON — call this `envelope`.
+1. Parse the agent's output as JSON — call this `result`. This is the raw snapshot object, or a status object.
 
-2. Extract `envelope.result.content[0].text`, then JSON-parse that string to get `snapshot`. If the result contains `"cancelled": true` at the envelope level OR inside the snapshot text, treat as cancelled.
-
-3. If `snapshot.reason == "timeout"`: output:
+2. If `result.reason == "timeout"` or (`result.cancelled == true` and `result.reason`): output:
    > Snapshot listener timed out after 10 minutes. Run `/glitch-spot` to start again.
-
    Stop.
 
-4. If `snapshot.cancelled == true`: output:
+3. If `result.cancelled == true`: output:
    > Snapshot listener was cancelled.
-
    Stop.
 
-5. If `envelope.result.content[0].text` contains an `"error"` key: output:
+4. If `result.error` is present: output:
    > Glitch Spot returned an error while waiting. Try again.
-
    Stop.
 
-6. **Read the annotated image** (if available):
-   - If `snapshot.images.annotated` is non-null, read that file path.
-   - Otherwise, read `snapshot.images.clean`.
+5. **Read the annotated image** (if available):
+   - If `result.images.annotated` is non-null, read that file path.
+   - Otherwise, read `result.images.clean`.
    - If the file does not exist on disk, skip the image and work from text only.
 
-7. **Format the summary:**
+6. **Format the summary:**
 
    ```
-   Snapshot {id} — {N} annotation(s):
+   Snapshot {result.id} — {N} annotation(s):
      1. Rect [{coords}] — "{note}"
      2. ...
 
-   Context: {context.os.platform} {context.os.version}
+   Context: {result.context.os.platform} {result.context.os.version}
    ```
 
-8. **Decide action:**
+7. **Decide action:**
 
    - **No annotations** (empty array): show the image and ask: > I see the snapshot but no annotations — what would you like me to do?
    - **All notes are specific and actionable** (contain clear instructions like "fix this typo", "change colour to X", "reduce padding", "align left"): announce what you're about to do and start working immediately.
