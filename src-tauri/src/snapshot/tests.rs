@@ -134,3 +134,122 @@ fn build_writes_png_to_tmp() {
     // Cleanup so we don't accumulate /tmp files when re-running tests.
     let _ = std::fs::remove_file(path);
 }
+
+use crate::snapshot::annotate::render_annotated_png;
+use image::Rgba;
+
+fn solid_white_png(width: u32, height: u32) -> Vec<u8> {
+    let img: image::RgbaImage =
+        image::ImageBuffer::from_pixel(width, height, Rgba([255u8, 255, 255, 255]));
+    let mut out = Vec::new();
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(
+            &mut std::io::Cursor::new(&mut out),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+    out
+}
+
+#[test]
+fn annotated_png_round_trips_with_no_annotations() {
+    let clean = solid_white_png(32, 32);
+    let bytes = render_annotated_png(&clean, &[], 2.0).unwrap();
+    assert!(
+        bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]),
+        "must be a PNG"
+    );
+    let decoded = image::load_from_memory(&bytes).unwrap().to_rgba8();
+    assert_eq!(decoded.width(), 32);
+    assert_eq!(decoded.height(), 32);
+    assert_eq!(decoded.get_pixel(0, 0), &Rgba([255, 255, 255, 255]));
+}
+
+#[test]
+fn annotated_png_draws_red_pixels_on_rect_border() {
+    let clean = solid_white_png(64, 64);
+    let annos = vec![Annotation {
+        id: "anno_1".into(),
+        shape: "rect".into(),
+        coords: Coords {
+            x: 10.0,
+            y: 10.0,
+            w: 20.0,
+            h: 20.0,
+        },
+        note: String::new(),
+    }];
+    let bytes = render_annotated_png(&clean, &annos, 2.0).unwrap();
+    let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
+    let top_left = img.get_pixel(10, 10);
+    assert_eq!(
+        top_left,
+        &Rgba([255, 59, 48, 255]),
+        "top-left of rect must be red, got {top_left:?}"
+    );
+    let interior = img.get_pixel(20, 20);
+    assert_ne!(
+        interior,
+        &Rgba([255, 59, 48, 255]),
+        "rect interior must not be filled, got {interior:?}"
+    );
+}
+
+#[test]
+fn annotated_png_renders_note_panel_for_non_empty_notes() {
+    let clean = solid_white_png(200, 200);
+    let annos = vec![Annotation {
+        id: "anno_1".into(),
+        shape: "rect".into(),
+        coords: Coords {
+            x: 20.0,
+            y: 20.0,
+            w: 60.0,
+            h: 30.0,
+        },
+        note: "hello".into(),
+    }];
+    let bytes = render_annotated_png(&clean, &annos, 2.0).unwrap();
+    let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
+    // Panel area sits at y >= rect.y + rect.h + gap.
+    let panel_top_y: i32 = 20 + 30 + 6;
+    let mut found_dark = false;
+    'outer: for y in panel_top_y..(panel_top_y + 60).min(img.height() as i32) {
+        for x in 20..(20 + 140).min(img.width() as i32) {
+            let pix = img.get_pixel(x as u32, y as u32);
+            if pix.0[0] < 80 && pix.0[1] < 80 && pix.0[2] < 80 {
+                found_dark = true;
+                break 'outer;
+            }
+        }
+    }
+    assert!(
+        found_dark,
+        "expected dark text pixels in the panel region below the rect"
+    );
+}
+
+#[test]
+fn annotated_png_skips_panel_for_empty_notes() {
+    let clean = solid_white_png(200, 200);
+    let annos = vec![Annotation {
+        id: "anno_1".into(),
+        shape: "rect".into(),
+        coords: Coords {
+            x: 20.0,
+            y: 20.0,
+            w: 60.0,
+            h: 30.0,
+        },
+        note: String::new(),
+    }];
+    let bytes = render_annotated_png(&clean, &annos, 2.0).unwrap();
+    let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
+    // Below the rect, in empty space — must still be white.
+    let pix = img.get_pixel(40, (20 + 30 + 10) as u32);
+    assert_eq!(
+        pix,
+        &Rgba([255, 255, 255, 255]),
+        "empty note ⇒ no panel pixels, got {pix:?}"
+    );
+}
