@@ -55,6 +55,7 @@ pub struct Images {
     pub annotated: Option<String>,
 }
 
+pub mod annotate;
 pub mod build;
 
 pub fn new_id() -> String {

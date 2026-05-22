@@ -4,7 +4,7 @@
 
 **Goal:** A snappy, AI-agent-friendly visual feedback tool for dev-time use. Hotkey → annotate → JSON-on-clipboard (or short-lived link). Eventually multi-platform; macOS-first.
 
-**Current focus:** `v0.2-drawing` — rectangle drawing with inline notes + clipboard JSON save.
+**Current focus:** `v0.3-persistence` — filesystem persistence to `~/.glitch-spot/snapshots/{id}/` + 24 h auto-cleanup.
 
 **Cross-stage scope reference:** [`scope.md`](./scope.md). Architectural decisions, snapshot schema, version slicing.
 
@@ -12,16 +12,16 @@
 
 ## Stages
 
-- [~] **v0.1-foundation** — Tauri 2 macOS scaffold, hotkey-triggered overlay, transparent live mode (`Ctrl+Opt+Cmd+G`) + frozen screenshot mode (`Ctrl+Opt+Cmd+H`), work-area positioning, click-to-dismiss. Branch: `v0.1-foundation`. Plan: [`docs/plans/2026-05-21-glitch-spot-v0.1-foundation.md`](../../plans/2026-05-21-glitch-spot-v0.1-foundation.md). Awaiting merge to `main`.
-- [~] **v0.2-drawing** — drag-to-draw rectangles with floating inline notes, undo, delete-on-hover, Save (`Cmd+Return`) / Discard (`Esc`-with-content modal), snapshot JSON to clipboard. Both modes supported. Branch: `v0.2-drawing`. Plan: [`docs/plans/2026-05-22-glitch-spot-v0.2-drawing.md`](../../plans/2026-05-22-glitch-spot-v0.2-drawing.md).
-- [ ] **v0.3-persistence** — write snapshot JSON + `clean.png` + `annotated.png` to `~/.glitch-spot/snapshots/{id}/`, 24h auto-cleanup.
+- [x] **v0.1-foundation** — Tauri 2 macOS scaffold, hotkey-triggered overlay, transparent live mode (`Ctrl+Opt+Cmd+G`) + frozen screenshot mode (`Ctrl+Opt+Cmd+H`), work-area positioning, click-to-dismiss. Branch: `v0.1-foundation`. Plan: [`docs/plans/completed/2026-05-21-glitch-spot-v0.1-foundation.md`](../../plans/completed/2026-05-21-glitch-spot-v0.1-foundation.md). Merged via `3301866`.
+- [x] **v0.2-drawing** — drag-to-draw rectangles with floating inline notes, undo, delete-on-hover, Save (`Cmd+Return`) / Discard (`Esc`-with-content modal), snapshot JSON to clipboard, annotated PNG generation, min-size guard against accidental clicks, text-selection suppressed during drags. Both modes supported. Branch: `v0.2-drawing`. Main plan: [`docs/plans/completed/2026-05-22-glitch-spot-v0.2-drawing.md`](../../plans/completed/2026-05-22-glitch-spot-v0.2-drawing.md). Annotated-PNG follow-up: [`docs/plans/completed/2026-05-22-glitch-spot-v0.2-annotated-png.md`](../../plans/completed/2026-05-22-glitch-spot-v0.2-annotated-png.md). Merged via `68c328d`.
+- [ ] **v0.3-persistence** — write snapshot JSON + `clean.png` + `annotated.png` to `~/.glitch-spot/snapshots/{id}/`, 24h auto-cleanup. (Annotated-PNG generation already ships in v0.2.)
 - [ ] **v0.4-mcp** — local MCP server (stdio child binary or HTTP, TBD), `wait_for_snapshot` / `get_latest_snapshot` / `get_snapshot(id)` tools + resources, Cursor + Claude Code config snippets.
 - [ ] **v1.0-windows-and-relay** — Windows port of the desktop app, `@glitch-spot/web` SDK for DOM-path enrichment in web hosts, Cloudflare relay (Workers + R2) with TTL'd passcode-protected links and HTML view.
 - [ ] **v1.5+** — Linux, source-map → file:line resolution, mobile SDKs, public-link redaction, etc.
 
 ## Open questions / known deferrals
 
-- **Overlay above menu bar (macOS):** v0.1 uses work-area positioning, excluding menu bar and dock. Clicks pass through to those strips. Fixing requires NSWindow level above `NSStatusWindowLevel` via private API.
+- **Overlay above menu bar (macOS):** _Won't fix._ Work-area positioning is the accepted design — clicks on the menu bar / dock pass through to the system surfaces and that is intentional. Decided 2026-05-22.
 - **Esc dismissal:** borderless transparent NSWindows don't always become the key window; Esc may not fire. Click-anywhere-to-dismiss is the reliable v0.1 path.
 - **Hotkey conflict handling:** if a default hotkey is taken by another app, registration panics at startup. Needs graceful UX in a later slice (v0.4 or v1.0).
 - **"No monitor at cursor" inconsistency:** capture falls back to display 0; overlay returns `NoMonitor` error. Picked: reconcile when revisiting work-area code.

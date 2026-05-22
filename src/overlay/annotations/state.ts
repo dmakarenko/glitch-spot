@@ -8,6 +8,11 @@ import type {
   Rect,
 } from "./types";
 
+// Smallest committed-rectangle dimension. Aligned with DrawingLayer's delete-X
+// visibility threshold so every saved rectangle has a working delete button,
+// and a stray click without a drag is discarded as accidental.
+export const MIN_RECT_DIMENSION = 25;
+
 export const initialState: AnnotationsState = {
   rects: [],
   history: [],
@@ -47,8 +52,30 @@ export function reducer(
     }
 
     case "END_DRAG": {
+      const draggingId = state.draggingId;
+      if (!draggingId) {
+        return { ...state, draggingId: null };
+      }
+      const dragged = state.rects.find((r) => r.id === draggingId);
+      if (!dragged) {
+        return { ...state, draggingId: null };
+      }
+      const tooSmall =
+        dragged.w < MIN_RECT_DIMENSION || dragged.h < MIN_RECT_DIMENSION;
+      if (tooSmall) {
+        return {
+          ...state,
+          rects: state.rects.filter((r) => r.id !== draggingId),
+          history: state.history.filter(
+            (h) => !(h.kind === "create" && h.id === draggingId)
+          ),
+          draggingId: null,
+          lastCreatedId:
+            state.lastCreatedId === draggingId ? null : state.lastCreatedId,
+        };
+      }
       const rects = state.rects.map((r) =>
-        r.id === state.draggingId ? stripAnchor(r) : r
+        r.id === draggingId ? stripAnchor(r) : r
       );
       return { ...state, rects, draggingId: null };
     }

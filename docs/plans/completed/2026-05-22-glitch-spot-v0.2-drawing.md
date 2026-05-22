@@ -2,8 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` to execute this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
 >
-> Part of initiative: [`docs/initiatives/glitch-spot/INITIATIVE.md`](../initiatives/glitch-spot/INITIATIVE.md).
-> Working scope reference: [`docs/initiatives/glitch-spot/scope.md`](../initiatives/glitch-spot/scope.md).
+> Part of initiative: [`docs/initiatives/glitch-spot/INITIATIVE.md`](../../initiatives/glitch-spot/INITIATIVE.md).
+> Working scope reference: [`docs/initiatives/glitch-spot/scope.md`](../../initiatives/glitch-spot/scope.md).
 
 **Goal:** Drag-to-draw rectangle annotations with inline notes on the overlay (in both live and frozen modes), undo, Save (`Cmd+Return`) / Discard (`Esc`-with-content) modal, and a save action that emits a structured snapshot JSON to the system clipboard alongside a clean PNG written to `/tmp/glitch-spot-<id>.png`.
 
@@ -32,7 +32,7 @@
 **Explicitly out of scope (deferred):**
 
 - Persistence to `~/.glitch-spot/snapshots/` — v0.3.
-- Annotated PNG generation (rectangles + note text composited on the clean PNG) — v0.3.
+- Annotated PNG generation (rectangles + note text composited on the clean PNG) — addressed in the v0.2 follow-up plan [`2026-05-22-glitch-spot-v0.2-annotated-png.md`](./2026-05-22-glitch-spot-v0.2-annotated-png.md).
 - Multi-select, drag, or resize rectangles — later.
 - Free-form shapes, arrows, brushes — later.
 - MCP server — v0.4.
@@ -2143,7 +2143,8 @@ git commit --allow-empty -m "v0.2-drawing slice acceptance pass"
 
 Subsequent plans (each on their own branch):
 
-- **v0.3-persistence** — `~/.glitch-spot/snapshots/{id}/{clean.png, annotated.png, snapshot.json}`, 24h auto-cleanup, annotated-PNG generation. JSON `images.clean` switches from `/tmp` to the persistence dir.
+- **v0.2 follow-up (annotated PNG)** — annotated-PNG generation was pulled forward from v0.3 before merge. See [`2026-05-22-glitch-spot-v0.2-annotated-png.md`](./2026-05-22-glitch-spot-v0.2-annotated-png.md).
+- **v0.3-persistence** — `~/.glitch-spot/snapshots/{id}/{clean.png, annotated.png, snapshot.json}`, 24h auto-cleanup. JSON `images.clean` switches from `/tmp` to the persistence dir. (Annotated-PNG generation is no longer in this slice — it ships in v0.2.)
 - **v0.4-mcp** — local MCP server. Decides stdio child binary vs. axum HTTP. Implements `wait_for_snapshot`, `get_latest_snapshot`, `get_snapshot(id)` tools/resources. Ships Cursor and Claude Code config snippets.
 - **v1.0-windows-and-relay** — Windows desktop port + `@glitch-spot/web` SDK + Cloudflare relay.
 
