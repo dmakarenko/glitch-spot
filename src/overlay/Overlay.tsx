@@ -4,6 +4,7 @@ import { useEffect, useReducer, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { DrawingLayer } from "./annotations/DrawingLayer";
+import { DiscardModal } from "./annotations/DiscardModal";
 import { initialState, reducer } from "./annotations/state";
 import { Toolbar } from "./Toolbar";
 
@@ -40,6 +41,7 @@ export function Overlay() {
   const [mode, setMode] = useState<Mode>("live");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [annotations, dispatch] = useReducer(reducer, initialState);
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
 
   useEffect(() => {
     let currentUrl: string | null = null;
@@ -89,27 +91,33 @@ export function Overlay() {
       setFrame(event.payload);
     });
 
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        invoke("hide_overlay");
-        return;
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        dispatch({ type: "UNDO" });
-        return;
-      }
-    };
-    window.addEventListener("keydown", onKey);
-
     return () => {
       unlisten.then((fn) => fn());
-      window.removeEventListener("keydown", onKey);
       if (currentUrl) URL.revokeObjectURL(currentUrl);
       delete (window as unknown as { __glitchSpotPresent?: (mode: Mode) => void })
         .__glitchSpotPresent;
     };
   }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (annotations.rects.length === 0) {
+          invoke("hide_overlay");
+        } else {
+          setShowDiscardModal(true);
+        }
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        dispatch({ type: "UNDO" });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [annotations.rects.length]);
 
   // In live mode, the body stays transparent — the user sees the real desktop
   // through the overlay. In frozen mode, the cropped screenshot fills the
@@ -139,6 +147,17 @@ export function Overlay() {
       />
       <DrawingLayer state={annotations} dispatch={dispatch} />
       <Toolbar rectCount={annotations.rects.length} onSave={() => { /* M11 wires this */ }} />
+      {showDiscardModal && (
+        <DiscardModal
+          onDiscard={() => {
+            setShowDiscardModal(false);
+            dispatch({ type: "CLEAR" });
+            invoke("hide_overlay");
+          }}
+          onSave={() => { setShowDiscardModal(false); /* M11 wires the save flow */ }}
+          onCancel={() => setShowDiscardModal(false)}
+        />
+      )}
     </div>
   );
 }
