@@ -18,7 +18,7 @@ pub struct SnapshotStore {
     // id -> snapshot, for get_snapshot(id) lookups
     all: Arc<Mutex<HashMap<String, Snapshot>>>,
     tx: watch::Sender<Option<StoreEvent>>,
-    rx: watch::Receiver<Option<StoreEvent>>,
+    rx: watch::Receiver<Option<StoreEvent>>, // kept to prevent sender-dropped errors on clone
 }
 
 pub enum WaitResult {
@@ -38,14 +38,22 @@ impl SnapshotStore {
         }
     }
 
+    // NOTE: watch::channel retains only the most recent value. If publish() and cancel()
+    // are called back-to-back before a waiter polls, the waiter sees Cancelled, not the
+    // snapshot. This is acceptable for our use case (cancel is user-initiated and only
+    // called when no annotation is expected).
     pub fn publish(&self, snap: Snapshot) {
-        let mut latest = self.latest.lock().unwrap();
-        *latest = Some(snap.clone());
+        {
+            let mut latest = self.latest.lock().unwrap();
+            *latest = Some(snap.clone());
+        }
         self.all.lock().unwrap().insert(snap.id.clone(), snap.clone());
         // Ignore send error — it means no receivers, which is fine.
         let _ = self.tx.send(Some(StoreEvent::Snapshot(snap)));
     }
 
+    // NOTE: Sends a Cancelled event; does not check if any waiter is active. No-op if
+    // no one is waiting (the sent value will just be the current watch channel state).
     pub fn cancel(&self) {
         let _ = self.tx.send(Some(StoreEvent::Cancelled));
     }
@@ -73,7 +81,7 @@ impl SnapshotStore {
                 match rx.borrow().as_ref() {
                     Some(StoreEvent::Snapshot(s)) => return WaitResult::Snapshot(s.clone()),
                     Some(StoreEvent::Cancelled) => return WaitResult::Cancelled,
-                    None => continue, // spurious None send; keep waiting
+                    None => continue, // defensive: should not happen with current senders
                 }
             }
         };
