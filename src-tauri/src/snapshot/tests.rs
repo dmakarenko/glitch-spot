@@ -78,14 +78,9 @@ use crate::capture::CapturedFrame;
 use crate::snapshot::build::{build_and_write, IncomingAnnotation};
 
 fn fake_frame() -> CapturedFrame {
-    // A minimal valid PNG: 1x1 transparent pixel.
-    let png: Vec<u8> = vec![
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
-        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
-        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00,
-        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
-        0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
-    ];
+    // Real 2x2 white PNG produced via the image crate so the bytes pass strict
+    // CRC checks when decoded by snapshot::annotate.
+    let png = solid_white_png(2, 2);
     CapturedFrame {
         width: 2,
         height: 2,
@@ -133,6 +128,32 @@ fn build_writes_png_to_tmp() {
     );
     // Cleanup so we don't accumulate /tmp files when re-running tests.
     let _ = std::fs::remove_file(path);
+    if let Some(ann) = &snap.images.annotated {
+        let _ = std::fs::remove_file(ann);
+    }
+}
+
+#[test]
+fn build_writes_annotated_png_alongside_clean() {
+    let snap = build_and_write(&fake_frame(), "frozen", vec![], "macos", "26.0").unwrap();
+    let annotated = snap
+        .images
+        .annotated
+        .as_ref()
+        .expect("annotated path must be set");
+    let path = std::path::Path::new(annotated);
+    assert!(path.exists(), "annotated PNG must be written to disk");
+    assert!(
+        annotated.ends_with("-annotated.png"),
+        "annotated path must end with -annotated.png, got {annotated}"
+    );
+    let bytes = std::fs::read(path).unwrap();
+    assert!(
+        bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]),
+        "annotated file must be a PNG"
+    );
+    let _ = std::fs::remove_file(path);
+    let _ = std::fs::remove_file(&snap.images.clean);
 }
 
 use crate::snapshot::annotate::render_annotated_png;

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use chrono::Utc;
 
 use crate::capture::CapturedFrame;
+use crate::snapshot::annotate::{render_annotated_png, AnnotateError};
 use crate::snapshot::{new_id, Annotation, Context, Coords, Images, OsInfo, ScreenInfo, Snapshot};
 
 /// One annotation as received from the React side. Coordinates are CSS pixels
@@ -25,6 +26,8 @@ pub struct IncomingAnnotation {
 pub enum BuildError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    #[error("annotate: {0}")]
+    Annotate(#[from] AnnotateError),
     #[error("no captured frame available to save")]
     NoFrame,
 }
@@ -42,7 +45,7 @@ pub fn build_and_write(
     std::fs::write(&clean_path, &frame.png)?;
 
     let scale = frame.scale_factor;
-    let annotations = annotations
+    let annotations: Vec<Annotation> = annotations
         .into_iter()
         .map(|a| Annotation {
             id: a.id,
@@ -56,6 +59,10 @@ pub fn build_and_write(
             note: a.note,
         })
         .collect();
+
+    let annotated_path = PathBuf::from(format!("/tmp/glitch-spot-{}-annotated.png", id));
+    let annotated_bytes = render_annotated_png(&frame.png, &annotations, frame.scale_factor)?;
+    std::fs::write(&annotated_path, &annotated_bytes)?;
 
     let snapshot = Snapshot {
         id,
@@ -76,7 +83,7 @@ pub fn build_and_write(
         },
         images: Images {
             clean: clean_path.to_string_lossy().into_owned(),
-            annotated: None,
+            annotated: Some(annotated_path.to_string_lossy().into_owned()),
         },
     };
     Ok(snapshot)
