@@ -1,8 +1,10 @@
 // ABOUTME: Overlay window component. Supports a live transparent overlay (default)
 // ABOUTME: and a frozen mode that displays a captured screenshot as backdrop.
-import { useEffect, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { DrawingLayer } from "./annotations/DrawingLayer";
+import { initialState, reducer } from "./annotations/state";
 
 type Frame = {
   width: number;
@@ -36,6 +38,7 @@ export function Overlay() {
   // session the mode is correct and imageUrl is clean.
   const [mode, setMode] = useState<Mode>("live");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [annotations, dispatch] = useReducer(reducer, initialState);
 
   useEffect(() => {
     let currentUrl: string | null = null;
@@ -99,10 +102,6 @@ export function Overlay() {
     };
   }, []);
 
-  const onClick = () => {
-    invoke("hide_overlay");
-  };
-
   // In live mode, the body stays transparent — the user sees the real desktop
   // through the overlay. In frozen mode, the cropped screenshot fills the
   // overlay 1:1 (capture is sized to the work area).
@@ -113,7 +112,6 @@ export function Overlay() {
 
   return (
     <div
-      onClick={onClick}
       style={{
         position: "fixed",
         inset: 0,
@@ -130,6 +128,7 @@ export function Overlay() {
           pointerEvents: "none",
         }}
       />
+      <DrawingLayer state={annotations} dispatch={dispatch} />
     </div>
   );
 }
