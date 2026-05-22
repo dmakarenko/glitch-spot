@@ -1,8 +1,12 @@
 // ABOUTME: Overlay window component. Supports a live transparent overlay (default)
 // ABOUTME: and a frozen mode that displays a captured screenshot as backdrop.
-import { useEffect, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { DrawingLayer } from "./annotations/DrawingLayer";
+import { DiscardModal } from "./annotations/DiscardModal";
+import { initialState, reducer } from "./annotations/state";
+import { Toolbar } from "./Toolbar";
 
 type Frame = {
   width: number;
@@ -36,6 +40,26 @@ export function Overlay() {
   // session the mode is correct and imageUrl is clean.
   const [mode, setMode] = useState<Mode>("live");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [annotations, dispatch] = useReducer(reducer, initialState);
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
+
+  const handleSave = async () => {
+    const payload = annotations.rects.map((r) => ({
+      id: r.id,
+      x: r.x,
+      y: r.y,
+      w: r.w,
+      h: r.h,
+      note: r.note,
+    }));
+    try {
+      await invoke("save_snapshot", { mode, annotations: payload });
+      dispatch({ type: "CLEAR" });
+      setShowDiscardModal(false);
+    } catch (err) {
+      console.error("save_snapshot failed", err);
+    }
+  };
 
   useEffect(() => {
     let currentUrl: string | null = null;
@@ -47,6 +71,8 @@ export function Overlay() {
       currentUrl = null;
       setImageUrl(null);
       setMode(newMode);
+      dispatch({ type: "CLEAR" });
+      setShowDiscardModal(false);
     };
 
     const setFrame = (frame: Frame) => {
@@ -85,23 +111,39 @@ export function Overlay() {
       setFrame(event.payload);
     });
 
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") invoke("hide_overlay");
-    };
-    window.addEventListener("keydown", onKey);
-
     return () => {
       unlisten.then((fn) => fn());
-      window.removeEventListener("keydown", onKey);
       if (currentUrl) URL.revokeObjectURL(currentUrl);
       delete (window as unknown as { __glitchSpotPresent?: (mode: Mode) => void })
         .__glitchSpotPresent;
     };
   }, []);
 
-  const onClick = () => {
-    invoke("hide_overlay");
-  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (annotations.rects.length === 0) {
+          invoke("hide_overlay");
+        } else {
+          setShowDiscardModal(true);
+        }
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (annotations.rects.length > 0) handleSave();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        dispatch({ type: "UNDO" });
+        return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [annotations.rects, mode]);
 
   // In live mode, the body stays transparent — the user sees the real desktop
   // through the overlay. In frozen mode, the cropped screenshot fills the
@@ -113,7 +155,6 @@ export function Overlay() {
 
   return (
     <div
-      onClick={onClick}
       style={{
         position: "fixed",
         inset: 0,
@@ -130,6 +171,22 @@ export function Overlay() {
           pointerEvents: "none",
         }}
       />
+      <DrawingLayer state={annotations} dispatch={dispatch} />
+      <Toolbar rectCount={annotations.rects.length} onSave={handleSave} />
+      {showDiscardModal && (
+        <DiscardModal
+          onDiscard={() => {
+            setShowDiscardModal(false);
+            dispatch({ type: "CLEAR" });
+            invoke("hide_overlay");
+          }}
+          onSave={() => {
+            setShowDiscardModal(false);
+            handleSave();
+          }}
+          onCancel={() => setShowDiscardModal(false)}
+        />
+      )}
     </div>
   );
 }

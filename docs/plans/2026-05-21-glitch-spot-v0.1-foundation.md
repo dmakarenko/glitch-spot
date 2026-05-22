@@ -2,7 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> **Reference scope:** `docs/seeds/2026-05-21-glitch-spot-v1-scope-seed.md` (working scope) and `docs/seeds/2026-05-21-glitch-spot-seed.md` (original PRD).
+> Part of initiative: [`docs/initiatives/glitch-spot/INITIATIVE.md`](../initiatives/glitch-spot/INITIATIVE.md).
+> Cross-stage scope: [`docs/initiatives/glitch-spot/scope.md`](../initiatives/glitch-spot/scope.md). Original PRD: [`docs/seeds/2026-05-21-glitch-spot-seed.md`](../seeds/2026-05-21-glitch-spot-seed.md).
 
 **Goal:** Build the foundation slice of Glitch Spot v0.1: pressing a global hotkey captures the active monitor and shows a transparent, always-on-top overlay window displaying the screenshot. No drawing, no notes, no save, no MCP — just the substrate the rest of v0.1 will build on.
 

@@ -8,6 +8,8 @@
   ],
   "permissions": [
     "core:default",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "clipboard-manager:allow-write-text",
+    "os:default"
   ]
 }

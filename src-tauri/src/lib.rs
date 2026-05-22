@@ -3,10 +3,14 @@
 mod capture;
 mod hotkey;
 mod overlay;
+pub mod snapshot;
 mod spike_capture;
 
 use std::sync::Mutex;
 use tauri::Manager;
+use tauri_plugin_clipboard_manager::ClipboardExt;
+
+use snapshot::build::IncomingAnnotation;
 
 /// Process-wide cache of the most recently captured frame.
 ///
@@ -45,6 +49,48 @@ fn get_latest_frame(state: tauri::State<'_, AppState>) -> Option<capture::Captur
     state.latest_frame.lock().ok().and_then(|g| g.clone())
 }
 
+#[tauri::command]
+async fn save_snapshot(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    mode: String,
+    annotations: Vec<IncomingAnnotation>,
+) -> Result<snapshot::Snapshot, String> {
+    let frame = match mode.as_str() {
+        "frozen" => state
+            .latest_frame
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .ok_or_else(|| "no cached frame for frozen mode".to_string())?,
+        "live" => {
+            // Hide the overlay BEFORE capturing so the saved screenshot doesn't
+            // include our own annotation rectangles + checker pattern. A brief
+            // sleep gives macOS time to repaint without the overlay before the
+            // screen-capture sample fires.
+            overlay::hide(&app).map_err(|e| e.to_string())?;
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            capture::capture_active_monitor(&app).map_err(|e| e.to_string())?
+        }
+        other => return Err(format!("unknown mode: {other}")),
+    };
+
+    let os_platform: &str = tauri_plugin_os::platform();
+    let os_version: String = tauri_plugin_os::version().to_string();
+
+    let snap =
+        snapshot::build::build_and_write(&frame, &mode, annotations, os_platform, &os_version)
+            .map_err(|e| e.to_string())?;
+
+    let json = serde_json::to_string_pretty(&snap).map_err(|e| e.to_string())?;
+    app.clipboard()
+        .write_text(json)
+        .map_err(|e| format!("clipboard: {e}"))?;
+
+    overlay::hide(&app).map_err(|e| e.to_string())?;
+    Ok(snap)
+}
+
 pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Result<()> {
     overlay::show_live(app)?;
     Ok(())
@@ -71,6 +117,8 @@ pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Re
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState {
             latest_frame: Mutex::new(None),
@@ -85,6 +133,7 @@ pub fn run() {
             open_overlay_frozen,
             hide_overlay,
             get_latest_frame,
+            save_snapshot,
             spike_capture::spike_capture,
         ])
         .run(tauri::generate_context!())
