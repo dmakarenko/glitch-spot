@@ -16,6 +16,10 @@ const BORDER_WIDTH: i32 = 3;
 const PANEL_PADDING: i32 = 8;
 const PANEL_GAP: i32 = 6;
 const BASE_FONT_PX: f32 = 24.0;
+const PANEL_MIN_W: i32 = 120;
+const PANEL_MAX_W_HARD: i32 = 480;
+const PANEL_MAX_W_NARROW_RECT: i32 = 240;
+const NARROW_RECT_THRESHOLD: i32 = 240;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AnnotateError {
@@ -38,7 +42,7 @@ pub fn render_annotated_png(
     let mut img =
         image::load_from_memory_with_format(clean_png, image::ImageFormat::Png)?.to_rgba8();
     let font = FontRef::try_from_slice(FONT_BYTES).map_err(|_| AnnotateError::Font)?;
-    let font_px = BASE_FONT_PX * (scale_factor / 2.0).max(0.5);
+    let font_px = BASE_FONT_PX * (scale_factor / 2.0).max(1.0);
     let scale = PxScale::from(font_px);
 
     for anno in annotations {
@@ -89,11 +93,18 @@ fn draw_note_panel(img: &mut RgbaImage, anno: &Annotation, font: &FontRef<'_>, s
 
     let rect_x = anno.coords.x.round() as i32;
     let rect_y = anno.coords.y.round() as i32;
+    let rect_w = anno.coords.w.round() as i32;
     let rect_h = anno.coords.h.round() as i32;
     let img_w = img.width() as i32;
     let img_h = img.height() as i32;
 
-    let panel_w = (max_line_w + 2 * PANEL_PADDING).max(120);
+    let max_panel_w = if rect_w >= NARROW_RECT_THRESHOLD {
+        rect_w.min(PANEL_MAX_W_HARD)
+    } else {
+        PANEL_MAX_W_NARROW_RECT
+    };
+    let natural_w = max_line_w + 2 * PANEL_PADDING;
+    let panel_w = natural_w.clamp(PANEL_MIN_W, max_panel_w);
     let panel_h = (line_h * lines.len() as i32) + 2 * PANEL_PADDING;
 
     let mut panel_x = rect_x;

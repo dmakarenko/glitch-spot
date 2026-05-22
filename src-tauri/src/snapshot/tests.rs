@@ -248,6 +248,43 @@ fn annotated_png_renders_note_panel_for_non_empty_notes() {
 }
 
 #[test]
+fn annotated_png_caps_panel_width_for_long_notes() {
+    // Wide rect (500 px) + a very long single-line note. Cap should keep the
+    // panel from extending past 480 px from the rect's left edge.
+    let clean = solid_white_png(600, 200);
+    let long_note: String = "x".repeat(200);
+    let annos = vec![Annotation {
+        id: "anno_1".into(),
+        shape: "rect".into(),
+        coords: Coords {
+            x: 0.0,
+            y: 10.0,
+            w: 500.0,
+            h: 30.0,
+        },
+        note: long_note,
+    }];
+    let bytes = render_annotated_png(&clean, &annos, 2.0).unwrap();
+    let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
+    // Panel sits at y = 10 + 30 + 6 = 46. Sample a y row clearly inside the panel.
+    let panel_inside_y: u32 = 46 + 8 + 5;
+    // At x = 485 (past the 480-px cap, still inside the image) the pixel must be
+    // pure white — i.e. NOT covered by the panel fill (which writes alpha=245).
+    let outside_panel = img.get_pixel(485, panel_inside_y);
+    assert_eq!(
+        outside_panel,
+        &Rgba([255, 255, 255, 255]),
+        "panel must not extend past the 480px cap, got {outside_panel:?} at (485, {panel_inside_y})"
+    );
+    // And the panel itself should exist somewhere left of the cap.
+    let inside_panel = img.get_pixel(50, panel_inside_y);
+    assert_eq!(
+        inside_panel.0[3], 245,
+        "expected panel-fill alpha at (50, {panel_inside_y}), got {inside_panel:?}"
+    );
+}
+
+#[test]
 fn annotated_png_skips_panel_for_empty_notes() {
     let clean = solid_white_png(200, 200);
     let annos = vec![Annotation {
