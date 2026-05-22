@@ -55,6 +55,8 @@ export function RectangleNote({ rect, containerHeight, onChange, autoFocus }: Pr
         boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
         outline: "none",
         resize: "none",
+        userSelect: "text",
+        WebkitUserSelect: "text",
       }}
     />
   );

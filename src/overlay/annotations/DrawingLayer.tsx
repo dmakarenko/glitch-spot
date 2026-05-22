@@ -39,6 +39,9 @@ export function DrawingLayer({ state, dispatch }: Props) {
       if (e.target !== e.currentTarget) return;
       // Ignore non-primary buttons.
       if (e.button !== 0) return;
+      // Prevent the browser from starting a text selection that would flash
+      // across existing notes and rect contents as the drag passes over them.
+      e.preventDefault();
       const rect = ref.current?.getBoundingClientRect();
       if (!rect) return;
       const x = e.clientX - rect.left;
@@ -76,6 +79,8 @@ export function DrawingLayer({ state, dispatch }: Props) {
         position: "absolute",
         inset: 0,
         cursor: "crosshair",
+        userSelect: "none",
+        WebkitUserSelect: "none",
       }}
     >
       {state.rects.map((r) => (
