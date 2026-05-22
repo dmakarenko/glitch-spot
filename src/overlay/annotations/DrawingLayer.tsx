@@ -90,10 +90,42 @@ export function DrawingLayer({ state, dispatch }: Props) {
             height: r.h,
             border: RECT_BORDER,
             background: RECT_FILL,
-            pointerEvents: "none",
             boxSizing: "border-box",
+            pointerEvents: "none",
           }}
-        />
+        >
+          {r.w > 24 && r.h > 24 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                dispatch({ type: "DELETE_RECT", id: r.id });
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              aria-label="Delete rectangle"
+              style={{
+                position: "absolute",
+                top: -10,
+                right: -10,
+                width: 20,
+                height: 20,
+                padding: 0,
+                border: "none",
+                borderRadius: "50%",
+                background: "#ff3b30",
+                color: "white",
+                fontSize: 14,
+                lineHeight: "20px",
+                textAlign: "center",
+                cursor: "pointer",
+                pointerEvents: "auto",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+              }}
+            >
+              ×
+            </button>
+          )}
+        </div>
       ))}
       {state.rects.map((r) => (
         <RectangleNote
