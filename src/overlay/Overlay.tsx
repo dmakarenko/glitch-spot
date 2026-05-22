@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { DrawingLayer } from "./annotations/DrawingLayer";
 import { initialState, reducer } from "./annotations/state";
+import { Toolbar } from "./Toolbar";
 
 type Frame = {
   width: number;
@@ -137,6 +138,7 @@ export function Overlay() {
         }}
       />
       <DrawingLayer state={annotations} dispatch={dispatch} />
+      <Toolbar rectCount={annotations.rects.length} onSave={() => { /* M11 wires this */ }} />
     </div>
   );
 }
