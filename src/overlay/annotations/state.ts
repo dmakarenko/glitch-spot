@@ -52,6 +52,33 @@ export function reducer(
       return { ...state, rects, draggingId: null };
     }
 
+    case "SET_NOTE": {
+      const rect = state.rects.find((r) => r.id === action.id);
+      if (!rect) return state;
+      const rects = state.rects.map((r) =>
+        r.id === action.id ? { ...r, note: action.note } : r
+      );
+      const alreadyEditing = state.history.some(
+        (h) => h.kind === "noteEdit" && h.id === action.id
+      );
+      const history: HistoryEntry[] = alreadyEditing
+        ? state.history
+        : [...state.history, { kind: "noteEdit", id: action.id, previousNote: rect.note }];
+      return { ...state, rects, history };
+    }
+
+    case "DELETE_RECT": {
+      const index = state.rects.findIndex((r) => r.id === action.id);
+      if (index < 0) return state;
+      const rect = state.rects[index];
+      const rects = state.rects.filter((r) => r.id !== action.id);
+      const history: HistoryEntry[] = [...state.history, { kind: "delete", rect, index }];
+      return { ...state, rects, history };
+    }
+
+    case "CLEAR":
+      return initialState;
+
     default:
       return state;
   }
