@@ -2,8 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` to execute this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
 >
-> Part of initiative: [`docs/initiatives/glitch-spot/INITIATIVE.md`](../initiatives/glitch-spot/INITIATIVE.md).
-> Working scope reference: [`docs/initiatives/glitch-spot/scope.md`](../initiatives/glitch-spot/scope.md).
+> Part of initiative: [`docs/initiatives/glitch-spot/INITIATIVE.md`](../../initiatives/glitch-spot/INITIATIVE.md).
+> Working scope reference: [`docs/initiatives/glitch-spot/scope.md`](../../initiatives/glitch-spot/scope.md).
 
 **Goal:** Drag-to-draw rectangle annotations with inline notes on the overlay (in both live and frozen modes), undo, Save (`Cmd+Return`) / Discard (`Esc`-with-content) modal, and a save action that emits a structured snapshot JSON to the system clipboard alongside a clean PNG written to `/tmp/glitch-spot-<id>.png`.
 

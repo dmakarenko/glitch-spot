@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: `superpowers:executing-plans`. Steps use checkbox (`- [ ]`) syntax.
 >
-> Part of initiative: [`docs/initiatives/glitch-spot/INITIATIVE.md`](../initiatives/glitch-spot/INITIATIVE.md).
+> Part of initiative: [`docs/initiatives/glitch-spot/INITIATIVE.md`](../../initiatives/glitch-spot/INITIATIVE.md).
 > Follow-up to: [`2026-05-22-glitch-spot-v0.2-drawing.md`](./2026-05-22-glitch-spot-v0.2-drawing.md). M1–M12 of that plan are complete; this slice pulls one piece of v0.3 scope (annotated PNG generation) forward into v0.2 before the merge.
 
 **Goal:** Generate `glitch-spot-<id>-annotated.png` alongside the clean PNG on save, with rectangle borders + each annotation's note text rendered onto a clone of the clean image. Populate `snapshot.images.annotated` with its absolute path so downstream consumers (agents, future relay) can use it directly.
