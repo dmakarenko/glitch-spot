@@ -50,6 +50,14 @@ export function Overlay() {
     };
 
     const setFrame = (frame: Frame) => {
+      // Frames are only ever produced by the frozen-overlay path. If we are
+      // receiving one then the user definitely pressed the frozen hotkey,
+      // even when the Rust-side `__glitchSpotPresent('frozen')` eval was a
+      // no-op (e.g. on the first ever show, before useEffect has installed
+      // the global, or after a webview reload). Force frozen mode here so
+      // the backdrop actually renders the screenshot.
+      setMode("frozen");
+
       const next = frameToObjectUrl(frame);
       // Decode off-screen before swapping the visible background so the new
       // image appears atomically rather than after a perceptible decode delay.
