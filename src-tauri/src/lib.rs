@@ -3,6 +3,7 @@
 mod capture;
 mod hotkey;
 mod overlay;
+pub mod snapshot;
 mod spike_capture;
 
 use std::sync::Mutex;
