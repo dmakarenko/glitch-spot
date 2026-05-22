@@ -89,7 +89,15 @@ export function Overlay() {
     });
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") invoke("hide_overlay");
+      if (e.key === "Escape") {
+        invoke("hide_overlay");
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        dispatch({ type: "UNDO" });
+        return;
+      }
     };
     window.addEventListener("keydown", onKey);
 
