@@ -79,6 +79,32 @@ export function reducer(
     case "CLEAR":
       return initialState;
 
+    case "UNDO": {
+      const history = [...state.history];
+      const last = history.pop();
+      if (!last) return state;
+      switch (last.kind) {
+        case "create":
+          return {
+            ...state,
+            rects: state.rects.filter((r) => r.id !== last.id),
+            history,
+          };
+        case "delete": {
+          const rects = [...state.rects];
+          const insertAt = Math.min(last.index, rects.length);
+          rects.splice(insertAt, 0, last.rect);
+          return { ...state, rects, history };
+        }
+        case "noteEdit": {
+          const rects = state.rects.map((r) =>
+            r.id === last.id ? { ...r, note: last.previousNote } : r
+          );
+          return { ...state, rects, history };
+        }
+      }
+    }
+
     default:
       return state;
   }

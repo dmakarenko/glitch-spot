@@ -85,3 +85,39 @@ describe("notes and deletion", () => {
     expect(s).toEqual(initialState);
   });
 });
+
+describe("undo", () => {
+  function drawn(id: string, state = initialState): import("./types").AnnotationsState {
+    let s = reducer(state, { type: "BEGIN_DRAG", id, x: 0, y: 0 });
+    s = reducer(s, { type: "DRAG_TO", x: 100, y: 50 });
+    return reducer(s, { type: "END_DRAG" });
+  }
+
+  it("UNDO on empty history is a no-op", () => {
+    const s = reducer(initialState, { type: "UNDO" });
+    expect(s).toEqual(initialState);
+  });
+
+  it("UNDO of a create removes the rect", () => {
+    let s = drawn("r1");
+    s = reducer(s, { type: "UNDO" });
+    expect(s.rects).toEqual([]);
+    expect(s.history).toEqual([]);
+  });
+
+  it("UNDO of a delete restores the rect at its original index", () => {
+    let s = drawn("r1");
+    s = drawn("r2", s);
+    s = reducer(s, { type: "DELETE_RECT", id: "r1" });
+    expect(s.rects.map((r) => r.id)).toEqual(["r2"]);
+    s = reducer(s, { type: "UNDO" });
+    expect(s.rects.map((r) => r.id)).toEqual(["r1", "r2"]);
+  });
+
+  it("UNDO of a note edit restores the prior note text", () => {
+    let s = drawn("r1");
+    s = reducer(s, { type: "SET_NOTE", id: "r1", note: "later" });
+    s = reducer(s, { type: "UNDO" });
+    expect(s.rects[0].note).toBe("");
+  });
+});
