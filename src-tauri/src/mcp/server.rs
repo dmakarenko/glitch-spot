@@ -283,4 +283,74 @@ mod tests {
         let resp = post_json(app, json!({"jsonrpc":"2.0","id":1,"method":"nonsense","params":{}})).await;
         assert!(resp["error"].is_object());
     }
+
+    #[tokio::test]
+    async fn wait_for_snapshot_returns_snapshot_when_published() {
+        let store = Arc::new(SnapshotStore::new());
+        let app = build_router(store.clone());
+
+        // Spawn the blocking wait in a separate task
+        let app2 = app.clone();
+        let wait_handle = tokio::spawn(async move {
+            post_json(
+                app2,
+                json!({
+                    "jsonrpc": "2.0", "id": 5,
+                    "method": "tools/call",
+                    "params": { "name": "wait_for_snapshot", "arguments": { "timeout_seconds": 5 } }
+                }),
+            )
+            .await
+        });
+
+        // Give the handler time to reach wait_for_next
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Publish a snapshot — this should unblock the handler
+        store.publish(fake_snapshot("snap_wait_01"));
+
+        let resp = wait_handle.await.unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let snapshot: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(snapshot["id"], "snap_wait_01");
+    }
+
+    #[tokio::test]
+    async fn wait_for_snapshot_returns_cancelled_when_cancel_called() {
+        let store = Arc::new(SnapshotStore::new());
+        let app = build_router(store.clone());
+
+        let app2 = app.clone();
+        let wait_handle = tokio::spawn(async move {
+            post_json(
+                app2,
+                json!({
+                    "jsonrpc": "2.0", "id": 6,
+                    "method": "tools/call",
+                    "params": { "name": "wait_for_snapshot", "arguments": { "timeout_seconds": 10 } }
+                }),
+            )
+            .await
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Cancel via a second request on a fresh router clone
+        let cancel_resp = post_json(
+            build_router(store.clone()),
+            json!({
+                "jsonrpc": "2.0", "id": 7,
+                "method": "tools/call",
+                "params": { "name": "cancel_wait", "arguments": {} }
+            }),
+        )
+        .await;
+        assert!(cancel_resp["result"].is_object());
+
+        // The wait should now return with cancelled
+        let resp = wait_handle.await.unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let body: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(body["cancelled"], true);
+    }
 }
