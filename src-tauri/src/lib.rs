@@ -7,7 +7,7 @@ mod overlay;
 pub mod snapshot;
 mod spike_capture;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -21,6 +21,7 @@ use snapshot::build::IncomingAnnotation;
 /// and this slot becomes the staging area for the snapshot artifact.
 pub struct AppState {
     pub latest_frame: Mutex<Option<capture::CapturedFrame>>,
+    pub snapshot_store: Arc<mcp::store::SnapshotStore>,
 }
 
 #[tauri::command]
@@ -83,6 +84,9 @@ async fn save_snapshot(
         snapshot::build::build_and_write(&frame, &mode, annotations, os_platform, &os_version)
             .map_err(|e| e.to_string())?;
 
+    // Notify any waiting MCP caller.
+    state.snapshot_store.publish(snap.clone());
+
     let json = serde_json::to_string_pretty(&snap).map_err(|e| e.to_string())?;
     app.clipboard()
         .write_text(json)
@@ -117,12 +121,20 @@ pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Re
 }
 
 pub fn run() {
+    let snapshot_store = Arc::new(mcp::store::SnapshotStore::new());
+    let store_for_mcp = snapshot_store.clone();
+
+    tauri::async_runtime::spawn(async move {
+        mcp::server::serve(store_for_mcp).await;
+    });
+
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState {
             latest_frame: Mutex::new(None),
+            snapshot_store,
         })
         .setup(|app| {
             hotkey::register(app.handle())?;

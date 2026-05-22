@@ -183,4 +183,20 @@ mod tests {
         assert!(store.get_snapshot("snap_abc").is_some());
         assert!(store.get_snapshot("snap_xyz").is_none());
     }
+
+    #[tokio::test]
+    async fn publishing_multiple_snapshots_each_wakes_a_waiter() {
+        let store = Arc::new(SnapshotStore::new());
+
+        for i in 0..3u32 {
+            let store2 = store.clone();
+            let handle = tokio::spawn(async move { store2.wait_for_next(5).await });
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            store.publish(fake_snapshot(&format!("snap_{i:03}")));
+            match handle.await.unwrap() {
+                WaitResult::Snapshot(s) => assert_eq!(s.id, format!("snap_{i:03}")),
+                _ => panic!("expected snapshot"),
+            }
+        }
+    }
 }
