@@ -1,0 +1,4 @@
+/* ABOUTME: Global CSS reset and base styles for Glitch Spot. */
+/* ABOUTME: Ensures full-height layout and consistent default colors. */
+html, body, #root { margin: 0; padding: 0; height: 100%; }
+body { background: #fafafa; color: #1a1a1a; }
