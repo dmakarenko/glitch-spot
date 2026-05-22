@@ -132,7 +132,7 @@ export function DrawingLayer({ state, dispatch }: Props) {
           key={`${r.id}-note`}
           rect={r}
           containerHeight={containerHeight}
-          autoFocus={r.id === state.lastCreatedId}
+          autoFocus={!state.draggingId && r.id === state.lastCreatedId}
           onChange={(note) => dispatch({ type: "SET_NOTE", id: r.id, note })}
         />
       ))}

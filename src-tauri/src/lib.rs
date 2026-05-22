@@ -63,7 +63,15 @@ async fn save_snapshot(
             .ok()
             .and_then(|g| g.clone())
             .ok_or_else(|| "no cached frame for frozen mode".to_string())?,
-        "live" => capture::capture_active_monitor(&app).map_err(|e| e.to_string())?,
+        "live" => {
+            // Hide the overlay BEFORE capturing so the saved screenshot doesn't
+            // include our own annotation rectangles + checker pattern. A brief
+            // sleep gives macOS time to repaint without the overlay before the
+            // screen-capture sample fires.
+            overlay::hide(&app).map_err(|e| e.to_string())?;
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            capture::capture_active_monitor(&app).map_err(|e| e.to_string())?
+        }
         other => return Err(format!("unknown mode: {other}")),
     };
 
