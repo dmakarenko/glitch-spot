@@ -55,6 +55,8 @@ pub struct Images {
     pub annotated: Option<String>,
 }
 
+pub mod build;
+
 pub fn new_id() -> String {
     let uuid = uuid::Uuid::new_v4().simple().to_string();
     format!("snap_{}", &uuid[..12])
