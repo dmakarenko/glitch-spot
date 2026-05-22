@@ -43,6 +43,24 @@ export function Overlay() {
   const [annotations, dispatch] = useReducer(reducer, initialState);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
 
+  const handleSave = async () => {
+    const payload = annotations.rects.map((r) => ({
+      id: r.id,
+      x: r.x,
+      y: r.y,
+      w: r.w,
+      h: r.h,
+      note: r.note,
+    }));
+    try {
+      await invoke("save_snapshot", { mode, annotations: payload });
+      dispatch({ type: "CLEAR" });
+      setShowDiscardModal(false);
+    } catch (err) {
+      console.error("save_snapshot failed", err);
+    }
+  };
+
   useEffect(() => {
     let currentUrl: string | null = null;
 
@@ -53,6 +71,8 @@ export function Overlay() {
       currentUrl = null;
       setImageUrl(null);
       setMode(newMode);
+      dispatch({ type: "CLEAR" });
+      setShowDiscardModal(false);
     };
 
     const setFrame = (frame: Frame) => {
@@ -110,14 +130,20 @@ export function Overlay() {
         }
         return;
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (annotations.rects.length > 0) handleSave();
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         dispatch({ type: "UNDO" });
+        return;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [annotations.rects.length]);
+  }, [annotations.rects, mode]);
 
   // In live mode, the body stays transparent — the user sees the real desktop
   // through the overlay. In frozen mode, the cropped screenshot fills the
@@ -146,7 +172,7 @@ export function Overlay() {
         }}
       />
       <DrawingLayer state={annotations} dispatch={dispatch} />
-      <Toolbar rectCount={annotations.rects.length} onSave={() => { /* M11 wires this */ }} />
+      <Toolbar rectCount={annotations.rects.length} onSave={handleSave} />
       {showDiscardModal && (
         <DiscardModal
           onDiscard={() => {
@@ -154,7 +180,10 @@ export function Overlay() {
             dispatch({ type: "CLEAR" });
             invoke("hide_overlay");
           }}
-          onSave={() => { setShowDiscardModal(false); /* M11 wires the save flow */ }}
+          onSave={() => {
+            setShowDiscardModal(false);
+            handleSave();
+          }}
           onCancel={() => setShowDiscardModal(false)}
         />
       )}
