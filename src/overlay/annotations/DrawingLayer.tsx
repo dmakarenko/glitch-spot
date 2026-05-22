@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AnnotationsAction, AnnotationsState } from "./types";
+import { MIN_RECT_DIMENSION } from "./state";
 import { RectangleNote } from "./RectangleNote";
 
 const RECT_BORDER = "2px solid #ff3b30";
@@ -99,7 +100,7 @@ export function DrawingLayer({ state, dispatch }: Props) {
             pointerEvents: "none",
           }}
         >
-          {r.w > 24 && r.h > 24 && (
+          {r.w >= MIN_RECT_DIMENSION && r.h >= MIN_RECT_DIMENSION && (
             <button
               type="button"
               onClick={(e) => {

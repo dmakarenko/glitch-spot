@@ -1,6 +1,6 @@
 // ABOUTME: Reducer tests for the overlay's annotation state. Pure data, no DOM.
 import { describe, expect, it } from "vitest";
-import { reducer, initialState } from "./state";
+import { reducer, initialState, MIN_RECT_DIMENSION } from "./state";
 
 describe("annotations reducer", () => {
   it("starts with no rects, no history, no drag", () => {
@@ -77,6 +77,7 @@ describe("notes and deletion", () => {
   it("DELETE_RECT removes the rect and records it in history with its original index", () => {
     let s = drawn("r1");
     s = reducer(s, { type: "BEGIN_DRAG", id: "r2", x: 200, y: 0 });
+    s = reducer(s, { type: "DRAG_TO", x: 300, y: 80 });
     s = reducer(s, { type: "END_DRAG" });
     s = reducer(s, { type: "DELETE_RECT", id: "r1" });
     expect(s.rects.map((r) => r.id)).toEqual(["r2"]);
@@ -133,8 +134,57 @@ describe("undo", () => {
 
   it("UNDO of a create clears lastCreatedId when undoing the most recent create", () => {
     let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 0, y: 0 });
+    s = reducer(s, { type: "DRAG_TO", x: 100, y: 50 });
     s = reducer(s, { type: "END_DRAG" });
     s = reducer(s, { type: "UNDO" });
     expect(s.lastCreatedId).toBeNull();
+  });
+});
+
+describe("min-size guard on END_DRAG", () => {
+  it("MIN_RECT_DIMENSION matches the X-button visibility threshold (25)", () => {
+    expect(MIN_RECT_DIMENSION).toBe(25);
+  });
+
+  it("END_DRAG after a pure click (no drag) discards the zero-size rect entirely", () => {
+    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 100, y: 50 });
+    s = reducer(s, { type: "END_DRAG" });
+    expect(s.rects).toEqual([]);
+    expect(s.history).toEqual([]);
+    expect(s.draggingId).toBeNull();
+    expect(s.lastCreatedId).toBeNull();
+  });
+
+  it("END_DRAG discards a sub-MIN_RECT_DIMENSION drag (10x10)", () => {
+    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 100, y: 50 });
+    s = reducer(s, { type: "DRAG_TO", x: 110, y: 60 });
+    s = reducer(s, { type: "END_DRAG" });
+    expect(s.rects).toEqual([]);
+    expect(s.history).toEqual([]);
+  });
+
+  it("END_DRAG keeps a rect that meets the threshold (25x25)", () => {
+    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 0, y: 0 });
+    s = reducer(s, { type: "DRAG_TO", x: 25, y: 25 });
+    s = reducer(s, { type: "END_DRAG" });
+    expect(s.rects).toHaveLength(1);
+    expect(s.rects[0]).toMatchObject({ w: 25, h: 25 });
+  });
+
+  it("END_DRAG discards a wide-but-flat rect (60x10) because height is below the threshold", () => {
+    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 0, y: 0 });
+    s = reducer(s, { type: "DRAG_TO", x: 60, y: 10 });
+    s = reducer(s, { type: "END_DRAG" });
+    expect(s.rects).toEqual([]);
+  });
+
+  it("discarding a too-small rect leaves any previously committed rectangles untouched", () => {
+    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 0, y: 0 });
+    s = reducer(s, { type: "DRAG_TO", x: 100, y: 80 });
+    s = reducer(s, { type: "END_DRAG" });
+    s = reducer(s, { type: "BEGIN_DRAG", id: "r2", x: 200, y: 200 });
+    s = reducer(s, { type: "END_DRAG" });
+    expect(s.rects.map((r) => r.id)).toEqual(["r1"]);
+    expect(s.history).toEqual([{ kind: "create", id: "r1" }]);
   });
 });
