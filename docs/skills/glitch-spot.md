@@ -9,15 +9,16 @@ Surface a Glitch Spot annotation snapshot in the current CC session.
 
 ## Arm state (no args)
 
-1. **Health check:** call the `get_latest_snapshot` MCP tool (tool is registered under the `glitch-spot` MCP server). If the call fails for any reason — connection refused, tool not registered, timeout, or any error — output exactly:
+1. **Health check:** call the `get_latest_snapshot` MCP tool (tool is registered under the `glitch-spot` MCP server). If the call succeeds, continue to step 2.
 
-   > Glitch Spot isn't running. Launch the app, then run `/glitch-spot` again.
-
-   Then stop.
+   If the call fails (tool not registered, connection refused, timeout, or any error):
+   - Run `open -a "Glitch Spot"` via Bash. If the app bundle is not found, try `open /Applications/Glitch\ Spot.app` as a fallback.
+   - Output: > Glitch Spot wasn't running — I've launched it. Give it a moment to start, then run `/glitch-spot` again.
+   - Stop.
 
 2. **Dispatch background agent:** Dispatch a background Agent (run_in_background: true) named `glitch-spot-waiter` with this exact prompt:
 
-   > Call the `wait_for_snapshot` MCP tool with `timeout_seconds: 600`. When the tool returns, output the raw JSON result on a single line, with no commentary, no markdown, and no code fences. If the tool errors, output `{"error": "<error message>"}` and nothing else.
+   > Call the `wait_for_snapshot` MCP tool in a loop using `timeout_seconds: 45` each time. If the result contains `"pending": true`, call it again immediately passing `last_seen_id: <result.last_id>` in the arguments. Keep looping until the result has an `"id"` field (snapshot arrived) or `"cancelled": true`. After 14 attempts (~10 minutes) with no snapshot, output `{"cancelled": true, "reason": "timeout"}` and stop. When done, output the final result on a single line with no commentary, no markdown, and no code fences. If any call errors, output `{"error": "<error message>"}` and stop.
 
 3. **Tell the user:**
 
@@ -80,6 +81,6 @@ When notified that the `glitch-spot-waiter` background agent completed:
 
 | Condition | Response |
 |---|---|
-| `get_latest_snapshot` fails for any reason | "Glitch Spot isn't running. Launch the app and try again." |
+| `get_latest_snapshot` fails for any reason | Try to launch the app via `open -a "Glitch Spot"`, output "wasn't running — I've launched it. Give it a moment, then run `/glitch-spot` again." |
 | Image file path in snapshot does not exist on disk | Skip image, present text annotations only. Do not error. |
 | Background agent times out (snapshot contains `"reason":"timeout"`) | "Snapshot listener timed out after 10 minutes. Run `/glitch-spot` to start again." |

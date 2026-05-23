@@ -1,5 +1,5 @@
-// ABOUTME: Vite build configuration for Glitch Spot's multi-page (main + overlay) frontend.
-// ABOUTME: Both HTML entry points are declared so adding overlay.html requires no config change.
+// ABOUTME: Vite build configuration for Glitch Spot's single-page overlay frontend.
+// ABOUTME: Only the overlay HTML entry point is declared; the main window has been removed.
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "path";
@@ -11,7 +11,6 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        main: resolve(__dirname, "index.html"),
         overlay: resolve(__dirname, "overlay.html"),
       },
     },

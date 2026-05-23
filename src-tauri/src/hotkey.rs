@@ -45,3 +45,32 @@ pub fn register(app: &AppHandle) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tauri_plugin_global_shortcut::{Code, Modifiers};
+
+    #[test]
+    fn live_hotkey_uses_ctrl_opt_cmd_g() {
+        let hk = live_hotkey();
+        assert_eq!(hk.key, Code::KeyG);
+        assert!(hk.mods.contains(Modifiers::CONTROL));
+        assert!(hk.mods.contains(Modifiers::ALT));
+        assert!(hk.mods.contains(Modifiers::SUPER));
+    }
+
+    #[test]
+    fn frozen_hotkey_uses_ctrl_opt_cmd_h() {
+        let hk = frozen_hotkey();
+        assert_eq!(hk.key, Code::KeyH);
+        assert!(hk.mods.contains(Modifiers::CONTROL));
+        assert!(hk.mods.contains(Modifiers::ALT));
+        assert!(hk.mods.contains(Modifiers::SUPER));
+    }
+
+    #[test]
+    fn live_and_frozen_hotkeys_are_distinct() {
+        assert_ne!(live_hotkey().key, frozen_hotkey().key);
+    }
+}

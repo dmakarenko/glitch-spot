@@ -2,7 +2,7 @@
 // ABOUTME: Runs on localhost:7820; CC registers it as an MCP server.
 
 use std::sync::Arc;
-use axum::{extract::State, http::StatusCode, response::Json as AxumJson, routing::post, Router};
+use axum::{extract::State, http::StatusCode, response::{IntoResponse, Json as AxumJson, Response}, routing::post, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -48,9 +48,14 @@ fn err(id: Option<Value>, code: i32, message: impl Into<String>) -> RpcResponse 
 async fn handle_mcp(
     State(store): State<Arc<SnapshotStore>>,
     AxumJson(req): AxumJson<RpcRequest>,
-) -> (StatusCode, AxumJson<RpcResponse>) {
+) -> Response {
+    // JSON-RPC notifications (id absent, method is a notification) must not receive
+    // a response. MCP clients send notifications/initialized after handshake.
+    if req.id.is_none() && req.method.starts_with("notifications/") {
+        return StatusCode::NO_CONTENT.into_response();
+    }
     let resp = dispatch(store, req).await;
-    (StatusCode::OK, AxumJson(resp))
+    (StatusCode::OK, AxumJson(resp)).into_response()
 }
 
 async fn dispatch(store: Arc<SnapshotStore>, req: RpcRequest) -> RpcResponse {
@@ -66,11 +71,12 @@ async fn dispatch(store: Arc<SnapshotStore>, req: RpcRequest) -> RpcResponse {
             "tools": [
                 {
                     "name": "wait_for_snapshot",
-                    "description": "Blocks until the next Glitch Spot annotation is saved. Returns the full snapshot JSON.",
+                    "description": "Blocks until the next Glitch Spot annotation is saved. Returns the full snapshot JSON. Server caps each call at 45s; on timeout it returns { pending: true, last_id: \"...\" } — retry immediately passing last_seen_id.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "timeout_seconds": { "type": "integer", "description": "Max seconds to wait. Default 600, max 1800." }
+                            "timeout_seconds": { "type": "integer", "description": "Max seconds to wait per call. Default 600, max 1800." },
+                            "last_seen_id": { "type": "string", "description": "Optional. ID from the previous pending response's last_id field. If the current latest snapshot differs, it is returned immediately without blocking." }
                         }
                     }
                 },
@@ -110,15 +116,35 @@ async fn dispatch(store: Arc<SnapshotStore>, req: RpcRequest) -> RpcResponse {
 async fn call_tool(store: Arc<SnapshotStore>, id: Option<Value>, name: &str, args: Value) -> RpcResponse {
     match name {
         "wait_for_snapshot" => {
-            let secs = args["timeout_seconds"]
-                .as_u64()
-                .unwrap_or(600)
-                .min(1800);
-            let result = store.wait_for_next(secs).await;
+            let requested = args["timeout_seconds"].as_u64().unwrap_or(600).min(1800);
+            // Cap each HTTP round-trip to stay under MCP client connection timeouts.
+            // Callers retry immediately on { "pending": true, "last_id": "..." }.
+            let chunk = requested.min(45);
+            let last_seen_id = args["last_seen_id"].as_str().map(|s| s.to_string());
+
+            // If a snapshot arrived in the gap between the previous chunk's timeout and this
+            // retry, catch it here before blocking — borrow_and_update() in wait_for_next
+            // would otherwise mark it as seen and miss it.
+            if let Some(ref seen_id) = last_seen_id {
+                if let Some(snap) = store.get_latest() {
+                    if &snap.id != seen_id {
+                        return mcp_text_content(
+                            id,
+                            serde_json::to_value(&snap).unwrap_or(Value::Null),
+                        );
+                    }
+                }
+            }
+
+            // Capture the current latest ID BEFORE waiting. Using the post-wait latest
+            // would include snapshots that arrived during/after the wait, making the
+            // gap-catch skip them on the next retry.
+            let pre_wait_id = store.get_latest().map(|s| s.id).unwrap_or_default();
+            let result = store.wait_for_next(chunk).await;
             let body = match result {
                 WaitResult::Snapshot(s) => serde_json::to_value(&s).unwrap_or(Value::Null),
                 WaitResult::Cancelled => json!({ "cancelled": true }),
-                WaitResult::TimedOut => json!({ "cancelled": true, "reason": "timeout" }),
+                WaitResult::TimedOut => json!({ "pending": true, "last_id": pre_wait_id }),
             };
             mcp_text_content(id, body)
         }
@@ -316,6 +342,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wait_for_snapshot_returns_pending_when_nothing_arrives() {
+        let (app, _) = make_app();
+        // timeout_seconds: 0 forces an immediate timeout → should return pending: true
+        let resp = post_json(app, json!({
+            "jsonrpc": "2.0", "id": 8,
+            "method": "tools/call",
+            "params": { "name": "wait_for_snapshot", "arguments": { "timeout_seconds": 0 } }
+        })).await;
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let body: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(body["pending"], true);
+        assert!(body["last_id"].is_string()); // present (may be empty string if no snapshots)
+        assert!(body.get("cancelled").is_none());
+    }
+
+    #[tokio::test]
     async fn wait_for_snapshot_returns_cancelled_when_cancel_called() {
         let store = Arc::new(SnapshotStore::new());
         let app = build_router(store.clone());
@@ -352,5 +394,35 @@ mod tests {
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         let body: Value = serde_json::from_str(text).unwrap();
         assert_eq!(body["cancelled"], true);
+    }
+
+    #[tokio::test]
+    async fn wait_for_snapshot_gap_catch_returns_snapshot_published_between_polls() {
+        let store = Arc::new(SnapshotStore::new());
+        let app = build_router(store.clone());
+
+        // Simulate a snapshot that arrived after a pending chunk timed out.
+        // The caller passes last_seen_id = "" (no prior snapshot); the store has
+        // a snapshot with a different id → gap-catch should return it immediately.
+        store.publish(fake_snapshot("snap_gap_01"));
+
+        let resp = post_json(
+            app,
+            json!({
+                "jsonrpc": "2.0", "id": 9,
+                "method": "tools/call",
+                "params": {
+                    "name": "wait_for_snapshot",
+                    "arguments": { "timeout_seconds": 0, "last_seen_id": "" }
+                }
+            }),
+        )
+        .await;
+
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let body: Value = serde_json::from_str(text).unwrap();
+        // Should have caught the snapshot, not returned pending
+        assert_eq!(body["id"], "snap_gap_01");
+        assert!(body.get("pending").is_none());
     }
 }

@@ -6,6 +6,7 @@ pub mod mcp;
 mod overlay;
 pub mod snapshot;
 mod spike_capture;
+mod tray;
 
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
@@ -22,6 +23,7 @@ use snapshot::build::IncomingAnnotation;
 pub struct AppState {
     pub latest_frame: Mutex<Option<capture::CapturedFrame>>,
     pub snapshot_store: Arc<mcp::store::SnapshotStore>,
+    pub latest_snapshot_at: Mutex<Option<chrono::DateTime<chrono::Utc>>>,
 }
 
 #[tauri::command]
@@ -87,6 +89,10 @@ async fn save_snapshot(
     // Notify any waiting MCP caller.
     state.snapshot_store.publish(snap.clone());
 
+    if let Ok(mut ts) = state.latest_snapshot_at.lock() {
+        *ts = Some(chrono::Utc::now());
+    }
+
     let json = serde_json::to_string_pretty(&snap).map_err(|e| e.to_string())?;
     app.clipboard()
         .write_text(json)
@@ -120,6 +126,22 @@ pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Re
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn app_state_latest_snapshot_at_starts_none() {
+        let state = AppState {
+            latest_frame: Mutex::new(None),
+            snapshot_store: Arc::new(mcp::store::SnapshotStore::new()),
+            latest_snapshot_at: Mutex::new(None),
+        };
+        assert!(state.latest_snapshot_at.lock().unwrap().is_none());
+    }
+}
+
 pub fn run() {
     let snapshot_store = Arc::new(mcp::store::SnapshotStore::new());
     let store_for_mcp = snapshot_store.clone();
@@ -132,12 +154,30 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None::<Vec<&str>>,
+        ))
         .manage(AppState {
             latest_frame: Mutex::new(None),
             snapshot_store,
+            latest_snapshot_at: Mutex::new(None),
         })
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // Auto-enable login item on first launch (if not already registered).
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let manager = app.autolaunch();
+                if !manager.is_enabled().unwrap_or(false) {
+                    let _ = manager.enable();
+                }
+            }
+
             hotkey::register(app.handle())?;
+            let _tray = tray::setup_tray(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
