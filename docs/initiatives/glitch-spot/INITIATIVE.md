@@ -4,7 +4,7 @@
 
 **Goal:** A snappy, AI-agent-friendly visual feedback tool for dev-time use. Hotkey → annotate → JSON-on-clipboard (or short-lived link). Eventually multi-platform; macOS-first.
 
-**Current focus:** `v0.3-persistence` — filesystem persistence to `~/.glitch-spot/snapshots/{id}/` + 24 h auto-cleanup.
+**Current focus:** `v0.3-persistence` — filesystem persistence to `~/.glitch-spot/snapshots/{id}/` + 24 h auto-cleanup. Design seed: [`v0.3-persistence-seed.md`](./v0.3-persistence-seed.md).
 
 **Cross-stage scope reference:** [`scope.md`](./scope.md). Architectural decisions, snapshot schema, version slicing.
 
@@ -14,10 +14,11 @@
 
 - [x] **v0.1-foundation** — Tauri 2 macOS scaffold, hotkey-triggered overlay, transparent live mode (`Ctrl+Opt+Cmd+G`) + frozen screenshot mode (`Ctrl+Opt+Cmd+H`), work-area positioning, click-to-dismiss. Branch: `v0.1-foundation`. Plan: [`docs/plans/completed/2026-05-21-glitch-spot-v0.1-foundation.md`](../../plans/completed/2026-05-21-glitch-spot-v0.1-foundation.md). Merged via `3301866`.
 - [x] **v0.2-drawing** — drag-to-draw rectangles with floating inline notes, undo, delete-on-hover, Save (`Cmd+Return`) / Discard (`Esc`-with-content modal), snapshot JSON to clipboard, annotated PNG generation, min-size guard against accidental clicks, text-selection suppressed during drags. Both modes supported. Branch: `v0.2-drawing`. Main plan: [`docs/plans/completed/2026-05-22-glitch-spot-v0.2-drawing.md`](../../plans/completed/2026-05-22-glitch-spot-v0.2-drawing.md). Annotated-PNG follow-up: [`docs/plans/completed/2026-05-22-glitch-spot-v0.2-annotated-png.md`](../../plans/completed/2026-05-22-glitch-spot-v0.2-annotated-png.md). Merged via `68c328d`.
-- [ ] **v0.3-persistence** — write snapshot JSON + `clean.png` + `annotated.png` to `~/.glitch-spot/snapshots/{id}/`, 24h auto-cleanup. (Annotated-PNG generation already ships in v0.2.)
-- [ ] **v0.4-mcp** — local MCP server (stdio child binary or HTTP, TBD), `wait_for_snapshot` / `get_latest_snapshot` / `get_snapshot(id)` tools + resources, Cursor + Claude Code config snippets.
-- [ ] **v1.0-windows-and-relay** — Windows port of the desktop app, `@glitch-spot/web` SDK for DOM-path enrichment in web hosts, Cloudflare relay (Workers + R2) with TTL'd passcode-protected links and HTML view.
-- [ ] **v1.5+** — Linux, source-map → file:line resolution, mobile SDKs, public-link redaction, etc.
+- [x] **v0.4-mcp** — local MCP HTTP server on `127.0.0.1:7820` with `wait_for_snapshot` / `get_latest_snapshot` / `get_snapshot(id)` / `cancel_wait` tools, `/glitch-spot` CC skill, menu-bar tray app (no Dock icon, autostart, dynamic snapshot-age label), standalone eval binary + bash eval script. Seed: [`v0.4-coding-harness-seed.md`](./v0.4-coding-harness-seed.md). Plans: [`docs/plans/completed/2026-05-22-glitch-spot-v0.4-mcp.md`](../../plans/completed/2026-05-22-glitch-spot-v0.4-mcp.md), [`docs/plans/completed/2026-05-22-menu-bar-app.md`](../../plans/completed/2026-05-22-menu-bar-app.md), [`docs/plans/completed/2026-05-22-glitch-spot-skill-evals.md`](../../plans/completed/2026-05-22-glitch-spot-skill-evals.md). Merged via `c23c8d3`.
+- [ ] **v0.3-persistence** — write snapshot JSON + `clean.png` + `annotated.png` to `~/.glitch-spot/snapshots/{id}/`, 24h auto-cleanup. Seed: [`v0.3-persistence-seed.md`](./v0.3-persistence-seed.md). (Sequenced after v0.4 — v0.4 didn't block on it; the `/tmp` paths in v0.4 will swap to `~/.glitch-spot/` here.)
+- [ ] **v1.0-relay** — `@glitch-spot/web` SDK for DOM-path enrichment in web hosts, Cloudflare relay (Workers + R2) with TTL'd passcode-protected links and HTML view. **(Was "v1.0-windows-and-relay"; Windows + Linux ports deferred — see below.)**
+- [ ] **future-ports** — Windows desktop app, Linux desktop app (PipeWire capture). _Deferred indefinitely 2026-05-25 — staying macOS-first while we focus on feature depth over OS breadth._
+- [ ] **v1.5+** — source-map → file:line resolution, mobile SDKs, public-link redaction, etc.
 
 ## Open questions / known deferrals
 
