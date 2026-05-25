@@ -8,6 +8,8 @@ pub mod snapshot;
 mod spike_capture;
 mod tray;
 
+pub use capture::CapturedFrame;
+
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
