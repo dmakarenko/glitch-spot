@@ -9,6 +9,16 @@ use crate::capture::CapturedFrame;
 use crate::snapshot::annotate::{render_annotated_png, AnnotateError};
 use crate::snapshot::{new_id, Annotation, Context, Coords, Images, OsInfo, ScreenInfo, Snapshot};
 
+/// The output of a pure snapshot build: a `Snapshot` plus the PNG bytes whose
+/// paths are recorded in `snapshot.images.{clean,annotated}`. Written to disk
+/// by `crate::snapshot::persist::write`.
+#[derive(Debug)]
+pub struct BuiltSnapshot {
+    pub snapshot: crate::snapshot::Snapshot,
+    pub clean_bytes: Vec<u8>,
+    pub annotated_bytes: Vec<u8>,
+}
+
 /// One annotation as received from the React side. Coordinates are CSS pixels
 /// relative to the overlay's content area; we multiply by `scale_factor` to
 /// get physical pixels for the on-disk image.

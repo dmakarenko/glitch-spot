@@ -59,6 +59,8 @@ pub mod annotate;
 pub mod build;
 pub mod persist;
 
+pub use build::BuiltSnapshot;
+
 pub fn new_id() -> String {
     let uuid = uuid::Uuid::new_v4().simple().to_string();
     format!("snap_{}", &uuid[..12])
