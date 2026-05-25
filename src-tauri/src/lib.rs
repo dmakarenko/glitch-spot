@@ -82,9 +82,18 @@ async fn save_snapshot(
     let os_platform: &str = tauri_plugin_os::platform();
     let os_version: String = tauri_plugin_os::version().to_string();
 
-    let snap =
-        snapshot::build::build_and_write(&frame, &mode, annotations, os_platform, &os_version)
-            .map_err(|e| e.to_string())?;
+    let base = snapshot::persist::snapshots_dir().map_err(|e| e.to_string())?;
+    let built = snapshot::build::build(
+        &frame,
+        &mode,
+        annotations,
+        os_platform,
+        &os_version,
+        &base,
+    )
+    .map_err(|e| e.to_string())?;
+    snapshot::persist::write(&base, &built).map_err(|e| e.to_string())?;
+    let snap = built.snapshot;
 
     // Notify any waiting MCP caller.
     state.snapshot_store.publish(snap.clone());

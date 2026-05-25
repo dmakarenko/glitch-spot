@@ -75,7 +75,7 @@ fn new_id_has_snap_prefix_and_reasonable_length() {
 }
 
 use crate::capture::CapturedFrame;
-use crate::snapshot::build::{build_and_write, IncomingAnnotation};
+use crate::snapshot::build::{build, IncomingAnnotation};
 
 fn fake_frame() -> CapturedFrame {
     // Real 2x2 white PNG produced via the image crate so the bytes pass strict
@@ -92,7 +92,8 @@ fn fake_frame() -> CapturedFrame {
 
 #[test]
 fn build_scales_annotation_coords_by_scale_factor() {
-    let snap = build_and_write(
+    let temp = tempfile::TempDir::new().unwrap();
+    let built = build(
         &fake_frame(),
         "frozen",
         vec![IncomingAnnotation {
@@ -105,10 +106,11 @@ fn build_scales_annotation_coords_by_scale_factor() {
         }],
         "macos",
         "26.0",
+        temp.path(),
     )
     .unwrap();
-    assert_eq!(snap.annotations.len(), 1);
-    let a = &snap.annotations[0];
+    assert_eq!(built.snapshot.annotations.len(), 1);
+    let a = &built.snapshot.annotations[0];
     assert_eq!(a.coords.x, 20.0);
     assert_eq!(a.coords.y, 40.0);
     assert_eq!(a.coords.w, 60.0);
@@ -116,44 +118,39 @@ fn build_scales_annotation_coords_by_scale_factor() {
 }
 
 #[test]
-fn build_writes_png_to_tmp() {
-    let snap = build_and_write(&fake_frame(), "live", vec![], "macos", "26.0").unwrap();
-    let path = std::path::Path::new(&snap.images.clean);
-    assert!(path.starts_with("/tmp/"));
-    assert!(path.exists());
-    let bytes = std::fs::read(path).unwrap();
-    assert!(
-        bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]),
-        "must be a PNG"
-    );
-    // Cleanup so we don't accumulate /tmp files when re-running tests.
-    let _ = std::fs::remove_file(path);
-    if let Some(ann) = &snap.images.annotated {
-        let _ = std::fs::remove_file(ann);
-    }
-}
+fn build_returns_paths_under_base_dir_and_bytes_match_frame() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let frame = fake_frame();
+    let built = build(&frame, "live", vec![], "macos", "26.0", temp.path()).unwrap();
 
-#[test]
-fn build_writes_annotated_png_alongside_clean() {
-    let snap = build_and_write(&fake_frame(), "frozen", vec![], "macos", "26.0").unwrap();
-    let annotated = snap
-        .images
-        .annotated
-        .as_ref()
-        .expect("annotated path must be set");
-    let path = std::path::Path::new(annotated);
-    assert!(path.exists(), "annotated PNG must be written to disk");
-    assert!(
-        annotated.ends_with("-annotated.png"),
-        "annotated path must end with -annotated.png, got {annotated}"
+    // Embedded paths point under `temp/{id}/...`
+    let id = &built.snapshot.id;
+    let expected_clean = temp.path().join(id).join("clean.png");
+    let expected_annotated = temp.path().join(id).join("annotated.png");
+    assert_eq!(
+        std::path::Path::new(&built.snapshot.images.clean),
+        expected_clean
     );
-    let bytes = std::fs::read(path).unwrap();
-    assert!(
-        bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]),
-        "annotated file must be a PNG"
+    assert_eq!(
+        built
+            .snapshot
+            .images
+            .annotated
+            .as_deref()
+            .map(std::path::Path::new),
+        Some(expected_annotated.as_path())
     );
-    let _ = std::fs::remove_file(path);
-    let _ = std::fs::remove_file(&snap.images.clean);
+
+    // No files were actually written (build is pure).
+    assert!(!expected_clean.exists());
+    assert!(!expected_annotated.exists());
+
+    // Returned bytes match the frame's PNG; annotated bytes start with PNG magic.
+    assert_eq!(built.clean_bytes, frame.png);
+    assert!(
+        built.annotated_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]),
+        "annotated_bytes must be PNG-encoded"
+    );
 }
 
 use crate::snapshot::annotate::render_annotated_png;

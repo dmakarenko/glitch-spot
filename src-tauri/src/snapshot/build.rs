@@ -1,23 +1,13 @@
-// ABOUTME: Assembles a Snapshot from incoming annotation data plus the latest captured frame.
-// ABOUTME: Writes the clean PNG to /tmp for v0.2; persistence to ~/.glitch-spot is v0.3 work.
+// ABOUTME: Pure assembly of a Snapshot from an incoming frame + annotations.
+// ABOUTME: Filesystem writes live in crate::snapshot::persist, not here.
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use chrono::Utc;
 
 use crate::capture::CapturedFrame;
 use crate::snapshot::annotate::{render_annotated_png, AnnotateError};
 use crate::snapshot::{new_id, Annotation, Context, Coords, Images, OsInfo, ScreenInfo, Snapshot};
-
-/// The output of a pure snapshot build: a `Snapshot` plus the PNG bytes whose
-/// paths are recorded in `snapshot.images.{clean,annotated}`. Written to disk
-/// by `crate::snapshot::persist::write`.
-#[derive(Debug)]
-pub struct BuiltSnapshot {
-    pub snapshot: crate::snapshot::Snapshot,
-    pub clean_bytes: Vec<u8>,
-    pub annotated_bytes: Vec<u8>,
-}
 
 /// One annotation as received from the React side. Coordinates are CSS pixels
 /// relative to the overlay's content area; we multiply by `scale_factor` to
@@ -32,27 +22,38 @@ pub struct IncomingAnnotation {
     pub note: String,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum BuildError {
-    #[error("io: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("annotate: {0}")]
-    Annotate(#[from] AnnotateError),
-    #[error("no captured frame available to save")]
-    NoFrame,
+/// The output of a pure snapshot build: a `Snapshot` plus the PNG bytes whose
+/// paths are recorded in `snapshot.images.{clean,annotated}`. Written to disk
+/// by `crate::snapshot::persist::write`.
+#[derive(Debug)]
+pub struct BuiltSnapshot {
+    pub snapshot: Snapshot,
+    pub clean_bytes: Vec<u8>,
+    pub annotated_bytes: Vec<u8>,
 }
 
-/// Build a Snapshot, write the clean PNG to /tmp, and return the snapshot.
-pub fn build_and_write(
+#[derive(Debug, thiserror::Error)]
+pub enum BuildError {
+    #[error("annotate: {0}")]
+    Annotate(#[from] AnnotateError),
+}
+
+/// Assemble a `BuiltSnapshot` from the captured frame + incoming annotations.
+/// Pure function — no filesystem writes. The embedded `images.{clean,annotated}`
+/// paths are computed as `{base_dir}/{id}/clean.png` and `…/annotated.png`,
+/// matching the layout that `persist::write` will materialise.
+pub fn build(
     frame: &CapturedFrame,
     mode: &str,
     annotations: Vec<IncomingAnnotation>,
     os_platform: &str,
     os_version: &str,
-) -> Result<Snapshot, BuildError> {
+    base_dir: &Path,
+) -> Result<BuiltSnapshot, BuildError> {
     let id = new_id();
-    let clean_path = PathBuf::from(format!("/tmp/glitch-spot-{}.png", id));
-    std::fs::write(&clean_path, &frame.png)?;
+    let dir = base_dir.join(&id);
+    let clean_path = dir.join("clean.png");
+    let annotated_path = dir.join("annotated.png");
 
     let scale = frame.scale_factor;
     let annotations: Vec<Annotation> = annotations
@@ -70,9 +71,7 @@ pub fn build_and_write(
         })
         .collect();
 
-    let annotated_path = PathBuf::from(format!("/tmp/glitch-spot-{}-annotated.png", id));
     let annotated_bytes = render_annotated_png(&frame.png, &annotations, frame.scale_factor)?;
-    std::fs::write(&annotated_path, &annotated_bytes)?;
 
     let snapshot = Snapshot {
         id,
@@ -96,5 +95,9 @@ pub fn build_and_write(
             annotated: Some(annotated_path.to_string_lossy().into_owned()),
         },
     };
-    Ok(snapshot)
+    Ok(BuiltSnapshot {
+        snapshot,
+        clean_bytes: frame.png.clone(),
+        annotated_bytes,
+    })
 }
