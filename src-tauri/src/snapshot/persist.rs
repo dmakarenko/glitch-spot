@@ -34,7 +34,7 @@ pub fn write(base: &Path, built: &BuiltSnapshot) -> io::Result<()> {
         std::fs::write(dir.join("clean.png"), &built.clean_bytes)?;
         std::fs::write(dir.join("annotated.png"), &built.annotated_bytes)?;
         let json = serde_json::to_vec_pretty(&built.snapshot)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         std::fs::write(dir.join("snapshot.json"), json)?;
         Ok(())
     };
