@@ -159,6 +159,17 @@ pub fn run() {
         mcp::server::serve(store_for_mcp).await;
     });
 
+    // Sweep snapshots older than 24h. Synchronous: a directory scan over a
+    // handful of small dirs is sub-millisecond. Failures never block startup.
+    match snapshot::persist::snapshots_dir() {
+        Ok(base) => {
+            if let Err(e) = snapshot::persist::cleanup(&base, snapshot::persist::MAX_AGE) {
+                eprintln!("[glitch-spot] cleanup failed: {e}");
+            }
+        }
+        Err(e) => eprintln!("[glitch-spot] could not resolve snapshots dir: {e}"),
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
