@@ -57,6 +57,7 @@ pub struct Images {
 
 pub mod annotate;
 pub mod build;
+pub mod persist;
 
 pub fn new_id() -> String {
     let uuid = uuid::Uuid::new_v4().simple().to_string();
