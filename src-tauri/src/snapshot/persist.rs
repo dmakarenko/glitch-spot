@@ -102,4 +102,25 @@ mod tests {
         assert_eq!(parsed.annotations.len(), 1);
         assert_eq!(parsed.annotations[0].note, "fix this");
     }
+
+    #[test]
+    fn write_rolls_back_on_partial_failure() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let built = fake_built("snap_rollback", temp.path());
+        let snap_dir = temp.path().join("snap_rollback");
+
+        // Pre-create `annotated.png` as a directory so `fs::write` to that
+        // path will fail.
+        std::fs::create_dir_all(snap_dir.join("annotated.png")).unwrap();
+
+        let err = write(temp.path(), &built).expect_err("write must fail");
+        // We don't assert on the exact error kind (platform-dependent), just
+        // that an error came back and the snapshot dir is gone afterwards.
+        let _ = err;
+        assert!(
+            !snap_dir.exists(),
+            "{} must be removed on partial-write failure",
+            snap_dir.display()
+        );
+    }
 }
