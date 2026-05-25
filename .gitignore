@@ -2,3 +2,7 @@
 node_modules/
 *.log
 dist/
+
+# Per-user agent scratch space (worktrees, session files, etc.)
+.claude/
+.superpowers/
