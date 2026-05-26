@@ -217,7 +217,21 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
     tauri::async_runtime::spawn(async move {
         let state = app_handle.state::<crate::AppState>();
         let mut rx = state.tunnel.subscribe();
+        let mut last_state: crate::share::tunnel::TunnelState = rx.borrow().clone();
         while rx.changed().await.is_ok() {
+            let new_state = rx.borrow().clone();
+            // Fire notification on transition INTO Error from any non-Error state.
+            if let crate::share::tunnel::TunnelState::Error { reason } = &new_state {
+                if !matches!(last_state, crate::share::tunnel::TunnelState::Error { .. }) {
+                    use tauri_plugin_notification::NotificationExt;
+                    let _ = app_handle.notification()
+                        .builder()
+                        .title("Glitch Spot — tunnel error")
+                        .body(reason.as_str())
+                        .show();
+                }
+            }
+            last_state = new_state;
             if let Ok(menu) = build_menu(&app_handle) {
                 let _ = tray_for_watch.set_menu(Some(menu));
             }
