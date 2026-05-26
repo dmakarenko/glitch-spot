@@ -33,7 +33,16 @@ impl Settings {
     pub fn load_from(dir: &Path) -> io::Result<Self> {
         let path = dir.join(CONFIG_FILE);
         let parsed: ConfigFile = match std::fs::read_to_string(&path) {
-            Ok(text) => toml::from_str(&text).unwrap_or_default(),
+            Ok(text) => match toml::from_str::<ConfigFile>(&text) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    eprintln!(
+                        "[glitch-spot settings] failed to parse {}: {e}; using defaults",
+                        path.display()
+                    );
+                    ConfigFile::default()
+                }
+            },
             Err(e) if e.kind() == io::ErrorKind::NotFound => ConfigFile::default(),
             Err(e) => return Err(e),
         };
@@ -41,7 +50,7 @@ impl Settings {
             .tunnel
             .provider
             .as_deref()
-            .and_then(ProviderKind::from_str)
+            .and_then(ProviderKind::from_name)
             .unwrap_or_default();
         Ok(Settings { provider: RwLock::new(provider) })
     }

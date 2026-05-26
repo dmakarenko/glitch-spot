@@ -13,7 +13,7 @@ impl Default for ProviderKind {
 }
 
 impl ProviderKind {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn from_name(s: &str) -> Option<Self> {
         match s {
             "cloudflared" => Some(ProviderKind::Cloudflared),
             "ngrok"       => Some(ProviderKind::Ngrok),
