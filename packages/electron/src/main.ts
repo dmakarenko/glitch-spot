@@ -1,6 +1,7 @@
 // ABOUTME: Main-process entry point for @glitch-spot/electron.
 // ABOUTME: GlitchSpot.init() creates the overlay window and wires IPC + hotkey.
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import {
   BrowserWindow,
   globalShortcut,
@@ -16,6 +17,11 @@ export class GlitchSpot {
   private config: Required<GlitchSpotConfig>
   private app: App
   private active = false
+
+  private snapshotHandler!: (event: Electron.IpcMainEvent, payload: unknown) => void
+  private cancelHandler!: () => void
+  private triggerHandler!: () => void
+  private syncBoundsHandler!: () => void
 
   private constructor(app: App, mainWindow: BrowserWindow, config: Required<GlitchSpotConfig>) {
     this.app = app
@@ -43,9 +49,9 @@ export class GlitchSpot {
   }
 
   private setupIpc(): void {
-    ipcMain.on('glitch-spot:trigger', () => this.trigger())
+    this.triggerHandler = () => { void this.trigger() }
 
-    ipcMain.on('glitch-spot:snapshot', async (_event, payload: {
+    this.snapshotHandler = async (_event: Electron.IpcMainEvent, payload: {
       mode: string
       annotations: AnnotationPayload[]
       cleanBase64: string
@@ -58,7 +64,7 @@ export class GlitchSpot {
       const display = screen.getDisplayMatching(this.mainWindow.getBounds())
 
       const snapshot: GlitchSnapshot = {
-        id: `snap_${Date.now().toString(16).padStart(12, '0')}`,
+        id: `snap_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
         created_at: new Date().toISOString(),
         mode: 'frozen',
         annotations: payload.annotations.map((a) => ({
@@ -94,36 +100,51 @@ export class GlitchSpot {
       } catch (err) {
         console.error('[glitch-spot] onSnapshot error:', err)
       }
-    })
+    }
 
-    ipcMain.on('glitch-spot:cancel', () => {
+    this.cancelHandler = () => {
       this.overlay.hide()
       this.active = false
-    })
+    }
+
+    ipcMain.on('glitch-spot:trigger', this.triggerHandler)
+    ipcMain.on('glitch-spot:snapshot', this.snapshotHandler)
+    ipcMain.on('glitch-spot:cancel', this.cancelHandler)
   }
 
   private trackMainWindow(): void {
-    const syncBounds = () => {
+    this.syncBoundsHandler = () => {
       if (this.active || this.overlay.isDestroyed()) return
       const b = this.mainWindow.getContentBounds()
       this.overlay.setBounds(b)
     }
-    this.mainWindow.on('resize', syncBounds)
-    this.mainWindow.on('move', syncBounds)
+    this.mainWindow.on('resize', this.syncBoundsHandler)
+    this.mainWindow.on('move', this.syncBoundsHandler)
   }
 
   async trigger(): Promise<void> {
     if (this.active) return
     this.active = true
 
-    const nativeImage = await this.mainWindow.webContents.capturePage()
-    const base64Png = nativeImage.toPNG().toString('base64')
+    try {
+      const nativeImage = await this.mainWindow.webContents.capturePage()
 
-    const bounds = this.mainWindow.getContentBounds()
-    this.overlay.setBounds(bounds)
-    this.overlay.show()
-    this.overlay.focus()
-    this.overlay.webContents.send('glitch-spot:frame', base64Png)
+      // Guard: stop() may have been called while we were capturing
+      if (this.overlay.isDestroyed()) {
+        this.active = false
+        return
+      }
+
+      const base64Png = nativeImage.toPNG().toString('base64')
+      const bounds = this.mainWindow.getContentBounds()
+      this.overlay.setBounds(bounds)
+      this.overlay.show()
+      this.overlay.focus()
+      this.overlay.webContents.send('glitch-spot:frame', base64Png)
+    } catch (err) {
+      console.error('[glitch-spot] trigger error:', err)
+      this.active = false
+    }
   }
 
   static init(app: App, mainWindow: BrowserWindow, config: GlitchSpotConfig): GlitchSpotInstance {
@@ -138,17 +159,19 @@ export class GlitchSpot {
     const instance = new GlitchSpot(app, mainWindow, fullConfig)
 
     if (fullConfig.hotkey) {
-      const ok = globalShortcut.register(fullConfig.hotkey, () => instance.trigger())
+      const ok = globalShortcut.register(fullConfig.hotkey, () => { void instance.trigger() })
       if (!ok) console.warn(`[glitch-spot] Could not register hotkey: ${fullConfig.hotkey}`)
     }
 
     return {
-      open() { instance.trigger() },
+      open() { void instance.trigger() },
       stop() {
         if (fullConfig.hotkey) globalShortcut.unregister(fullConfig.hotkey)
-        ipcMain.removeAllListeners('glitch-spot:snapshot')
-        ipcMain.removeAllListeners('glitch-spot:cancel')
-        ipcMain.removeAllListeners('glitch-spot:trigger')
+        ipcMain.off('glitch-spot:trigger', instance.triggerHandler)
+        ipcMain.off('glitch-spot:snapshot', instance.snapshotHandler)
+        ipcMain.off('glitch-spot:cancel', instance.cancelHandler)
+        instance.mainWindow.off('resize', instance.syncBoundsHandler)
+        instance.mainWindow.off('move', instance.syncBoundsHandler)
         if (!instance.overlay.isDestroyed()) instance.overlay.destroy()
       },
     }
