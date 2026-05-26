@@ -46,47 +46,70 @@ export function Overlay() {
   }
 
   useEffect(() => {
+    // The Rust side calls __glitchSpotPresent via WebviewWindow::eval before
+    // showing the window so the mode/state is reset synchronously before first
+    // paint. In the Electron path this is not called — the bridge handles reset.
     ;(window as unknown as { __glitchSpotPresent?: (mode: Mode) => void }).__glitchSpotPresent = (
       newMode,
     ) => {
-      if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current)
-      currentUrlRef.current = null
-      setImageUrl(null)
-      setMode(newMode)
-      dispatch({ type: 'CLEAR' })
-      setShowDiscardModal(false)
-    }
+      if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);
+      currentUrlRef.current = null;
+      setImageUrl(null);
+      setMode(newMode);
+      dispatch({ type: "CLEAR" });
+      setShowDiscardModal(false);
+    };
 
-    let unlistenFrame: (() => void) | null = null
+    let unlistenFrame: (() => void) | null = null;
+    let cancelled = false;
 
-    bridge.onFrame((blobUrl) => {
-      setMode('frozen')
-      const img = new window.Image()
-      img.onload = () => {
-        if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current)
-        currentUrlRef.current = blobUrl
-        setImageUrl(blobUrl)
-      }
-      img.onerror = () => URL.revokeObjectURL(blobUrl)
-      img.src = blobUrl
-    }).then((unlisten) => {
-      unlistenFrame = unlisten
-    })
+    // Frames are only ever produced by the frozen path. Force frozen mode here
+    // so the backdrop renders the screenshot even if __glitchSpotPresent was
+    // not called (first show before useEffect installs it, or Electron path).
+    bridge
+      .onFrame((blobUrl) => {
+        setMode("frozen");
+        // Decode off-screen before swapping the visible background so the new
+        // image appears atomically rather than after a perceptible decode delay.
+        const img = new window.Image();
+        img.onload = () => {
+          if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);
+          currentUrlRef.current = blobUrl;
+          setImageUrl(blobUrl);
+        };
+        img.onerror = () => URL.revokeObjectURL(blobUrl);
+        img.src = blobUrl;
+      })
+      .then((unlisten) => {
+        if (cancelled) unlisten();
+        else unlistenFrame = unlisten;
+      })
+      .catch(console.error);
 
-    bridge.getFrame().then((blobUrl) => {
-      if (blobUrl) {
-        setMode('frozen')
-        currentUrlRef.current = blobUrl
-        setImageUrl(blobUrl)
-      }
-    })
+    bridge
+      .getFrame()
+      .then((blobUrl) => {
+        if (blobUrl) {
+          setMode("frozen");
+          const img = new window.Image();
+          img.onload = () => {
+            if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);
+            currentUrlRef.current = blobUrl;
+            setImageUrl(blobUrl);
+          };
+          img.onerror = () => URL.revokeObjectURL(blobUrl);
+          img.src = blobUrl;
+        }
+      })
+      .catch(console.error);
 
     return () => {
-      unlistenFrame?.()
-      if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current)
+      cancelled = true;
+      unlistenFrame?.();
+      if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);
       delete (window as unknown as { __glitchSpotPresent?: (mode: Mode) => void })
-        .__glitchSpotPresent
-    }
+        .__glitchSpotPresent;
+    };
   }, [])
 
   useEffect(() => {
