@@ -9,6 +9,9 @@ export default defineConfig([
     dts: true,
     external: ['electron', 'react', 'react-dom'],
     sourcemap: true,
+    outExtension({ format }) {
+      return { js: format === 'cjs' ? '.cjs' : '.mjs' }
+    },
   },
   {
     entry: { preload: 'src/preload.ts', 'overlay-preload': 'src/overlay-preload.ts' },
@@ -16,5 +19,8 @@ export default defineConfig([
     dts: false,
     external: ['electron'],
     sourcemap: true,
+    outExtension() {
+      return { js: '.cjs' }
+    },
   },
 ])
