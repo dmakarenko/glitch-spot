@@ -47,4 +47,26 @@ describe('overlay-preload', () => {
     bridge.cancel()
     expect(mockIpcRenderer.send).toHaveBeenCalledWith('glitch-spot:cancel')
   })
+
+  it('offFrame removes a handler so it no longer receives frames', async () => {
+    await import('../src/overlay-preload')
+    const bridge = mockContextBridge.exposeInMainWorld.mock.calls[0][1]
+    const cb = vi.fn()
+
+    bridge.onFrame(cb)
+
+    // Simulate a frame arriving — cb should fire
+    const frameListener = mockIpcRenderer.on.mock.calls.find(
+      (call: [string, unknown]) => call[0] === 'glitch-spot:frame'
+    )?.[1] as (event: unknown, data: string) => void
+    frameListener?.(null, 'base64data')
+    expect(cb).toHaveBeenCalledTimes(1)
+
+    // Remove handler
+    bridge.offFrame(cb)
+
+    // Simulate another frame — cb should NOT fire
+    frameListener?.(null, 'base64data2')
+    expect(cb).toHaveBeenCalledTimes(1) // still 1, not 2
+  })
 })

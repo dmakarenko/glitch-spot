@@ -7,6 +7,7 @@ type FrameHandler = (base64Png: string) => void
 const frameHandlers = new Set<FrameHandler>()
 
 ipcRenderer.on('glitch-spot:frame', (_event, base64Png: string) => {
+  if (typeof base64Png !== 'string' || base64Png.length === 0) return
   frameHandlers.forEach((cb) => cb(base64Png))
 })
 
