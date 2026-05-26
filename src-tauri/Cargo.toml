@@ -38,7 +38,7 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-os = "2"
 tauri-plugin-autostart = "2"
 axum = "0.7"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process"] }
 rand = "0.8"
 subtle = "2"
 base64 = "0.22"
@@ -47,6 +47,7 @@ toml = "0.8"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tauri-plugin-notification = "2"
+futures = "0.3"
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }
