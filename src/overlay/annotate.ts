@@ -35,14 +35,14 @@ export async function renderAnnotated(
     const w = rect.w * scaleFactor
     const h = rect.h * scaleFactor
 
-    ctx.strokeStyle = '#f97316'
+    ctx.strokeStyle = '#EE6633'
     ctx.lineWidth = 2 * scaleFactor
     ctx.strokeRect(x, y, w, h)
 
     const badgeR = 10 * scaleFactor
     const badgeCx = x + badgeR
     const badgeCy = y + badgeR
-    ctx.fillStyle = '#f97316'
+    ctx.fillStyle = '#EE6633'
     ctx.beginPath()
     ctx.arc(badgeCx, badgeCy, badgeR, 0, Math.PI * 2)
     ctx.fill()
