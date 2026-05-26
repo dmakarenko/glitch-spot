@@ -6,12 +6,13 @@ import { resolve } from 'path'
 
 export default defineConfig({
   plugins: [react()],
+  base: './',  // required for file:// loading via BrowserWindow.loadFile()
   build: {
     outDir: resolve(__dirname, 'packages/electron/overlay'),
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        index: resolve(__dirname, 'overlay.html'),
+        overlay: resolve(__dirname, 'overlay.html'),  // use 'overlay' key to match Tauri config
       },
     },
   },

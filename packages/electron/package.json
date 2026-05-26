@@ -23,6 +23,7 @@
     "build": "tsup",
     "build:overlay": "cd ../.. && npx vite build --config vite.config.electron-overlay.ts",
     "build:all": "npm run build:overlay && npm run build",
+    "prepublishOnly": "npm run build:all",
     "test": "vitest run",
     "test:watch": "vitest"
   },
