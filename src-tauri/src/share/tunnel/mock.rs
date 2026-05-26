@@ -11,6 +11,10 @@ use crate::share::tunnel::provider::{ProviderError, ProviderKind, TunnelProvider
 pub struct MockTunnelProvider {
     pub kind: ProviderKind,
     pub outcome: Arc<Mutex<MockOutcome>>,
+    /// Mirrors `TunnelProvider::child_persists_with_tunnel`. True for the
+    /// cloudflared/ngrok-style mocks (default); false for the Tailscale-style
+    /// marker-child mock built via `with_url_marker_child`.
+    pub child_persists: bool,
 }
 
 pub enum MockOutcome {
@@ -28,6 +32,7 @@ impl MockTunnelProvider {
         Self {
             kind: ProviderKind::Cloudflared,
             outcome: Arc::new(Mutex::new(MockOutcome::ImmediateUrl(url.into()))),
+            child_persists: true,
         }
     }
 
@@ -35,6 +40,7 @@ impl MockTunnelProvider {
         Self {
             kind: ProviderKind::Cloudflared,
             outcome: Arc::new(Mutex::new(MockOutcome::ImmediateError(reason.into()))),
+            child_persists: true,
         }
     }
 
@@ -45,6 +51,21 @@ impl MockTunnelProvider {
                 url: url.into(),
                 child_lives_ms,
             })),
+            child_persists: true,
+        }
+    }
+
+    /// Marker-child mock: child exits after `child_lives_ms`, but the provider
+    /// reports `child_persists_with_tunnel = false`, so TunnelManager must NOT
+    /// transition to Error on child exit. Models the Tailscale Funnel adapter.
+    pub fn with_url_marker_child(url: impl Into<String>, child_lives_ms: u64) -> Self {
+        Self {
+            kind: ProviderKind::Tailscale,
+            outcome: Arc::new(Mutex::new(MockOutcome::ShortLivedUrl {
+                url: url.into(),
+                child_lives_ms,
+            })),
+            child_persists: false,
         }
     }
 }
@@ -97,5 +118,9 @@ impl TunnelProvider for MockTunnelProvider {
 
     fn kind(&self) -> ProviderKind {
         self.kind
+    }
+
+    fn child_persists_with_tunnel(&self) -> bool {
+        self.child_persists
     }
 }

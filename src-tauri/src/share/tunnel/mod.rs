@@ -118,40 +118,55 @@ impl TunnelManager {
 
         self.set_state(TunnelState::Live { url: url.clone() }).await;
 
-        // Spawn monitor that owns the child for the lifetime of the Live state.
-        // If the child exits unexpectedly while we are still Live, transition to Error.
-        let self_clone = Arc::clone(&self);
-        let monitor = tokio::spawn(async move {
-            let _ = child.wait().await;
-            let inner = self_clone.inner.lock().await;
-            if matches!(inner.state, TunnelState::Live { .. }) {
-                drop(inner);
-                self_clone.set_state(TunnelState::Error {
-                    reason: "tunnel disconnected".to_string(),
-                }).await;
-            }
-        });
+        if provider.child_persists_with_tunnel() {
+            // Spawn monitor that owns the child for the lifetime of the Live state.
+            // If the child exits unexpectedly while we are still Live, transition to Error.
+            let self_clone = Arc::clone(&self);
+            let monitor = tokio::spawn(async move {
+                let _ = child.wait().await;
+                let inner = self_clone.inner.lock().await;
+                if matches!(inner.state, TunnelState::Live { .. }) {
+                    drop(inner);
+                    self_clone.set_state(TunnelState::Error {
+                        reason: "tunnel disconnected".to_string(),
+                    }).await;
+                }
+            });
 
-        {
-            let mut inner = self.inner.lock().await;
-            if let Some(prev) = inner.monitor.replace(monitor) {
-                prev.abort();
+            {
+                let mut inner = self.inner.lock().await;
+                if let Some(prev) = inner.monitor.replace(monitor) {
+                    prev.abort();
+                }
             }
+        } else {
+            // Child is a marker that has already exited or is about to. No
+            // disconnect-detection path for this provider — the tunnel persists
+            // in its own daemon (e.g. tailscaled). Implication: Tailscale Funnel
+            // shares stay live across app quits because the manager has no
+            // handle to revoke them. Accepted v1.0 trade-off, documented in the
+            // seed §2.4.
+            drop(child);
         }
 
         Ok(url)
     }
 
     pub async fn shutdown(&self) {
+        // Set state to Idle under the SAME lock as the monitor take, so any
+        // monitor task waiting on the lock sees Idle (not Live) and skips the
+        // spurious "tunnel disconnected" transition.
         let monitor_opt = {
             let mut inner = self.inner.lock().await;
-            inner.monitor.take()
+            let monitor = inner.monitor.take();
+            inner.state = TunnelState::Idle;
+            let _ = self.tx.send_replace(TunnelState::Idle);
+            monitor
         };
         if let Some(monitor) = monitor_opt {
             monitor.abort();
             let _ = monitor.await;
         }
-        self.set_state(TunnelState::Idle).await;
     }
 
     async fn set_state(&self, next: TunnelState) {
@@ -257,6 +272,7 @@ mod tests {
         let provider = Arc::new(MockTunnelProvider {
             kind: crate::share::tunnel::provider::ProviderKind::Cloudflared,
             outcome,
+            child_persists: true,
         });
         let result = mgr.clone().start_tunnel_with_deadline(provider, 7821, std::time::Duration::from_millis(50)).await;
         assert!(result.is_err());
@@ -282,5 +298,30 @@ mod tests {
         if !matches!(final_state, TunnelState::Error { .. }) {
             panic!("expected Error state after child exit, got {:?}", final_state);
         }
+    }
+
+    #[tokio::test]
+    async fn marker_child_exit_stays_live() {
+        // Tailscale-style: child is a marker that exits immediately, but the
+        // tunnel itself persists in a separate daemon. Manager must NOT
+        // transition to Error on child exit.
+        let mgr = Arc::new(TunnelManager::new());
+        let provider = Arc::new(MockTunnelProvider::with_url_marker_child(
+            "https://ts.example.ts.net",
+            100,
+        ));
+        mgr.clone().start_tunnel(provider, 7821).await.unwrap();
+        assert!(matches!(mgr.current_state(), TunnelState::Live { .. }));
+
+        // Wait beyond when the mock child would have exited.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // State must STILL be Live — marker-child exit must not flip to Error.
+        let final_state = mgr.current_state();
+        assert!(
+            matches!(final_state, TunnelState::Live { .. }),
+            "marker child exit should not transition to Error, got {:?}",
+            final_state,
+        );
     }
 }

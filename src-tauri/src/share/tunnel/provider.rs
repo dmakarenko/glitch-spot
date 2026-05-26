@@ -55,4 +55,12 @@ pub trait TunnelProvider: Send + Sync {
     /// under a deadline and for killing the child on shutdown.
     async fn spawn(&self, local_port: u16) -> Result<(Child, UrlFuture), ProviderError>;
     fn kind(&self) -> ProviderKind;
+
+    /// Whether early exit of the spawned child indicates a real tunnel disconnect.
+    /// True for providers where the child IS the tunnel process (cloudflared, ngrok).
+    /// False for providers where the child is a control-plane invocation that hands
+    /// off to a separately-running daemon (tailscale funnel --bg).
+    fn child_persists_with_tunnel(&self) -> bool {
+        true
+    }
 }

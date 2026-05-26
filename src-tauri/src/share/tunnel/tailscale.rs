@@ -104,6 +104,12 @@ impl TunnelProvider for Tailscale {
     }
 
     fn kind(&self) -> ProviderKind { ProviderKind::Tailscale }
+
+    /// `tailscale funnel --bg` is a control-plane invocation that exits
+    /// immediately after handing off to the tailscaled daemon. The child
+    /// exit is not a disconnect signal — the tunnel itself persists in the
+    /// daemon.
+    fn child_persists_with_tunnel(&self) -> bool { false }
 }
 
 #[cfg(test)]
