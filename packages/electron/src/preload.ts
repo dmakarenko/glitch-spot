@@ -11,3 +11,9 @@ export function glitchSpotPreload(): void {
 }
 
 export const preloadPath = __filename
+
+// Self-execute when loaded directly as an Electron preload script.
+// process.type is 'renderer' in any preload/renderer context.
+if (process.type === 'renderer') {
+  glitchSpotPreload()
+}

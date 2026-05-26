@@ -26,7 +26,8 @@ export function GlitchSpotButton({ position = 'bottom-right' }: Props) {
 
   return (
     <button
-      onClick={() => (window as unknown as { glitchSpot: { open(): void } }).glitchSpot.open()}
+      type="button"
+      onClick={() => (window as unknown as { glitchSpot?: { open(): void } }).glitchSpot?.open()}
       style={{
         position: 'fixed',
         ...positionStyles[position],
