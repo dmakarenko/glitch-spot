@@ -28,6 +28,9 @@ pub struct AppState {
     pub latest_frame: Mutex<Option<capture::CapturedFrame>>,
     pub snapshot_store: Arc<mcp::store::SnapshotStore>,
     pub latest_snapshot_at: Mutex<Option<chrono::DateTime<chrono::Utc>>>,
+    pub tunnel: Arc<share::tunnel::TunnelManager>,
+    pub settings: Arc<settings::Settings>,
+    pub config_dir: std::path::PathBuf,
 }
 
 #[tauri::command]
@@ -115,6 +118,84 @@ async fn save_snapshot(
     Ok(snap)
 }
 
+/// Shares the latest snapshot: starts the tunnel, generates a token, writes it to disk,
+/// copies the URL to the clipboard, and fires a notification. Called by both the Tauri
+/// command and the tray menu handler.
+pub(crate) async fn do_share_latest(
+    app: &tauri::AppHandle,
+    state: &AppState,
+) -> Result<String, String> {
+    let snap = state
+        .snapshot_store
+        .get_latest()
+        .ok_or_else(|| "no snapshot to share".to_string())?;
+    let snap_id = snap.id.clone();
+
+    let provider: Arc<dyn share::tunnel::provider::TunnelProvider> =
+        match state.settings.current_provider() {
+            settings::ProviderKind::Cloudflared => Arc::new(share::tunnel::cloudflared::Cloudflared),
+            settings::ProviderKind::Ngrok       => Arc::new(share::tunnel::ngrok::Ngrok),
+            settings::ProviderKind::Tailscale   => Arc::new(share::tunnel::tailscale::Tailscale),
+        };
+
+    let tunnel_url = state.tunnel.start_tunnel(provider, 7821).await
+        .map_err(|e| e.to_string())?;
+
+    let token = share::token::generate();
+    let snap_dir = snapshot::persist::snapshots_dir().map_err(|e| e.to_string())?.join(&snap_id);
+    share::token::write_for(&snap_dir, &token).map_err(|e| e.to_string())?;
+
+    let share_url = format!("{tunnel_url}/share/{snap_id}/{token}/");
+    app.clipboard().write_text(share_url.clone()).map_err(|e| e.to_string())?;
+
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app.notification()
+        .builder()
+        .title("Glitch Spot")
+        .body("Share URL copied to clipboard")
+        .show();
+
+    Ok(share_url)
+}
+
+/// Sets the tunnel provider: shuts down any running tunnel and persists the new choice.
+/// Called by both the Tauri command and the tray menu handler.
+pub(crate) async fn do_set_tunnel_provider(
+    state: &AppState,
+    kind: String,
+) -> Result<(), String> {
+    let parsed = settings::ProviderKind::from_name(&kind)
+        .ok_or_else(|| format!("unknown provider: {kind}"))?;
+    state.tunnel.shutdown().await;
+    state.settings.save_provider(&state.config_dir, parsed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn share_latest(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    do_share_latest(&app, &state).await
+}
+
+#[tauri::command]
+fn current_tunnel_state(state: tauri::State<'_, AppState>) -> String {
+    match state.tunnel.current_state() {
+        share::tunnel::TunnelState::Idle => "idle".into(),
+        share::tunnel::TunnelState::Starting => "starting…".into(),
+        share::tunnel::TunnelState::Live { url } => url,
+        share::tunnel::TunnelState::Error { reason } => format!("error — {reason}"),
+    }
+}
+
+#[tauri::command]
+async fn set_tunnel_provider(
+    state: tauri::State<'_, AppState>,
+    kind: String,
+) -> Result<(), String> {
+    do_set_tunnel_provider(&state, kind).await
+}
+
 pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Result<()> {
     overlay::show_live(app)?;
     Ok(())
@@ -146,10 +227,16 @@ mod tests {
 
     #[test]
     fn app_state_latest_snapshot_at_starts_none() {
+        let temp = tempfile::TempDir::new().unwrap();
         let state = AppState {
             latest_frame: Mutex::new(None),
             snapshot_store: Arc::new(mcp::store::SnapshotStore::new()),
             latest_snapshot_at: Mutex::new(None),
+            tunnel: Arc::new(share::tunnel::TunnelManager::new()),
+            settings: Arc::new(
+                settings::Settings::load_from(temp.path()).unwrap(),
+            ),
+            config_dir: temp.path().to_path_buf(),
         };
         assert!(state.latest_snapshot_at.lock().unwrap().is_none());
     }
@@ -190,7 +277,28 @@ pub fn run() {
         Err(e) => eprintln!("[glitch-spot] could not resolve snapshots dir: {e}"),
     }
 
-    tauri::Builder::default()
+    let config_dir = std::path::PathBuf::from(
+        std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
+    )
+    .join(".glitch-spot");
+
+    let settings = match settings::Settings::load_from(&config_dir) {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            eprintln!("[glitch-spot] settings load failed: {e}; using defaults");
+            let temp = std::env::temp_dir().join("glitch-spot-fallback");
+            let _ = std::fs::create_dir_all(&temp);
+            Arc::new(
+                settings::Settings::load_from(&temp)
+                    .expect("default settings construction must succeed"),
+            )
+        }
+    };
+
+    let tunnel = Arc::new(share::tunnel::TunnelManager::new());
+
+    let tunnel_for_exit = tunnel.clone();
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -198,10 +306,14 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None::<Vec<&str>>,
         ))
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState {
             latest_frame: Mutex::new(None),
             snapshot_store,
             latest_snapshot_at: Mutex::new(None),
+            tunnel: tunnel.clone(),
+            settings: settings.clone(),
+            config_dir: config_dir.clone(),
         })
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -228,7 +340,19 @@ pub fn run() {
             get_latest_frame,
             save_snapshot,
             spike_capture::spike_capture,
+            share_latest,
+            current_tunnel_state,
+            set_tunnel_provider,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(move |_app, event| {
+        if let tauri::RunEvent::ExitRequested { .. } = &event {
+            let tunnel = tunnel_for_exit.clone();
+            tauri::async_runtime::block_on(async move {
+                tunnel.shutdown().await;
+            });
+        }
+    });
 }

@@ -9,6 +9,7 @@
     "core:default",
     "global-shortcut:default",
     "clipboard-manager:allow-write-text",
-    "os:default"
+    "os:default",
+    "notification:default"
   ]
 }

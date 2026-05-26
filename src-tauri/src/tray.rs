@@ -3,7 +3,7 @@
 
 use chrono::{DateTime, Utc};
 use tauri::{
-    menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
+    menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
@@ -62,6 +62,48 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .id("latest_snapshot")
         .build(app)?;
 
+    let has_snapshot = state.snapshot_store.get_latest().is_some();
+    let tunnel_state_label = match state.tunnel.current_state() {
+        crate::share::tunnel::TunnelState::Idle => "Tunnel: idle".to_string(),
+        crate::share::tunnel::TunnelState::Starting => "Tunnel: starting…".to_string(),
+        crate::share::tunnel::TunnelState::Live { url } => {
+            let host = url.trim_start_matches("https://").trim_start_matches("http://");
+            format!("Tunnel: {host}")
+        }
+        crate::share::tunnel::TunnelState::Error { reason } => format!("Tunnel: error — {reason}"),
+    };
+    let share_disabled = !has_snapshot
+        || matches!(state.tunnel.current_state(), crate::share::tunnel::TunnelState::Starting);
+
+    let share_latest_item = MenuItemBuilder::new("Share latest snapshot…")
+        .id("share_latest")
+        .enabled(!share_disabled)
+        .build(app)?;
+
+    let tunnel_status_item = MenuItemBuilder::new(&tunnel_state_label)
+        .id("tunnel_status")
+        .enabled(false)
+        .build(app)?;
+
+    let current = state.settings.current_provider();
+    let provider_cf = CheckMenuItemBuilder::new("cloudflared")
+        .id("provider:cloudflared")
+        .checked(matches!(current, crate::settings::ProviderKind::Cloudflared))
+        .build(app)?;
+    let provider_ng = CheckMenuItemBuilder::new("ngrok")
+        .id("provider:ngrok")
+        .checked(matches!(current, crate::settings::ProviderKind::Ngrok))
+        .build(app)?;
+    let provider_ts = CheckMenuItemBuilder::new("Tailscale Funnel")
+        .id("provider:tailscale")
+        .checked(matches!(current, crate::settings::ProviderKind::Tailscale))
+        .build(app)?;
+    let provider_submenu = SubmenuBuilder::new(app, "Tunnel provider")
+        .item(&provider_cf)
+        .item(&provider_ng)
+        .item(&provider_ts)
+        .build()?;
+
     let launch_at_login = CheckMenuItemBuilder::new("Launch at Login")
         .id("launch_at_login")
         .checked(autostart_on)
@@ -78,6 +120,9 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&mcp_status)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&latest_snapshot)
+        .item(&share_latest_item)
+        .item(&tunnel_status_item)
+        .item(&provider_submenu)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&launch_at_login)
         .item(&PredefinedMenuItem::separator(app)?)
@@ -90,7 +135,7 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
     let icon = Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
     let menu = build_menu(app)?;
 
-    TrayIconBuilder::new()
+    let tray = TrayIconBuilder::new()
         .icon(icon)
         .icon_as_template(true)
         .menu(&menu)
@@ -119,6 +164,25 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                         }
                     }
                 }
+                "share_latest" => {
+                    let app2 = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app2.state::<crate::AppState>();
+                        if let Err(e) = crate::do_share_latest(&app2, &state).await {
+                            eprintln!("tray: share_latest failed: {e}");
+                        }
+                    });
+                }
+                "provider:cloudflared" | "provider:ngrok" | "provider:tailscale" => {
+                    let kind = event.id.as_ref().split(':').nth(1).unwrap_or("cloudflared").to_string();
+                    let app2 = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app2.state::<crate::AppState>();
+                        if let Err(e) = crate::do_set_tunnel_provider(&state, kind).await {
+                            eprintln!("tray: set provider failed: {e}");
+                        }
+                    });
+                }
                 "launch_at_login" => {
                     let manager = app.autolaunch();
                     let is_on = manager.is_enabled().unwrap_or(false);
@@ -146,7 +210,21 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                 }
             }
         })
-        .build(app)
+        .build(app)?;
+
+    let app_handle = app.clone();
+    let tray_for_watch = tray.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app_handle.state::<crate::AppState>();
+        let mut rx = state.tunnel.subscribe();
+        while rx.changed().await.is_ok() {
+            if let Ok(menu) = build_menu(&app_handle) {
+                let _ = tray_for_watch.set_menu(Some(menu));
+            }
+        }
+    });
+
+    Ok(tray)
 }
 
 #[cfg(test)]
