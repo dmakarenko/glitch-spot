@@ -39,6 +39,13 @@ tauri-plugin-os = "2"
 tauri-plugin-autostart = "2"
 axum = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+rand = "0.8"
+subtle = "2"
+async-trait = "0.1"
+toml = "0.8"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tauri-plugin-notification = "2"
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }

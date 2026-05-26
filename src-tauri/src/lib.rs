@@ -7,6 +7,8 @@ mod overlay;
 pub mod snapshot;
 mod spike_capture;
 mod tray;
+pub mod settings;
+pub mod share;
 
 pub use capture::CapturedFrame;
 
