@@ -6,8 +6,8 @@ import type { AnnotationsAction, AnnotationsState } from "./types";
 import { MIN_RECT_DIMENSION } from "./state";
 import { RectangleNote } from "./RectangleNote";
 
-const RECT_BORDER = "2px solid #ff3b30";
-const RECT_FILL = "rgba(255, 59, 48, 0.08)";
+const RECT_BORDER = "1.5px solid rgba(238, 102, 51, 0.9)";
+const RECT_FILL = "rgba(238, 102, 51, 0.05)";
 
 let _nextId = 1;
 export function nextRectId(): string {
@@ -98,6 +98,7 @@ export function DrawingLayer({ state, dispatch }: Props) {
             background: RECT_FILL,
             boxSizing: "border-box",
             pointerEvents: "none",
+            boxShadow: "-2px 0 0 rgba(255, 0, 60, 0.4), 2px 0 0 rgba(0, 245, 255, 0.4)",
           }}
         >
           {r.w >= MIN_RECT_DIMENSION && r.h >= MIN_RECT_DIMENSION && (
