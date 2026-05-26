@@ -10,42 +10,52 @@ export function Toolbar({ rectCount, onSave }: Props) {
   if (rectCount === 0) return null;
   return (
     <div
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
+      className="glitch-frame"
       style={{
         position: "fixed",
         top: 12,
         left: "50%",
         transform: "translateX(-50%)",
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "8px 12px",
-        background: "rgba(20,20,20,0.85)",
-        color: "white",
-        font: "13px/1 system-ui",
-        borderRadius: 8,
-        boxShadow: "0 4px 18px rgba(0,0,0,0.35)",
-        pointerEvents: "auto",
+        borderRadius: 9,
         zIndex: 10,
       }}
     >
-      <span>{rectCount} rectangle{rectCount === 1 ? "" : "s"}</span>
-      <button
-        type="button"
-        onClick={onSave}
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
         style={{
-          padding: "6px 12px",
-          background: "#0a84ff",
-          color: "white",
-          border: "none",
-          borderRadius: 4,
-          fontWeight: 600,
-          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "8px 12px",
+          background: "rgba(18,18,18,0.94)",
+          color: "#e0e0e0",
+          font: "13px/1 system-ui",
+          borderRadius: 8,
+          border: "1px solid rgba(255,255,255,0.07)",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.6)",
+          backdropFilter: "blur(8px)",
+          WebkitBackdropFilter: "blur(8px)",
+          pointerEvents: "auto",
         }}
       >
-        Save (⌘↩)
-      </button>
+        <span>{rectCount} rectangle{rectCount === 1 ? "" : "s"}</span>
+        <button
+          type="button"
+          onClick={onSave}
+          style={{
+            padding: "6px 12px",
+            background: "#ee6633",
+            color: "white",
+            border: "none",
+            borderRadius: 4,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Save (⌘↩)
+        </button>
+      </div>
     </div>
   );
 }
