@@ -15,7 +15,7 @@ app.whenReady().then(async () => {
   await win.loadURL('data:text/html,<h1>Glitch Spot Smoke Test</h1><p>Press Ctrl+Shift+G</p>')
 
   // Require the built SDK (CJS)
-  const { GlitchSpot } = require('./dist/main.cjs')
+  const { GlitchSpot } = require('../dist/main.cjs')
 
   const gs = GlitchSpot.init(app, win, {
     hotkey: 'Ctrl+Shift+G',

@@ -44,8 +44,8 @@ describe('renderAnnotated', () => {
     const fakeUrl = 'blob:fake'
 
     const ImageMock = vi.fn().mockImplementationOnce(function (this: HTMLImageElement) {
-      this.naturalWidth = 800
-      this.naturalHeight = 600
+      Object.defineProperty(this, 'naturalWidth', { value: 800, configurable: true })
+      Object.defineProperty(this, 'naturalHeight', { value: 600, configurable: true })
       Object.defineProperty(this, 'src', {
         set(_url: string) {
           queueMicrotask(() => {

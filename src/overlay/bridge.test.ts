@@ -3,15 +3,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 beforeEach(() => {
-  // @ts-expect-error test setup
   delete window.__TAURI__
-  // @ts-expect-error test setup
   delete window.glitchSpotBridge
 })
 
 describe('createBridge', () => {
   it('returns TauriBridge when __TAURI__ is present', async () => {
-    // @ts-expect-error test setup
     window.__TAURI__ = {}
     const { createBridge } = await import('./bridge')
     const bridge = createBridge()
@@ -19,7 +16,6 @@ describe('createBridge', () => {
   })
 
   it('returns ElectronBridge when glitchSpotBridge is present', async () => {
-    // @ts-expect-error test setup
     window.glitchSpotBridge = {
       onFrame: vi.fn(),
       offFrame: vi.fn(),
