@@ -51,9 +51,13 @@ export class GlitchSpot {
   private setupIpc(): void {
     this.triggerHandler = () => { void this.trigger() }
 
-    this.snapshotHandler = async (_event: Electron.IpcMainEvent, rawPayload: unknown) => {
+    this.snapshotHandler = async (event: Electron.IpcMainEvent, rawPayload: unknown) => {
+      if (event.sender !== this.overlay.webContents) {
+        console.warn('[glitch-spot] Rejected snapshot IPC from unexpected sender')
+        return
+      }
+
       const payload = rawPayload as {
-        mode: string
         annotations: AnnotationPayload[]
         cleanBase64: string
         annotatedBase64: string
@@ -71,13 +75,18 @@ export class GlitchSpot {
         annotations: payload.annotations.map((a) => ({
           id: a.id,
           shape: 'rect',
-          coords: { x: a.x, y: a.y, w: a.w, h: a.h },
+          coords: {
+            x: a.x * display.scaleFactor,
+            y: a.y * display.scaleFactor,
+            w: a.w * display.scaleFactor,
+            h: a.h * display.scaleFactor,
+          },
           note: a.note,
         })),
         context: {
           screen: {
-            width: bounds.width,
-            height: bounds.height,
+            width: bounds.width * display.scaleFactor,
+            height: bounds.height * display.scaleFactor,
             scale_factor: display.scaleFactor,
           },
           os: {

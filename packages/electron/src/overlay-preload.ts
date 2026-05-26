@@ -19,12 +19,11 @@ const bridge: GlitchSpotNativeBridge = {
     frameHandlers.delete(cb)
   },
   saveSnapshot(
-    mode: string,
     annotations: AnnotationPayload[],
     cleanBase64: string,
     annotatedBase64: string,
   ): void {
-    ipcRenderer.send('glitch-spot:snapshot', { mode, annotations, cleanBase64, annotatedBase64 })
+    ipcRenderer.send('glitch-spot:snapshot', { annotations, cleanBase64, annotatedBase64 })
   },
   cancel(): void {
     ipcRenderer.send('glitch-spot:cancel')

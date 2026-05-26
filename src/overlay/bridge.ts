@@ -78,7 +78,8 @@ class ElectronBridge implements OverlayBridge {
       annotations,
       window.devicePixelRatio,
     )
-    window.glitchSpotBridge!.saveSnapshot(mode, annotations, this.cleanBase64, annotatedBase64)
+    // mode is always 'frozen' in v1 — not passed through IPC, set by main process
+    window.glitchSpotBridge!.saveSnapshot(annotations, this.cleanBase64, annotatedBase64)
   }
 
   cancel(): void {

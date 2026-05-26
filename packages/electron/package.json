@@ -16,6 +16,9 @@
       "import": "./dist/renderer.mjs",
       "require": "./dist/renderer.cjs",
       "types": "./dist/renderer.d.ts"
+    },
+    "./preload": {
+      "require": "./dist/preload.cjs"
     }
   },
   "files": ["dist", "overlay"],
