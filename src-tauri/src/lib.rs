@@ -153,6 +153,13 @@ mod tests {
         };
         assert!(state.latest_snapshot_at.lock().unwrap().is_none());
     }
+
+    #[test]
+    fn share_router_is_reachable_from_lib() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let _router = crate::share::router::build_share_router(temp.path().to_path_buf());
+        // Smoke test: just confirm construction doesn't panic.
+    }
 }
 
 pub fn run() {
@@ -162,6 +169,15 @@ pub fn run() {
     tauri::async_runtime::spawn(async move {
         mcp::server::serve(store_for_mcp).await;
     });
+
+    let share_base = snapshot::persist::snapshots_dir().ok();
+    if let Some(base) = share_base.clone() {
+        tauri::async_runtime::spawn(async move {
+            share::router::serve_share(base).await;
+        });
+    } else {
+        eprintln!("[glitch-spot] share server NOT started — could not resolve snapshots dir");
+    }
 
     // Sweep snapshots older than 24h. Synchronous: a directory scan over a
     // handful of small dirs is sub-millisecond. Failures never block startup.
