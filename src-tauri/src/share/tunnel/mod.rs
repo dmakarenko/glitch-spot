@@ -4,8 +4,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::process::Child;
 use tokio::sync::{watch, Mutex};
+use tokio::task::JoinHandle;
 
 use crate::share::tunnel::provider::TunnelProvider;
 
@@ -36,14 +36,14 @@ pub struct TunnelManager {
 
 struct Inner {
     state: TunnelState,
-    child: Option<Child>,
+    monitor: Option<JoinHandle<()>>,
 }
 
 impl TunnelManager {
     pub fn new() -> Self {
         let (tx, _rx) = watch::channel(TunnelState::Idle);
         TunnelManager {
-            inner: Mutex::new(Inner { state: TunnelState::Idle, child: None }),
+            inner: Mutex::new(Inner { state: TunnelState::Idle, monitor: None }),
             tx,
         }
     }
@@ -59,7 +59,7 @@ impl TunnelManager {
     /// Start the tunnel (if Idle/Error) and return its public URL.
     /// Re-uses the existing URL when already Live.
     pub async fn start_tunnel(
-        &self,
+        self: Arc<Self>,
         provider: Arc<dyn TunnelProvider>,
         local_port: u16,
     ) -> Result<String, ShareError> {
@@ -67,7 +67,7 @@ impl TunnelManager {
     }
 
     pub async fn start_tunnel_with_deadline(
-        &self,
+        self: Arc<Self>,
         provider: Arc<dyn TunnelProvider>,
         local_port: u16,
         url_deadline: Duration,
@@ -83,7 +83,7 @@ impl TunnelManager {
         self.set_state(TunnelState::Starting).await;
 
         let spawn_result = provider.spawn(local_port).await;
-        let (child, url_future) = match spawn_result {
+        let (mut child, url_future) = match spawn_result {
             Ok(pair) => pair,
             Err(e) => {
                 let reason = e.to_string();
@@ -92,16 +92,10 @@ impl TunnelManager {
             }
         };
 
-        // Stash the child immediately so a concurrent shutdown can kill it.
-        {
-            let mut inner = self.inner.lock().await;
-            inner.child = Some(child);
-        }
-
         let url = match tokio::time::timeout(url_deadline, url_future).await {
             Ok(Ok(u)) => u,
             Ok(Err(reason)) => {
-                self.kill_child().await;
+                drop(child); // kill_on_drop → SIGKILL
                 self.set_state(TunnelState::Error { reason: reason.clone() }).await;
                 return Err(ShareError::TunnelStartFailed(reason));
             }
@@ -116,33 +110,48 @@ impl TunnelManager {
                     provider.kind().as_str(),
                     pretty_deadline,
                 );
-                self.kill_child().await;
+                drop(child);
                 self.set_state(TunnelState::Error { reason: reason.clone() }).await;
                 return Err(ShareError::TunnelStartFailed(reason));
             }
         };
 
         self.set_state(TunnelState::Live { url: url.clone() }).await;
+
+        // Spawn monitor that owns the child for the lifetime of the Live state.
+        // If the child exits unexpectedly while we are still Live, transition to Error.
+        let self_clone = Arc::clone(&self);
+        let monitor = tokio::spawn(async move {
+            let _ = child.wait().await;
+            let inner = self_clone.inner.lock().await;
+            if matches!(inner.state, TunnelState::Live { .. }) {
+                drop(inner);
+                self_clone.set_state(TunnelState::Error {
+                    reason: "tunnel disconnected".to_string(),
+                }).await;
+            }
+        });
+
+        {
+            let mut inner = self.inner.lock().await;
+            if let Some(prev) = inner.monitor.replace(monitor) {
+                prev.abort();
+            }
+        }
+
         Ok(url)
     }
 
     pub async fn shutdown(&self) {
-        self.kill_child().await;
-        self.set_state(TunnelState::Idle).await;
-    }
-
-    async fn kill_child(&self) {
-        let child_opt = {
+        let monitor_opt = {
             let mut inner = self.inner.lock().await;
-            inner.child.take()
+            inner.monitor.take()
         };
-        if let Some(mut child) = child_opt {
-            // SIGKILL via tokio's start_kill (no graceful SIGTERM path on Unix from
-            // tokio::process::Child). Acceptable for our tunnel binaries — the
-            // trycloudflare/ngrok sessions expire server-side within seconds anyway.
-            let _ = child.start_kill();
-            let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+        if let Some(monitor) = monitor_opt {
+            monitor.abort();
+            let _ = monitor.await;
         }
+        self.set_state(TunnelState::Idle).await;
     }
 
     async fn set_state(&self, next: TunnelState) {
@@ -175,49 +184,49 @@ mod tests {
 
     #[tokio::test]
     async fn starts_idle() {
-        let mgr = TunnelManager::new();
+        let mgr = Arc::new(TunnelManager::new());
         assert!(matches!(mgr.current_state(), TunnelState::Idle));
     }
 
     #[tokio::test]
     async fn share_latest_transitions_to_live() {
-        let mgr = TunnelManager::new();
+        let mgr = Arc::new(TunnelManager::new());
         let provider = Arc::new(MockTunnelProvider::with_url("https://abc.trycloudflare.com"));
-        let url = mgr.start_tunnel(provider, 7821).await.unwrap();
+        let url = mgr.clone().start_tunnel(provider, 7821).await.unwrap();
         assert_eq!(url, "https://abc.trycloudflare.com");
         assert!(matches!(mgr.current_state(), TunnelState::Live { .. }));
     }
 
     #[tokio::test]
     async fn second_start_while_live_returns_same_url() {
-        let mgr = TunnelManager::new();
+        let mgr = Arc::new(TunnelManager::new());
         let provider = Arc::new(MockTunnelProvider::with_url("https://abc.trycloudflare.com"));
-        let url1 = mgr.start_tunnel(provider.clone(), 7821).await.unwrap();
-        let url2 = mgr.start_tunnel(provider, 7821).await.unwrap();
+        let url1 = mgr.clone().start_tunnel(provider.clone(), 7821).await.unwrap();
+        let url2 = mgr.clone().start_tunnel(provider, 7821).await.unwrap();
         assert_eq!(url1, url2);
     }
 
     #[tokio::test]
     async fn error_outcome_transitions_to_error() {
-        let mgr = TunnelManager::new();
+        let mgr = Arc::new(TunnelManager::new());
         let provider = Arc::new(MockTunnelProvider::with_error("authtoken missing"));
-        let result = mgr.start_tunnel(provider, 7821).await;
+        let result = mgr.clone().start_tunnel(provider, 7821).await;
         assert!(result.is_err());
         assert!(matches!(mgr.current_state(), TunnelState::Error { .. }));
     }
 
     #[tokio::test]
     async fn shutdown_returns_to_idle() {
-        let mgr = TunnelManager::new();
+        let mgr = Arc::new(TunnelManager::new());
         let provider = Arc::new(MockTunnelProvider::with_url("https://abc.trycloudflare.com"));
-        mgr.start_tunnel(provider, 7821).await.unwrap();
+        mgr.clone().start_tunnel(provider, 7821).await.unwrap();
         mgr.shutdown().await;
         assert!(matches!(mgr.current_state(), TunnelState::Idle));
     }
 
     #[tokio::test]
     async fn subscribe_receives_transitions() {
-        let mgr = TunnelManager::new();
+        let mgr = Arc::new(TunnelManager::new());
         let mut rx = mgr.subscribe();
         let provider = Arc::new(MockTunnelProvider::with_url("https://x.trycloudflare.com"));
 
@@ -232,14 +241,14 @@ mod tests {
             }
         });
 
-        mgr.start_tunnel(provider, 7821).await.unwrap();
+        mgr.clone().start_tunnel(provider, 7821).await.unwrap();
         let final_state = handle.await.unwrap();
         assert!(matches!(final_state, TunnelState::Live { .. }));
     }
 
     #[tokio::test]
     async fn url_future_timeout_yields_error_state() {
-        let mgr = TunnelManager::new();
+        let mgr = Arc::new(TunnelManager::new());
         let outcome = Arc::new(std::sync::Mutex::new(MockOutcome::DelayedUrl {
             url: "https://late.trycloudflare.com".into(),
             delay_ms: 5_000,
@@ -248,8 +257,29 @@ mod tests {
             kind: crate::share::tunnel::provider::ProviderKind::Cloudflared,
             outcome,
         });
-        let result = mgr.start_tunnel_with_deadline(provider, 7821, std::time::Duration::from_millis(50)).await;
+        let result = mgr.clone().start_tunnel_with_deadline(provider, 7821, std::time::Duration::from_millis(50)).await;
         assert!(result.is_err());
         assert!(matches!(mgr.current_state(), TunnelState::Error { .. }));
+    }
+
+    #[tokio::test]
+    async fn child_exit_transitions_to_error() {
+        let mgr = Arc::new(TunnelManager::new());
+        let provider = Arc::new(MockTunnelProvider::with_short_lived_url("https://x.trycloudflare.com", 100));
+        mgr.clone().start_tunnel(provider, 7821).await.unwrap();
+        assert!(matches!(mgr.current_state(), TunnelState::Live { .. }));
+
+        // Wait for the mock child (sleep 0.1s) to exit and the monitor to detect it.
+        // Poll up to 2s.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            if matches!(mgr.current_state(), TunnelState::Error { .. }) { break; }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        let final_state = mgr.current_state();
+        if !matches!(final_state, TunnelState::Error { .. }) {
+            panic!("expected Error state after child exit, got {:?}", final_state);
+        }
     }
 }

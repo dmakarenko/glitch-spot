@@ -17,6 +17,10 @@ pub enum MockOutcome {
     ImmediateUrl(String),
     ImmediateError(String),
     DelayedUrl { url: String, delay_ms: u64 },
+    /// Spawns a child that exits after `child_lives_ms` milliseconds.
+    /// The URL future resolves immediately so TunnelManager reaches Live;
+    /// then the child's exit triggers the disconnect-detection path.
+    ShortLivedUrl { url: String, child_lives_ms: u64 },
 }
 
 impl MockTunnelProvider {
@@ -33,24 +37,44 @@ impl MockTunnelProvider {
             outcome: Arc::new(Mutex::new(MockOutcome::ImmediateError(reason.into()))),
         }
     }
+
+    pub fn with_short_lived_url(url: impl Into<String>, child_lives_ms: u64) -> Self {
+        Self {
+            kind: ProviderKind::Cloudflared,
+            outcome: Arc::new(Mutex::new(MockOutcome::ShortLivedUrl {
+                url: url.into(),
+                child_lives_ms,
+            })),
+        }
+    }
 }
 
 #[async_trait]
 impl TunnelProvider for MockTunnelProvider {
     async fn spawn(&self, _local_port: u16) -> Result<(Child, UrlFuture), ProviderError> {
-        // Spawn a real but trivial child so kill() and wait() behave realistically.
-        let child = Command::new("sleep")
-            .arg("3600")
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| ProviderError::Spawn {
-                provider: "mock",
-                reason: e.to_string(),
-            })?;
-
         let outcome = self.outcome.lock().unwrap();
+
+        // Spawn a real but trivial child so kill() and wait() behave realistically.
+        let child = match &*outcome {
+            MockOutcome::ShortLivedUrl { child_lives_ms, .. } => {
+                let secs = format!("{:.3}", *child_lives_ms as f64 / 1000.0);
+                Command::new("sleep")
+                    .arg(secs)
+                    .kill_on_drop(true)
+                    .spawn()
+                    .map_err(|e| ProviderError::Spawn { provider: "mock", reason: e.to_string() })?
+            }
+            _ => {
+                Command::new("sleep")
+                    .arg("3600")
+                    .kill_on_drop(true)
+                    .spawn()
+                    .map_err(|e| ProviderError::Spawn { provider: "mock", reason: e.to_string() })?
+            }
+        };
+
         let url_future: UrlFuture = match &*outcome {
-            MockOutcome::ImmediateUrl(u) => {
+            MockOutcome::ImmediateUrl(u) | MockOutcome::ShortLivedUrl { url: u, .. } => {
                 let u = u.clone();
                 async move { Ok(u) }.boxed()
             }

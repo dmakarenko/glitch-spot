@@ -39,9 +39,9 @@ async fn share_flow_yields_html_view_with_note() {
     let snap_dir = write_real_snapshot(temp.path(), snap_id);
 
     // Mock the tunnel.
-    let mgr = TunnelManager::new();
+    let mgr = Arc::new(TunnelManager::new());
     let provider = Arc::new(MockTunnelProvider::with_url("https://e2e.trycloudflare.com"));
-    let tunnel_url = mgr.start_tunnel(provider, 7821).await.unwrap();
+    let tunnel_url = mgr.clone().start_tunnel(provider, 7821).await.unwrap();
     assert_eq!(tunnel_url, "https://e2e.trycloudflare.com");
 
     // Generate token.

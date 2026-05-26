@@ -138,7 +138,7 @@ pub(crate) async fn do_share_latest(
             settings::ProviderKind::Tailscale   => Arc::new(share::tunnel::tailscale::Tailscale),
         };
 
-    let tunnel_url = state.tunnel.start_tunnel(provider, 7821).await
+    let tunnel_url = Arc::clone(&state.tunnel).start_tunnel(provider, 7821).await
         .map_err(|e| e.to_string())?;
 
     let token = share::token::generate();
