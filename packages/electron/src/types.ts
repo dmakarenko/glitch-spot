@@ -47,3 +47,10 @@ export interface GlitchSpotInstance {
   open(): void
   stop(): void
 }
+
+export interface GlitchSpotNativeBridge {
+  onFrame(cb: (base64Png: string) => void): void
+  offFrame(cb: (base64Png: string) => void): void
+  saveSnapshot(mode: string, annotations: AnnotationPayload[], cleanBase64: string, annotatedBase64: string): void
+  cancel(): void
+}

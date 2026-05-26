@@ -2,7 +2,7 @@
 // ABOUTME: TauriBridge wraps @tauri-apps/api; ElectronBridge wraps window.glitchSpotBridge.
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
-import type { AnnotationPayload } from '../../packages/electron/src/types'
+import type { AnnotationPayload, GlitchSpotNativeBridge } from '../../packages/electron/src/types'
 
 export interface OverlayBridge {
   onFrame(cb: (blobUrl: string) => void): Promise<() => void>
@@ -37,17 +37,10 @@ class TauriBridge implements OverlayBridge {
   }
 }
 
-interface NativeBridge {
-  onFrame(cb: (base64Png: string) => void): void
-  offFrame(cb: (base64Png: string) => void): void
-  saveSnapshot(mode: string, annotations: AnnotationPayload[], cleanBase64: string, annotatedBase64: string): void
-  cancel(): void
-}
-
 declare global {
   interface Window {
     __TAURI__?: unknown
-    glitchSpotBridge?: NativeBridge
+    glitchSpotBridge?: GlitchSpotNativeBridge
   }
 }
 
@@ -76,7 +69,9 @@ class ElectronBridge implements OverlayBridge {
   }
 
   async saveSnapshot(mode: string, annotations: AnnotationPayload[]): Promise<void> {
-    if (!this.cleanBase64 || !this.cleanBlobUrl) return
+    if (!this.cleanBase64 || !this.cleanBlobUrl) {
+      throw new Error('[glitch-spot] saveSnapshot called before first frame')
+    }
     const { renderAnnotated } = await import('./annotate')
     const annotatedBase64 = await renderAnnotated(
       this.cleanBlobUrl,
