@@ -27,16 +27,33 @@ pub fn verify_ct(provided: &str, stored: &str) -> bool {
 }
 
 pub fn write_for(snapshot_dir: &Path, token: &str) -> io::Result<()> {
-    let path = snapshot_dir.join(TOKEN_FILE);
-    std::fs::write(&path, format!("{token}\n"))?;
+    use std::io::Write;
+    let final_path = snapshot_dir.join(TOKEN_FILE);
+    let temp_path = snapshot_dir.join(format!(".{TOKEN_FILE}.tmp"));
+
+    // Best-effort cleanup of a stale temp from a prior crashed write.
+    // We ignore NotFound; any other error will surface from the next open() anyway.
+    let _ = std::fs::remove_file(&temp_path);
+
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&path)?.permissions();
-        perms.set_mode(0o600);
-        std::fs::set_permissions(&path, perms)?;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temp_path)?;
+        file.write_all(token.as_bytes())?;
+        file.write_all(b"\n")?;
     }
-    Ok(())
+    #[cfg(not(unix))]
+    {
+        std::fs::write(&temp_path, format!("{token}\n"))?;
+    }
+
+    // Atomic rename — overwrites any existing share-token in one syscall,
+    // and the new file inherits the 0o600 mode set at create_new time.
+    std::fs::rename(&temp_path, &final_path)
 }
 
 pub fn read_for(snapshot_dir: &Path) -> io::Result<Option<String>> {
@@ -99,6 +116,7 @@ mod tests {
         write_for(dir, &t).unwrap();
         let read = read_for(dir).unwrap().expect("token file should exist");
         assert_eq!(read, t);
+        assert!(verify_ct(&read, &t), "round-tripped token must verify_ct against original");
     }
 
     #[test]
