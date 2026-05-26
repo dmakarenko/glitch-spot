@@ -106,10 +106,15 @@ impl TunnelManager {
                 return Err(ShareError::TunnelStartFailed(reason));
             }
             Err(_elapsed) => {
+                let pretty_deadline = if url_deadline < Duration::from_secs(1) {
+                    format!("{} ms", url_deadline.as_millis())
+                } else {
+                    format!("{} s", url_deadline.as_secs())
+                };
                 let reason = format!(
-                    "{} didn't publish a URL within {}s",
+                    "{} didn't publish a URL within {}",
                     provider.kind().as_str(),
-                    url_deadline.as_secs()
+                    pretty_deadline,
                 );
                 self.kill_child().await;
                 self.set_state(TunnelState::Error { reason: reason.clone() }).await;
@@ -132,7 +137,9 @@ impl TunnelManager {
             inner.child.take()
         };
         if let Some(mut child) = child_opt {
-            // SIGTERM via start_kill, then wait briefly.
+            // SIGKILL via tokio's start_kill (no graceful SIGTERM path on Unix from
+            // tokio::process::Child). Acceptable for our tunnel binaries — the
+            // trycloudflare/ngrok sessions expire server-side within seconds anyway.
             let _ = child.start_kill();
             let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
         }
