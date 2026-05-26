@@ -170,6 +170,7 @@ pub mod provider;
 pub mod cloudflared;
 pub mod ngrok;
 pub mod tailscale;
+pub mod log;
 
 // `mock` is used by both the inline unit tests in this module AND by the
 // integration test in `tests/share_e2e.rs`. Integration tests cannot see

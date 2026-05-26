@@ -46,7 +46,7 @@ impl TunnelProvider for Cloudflared {
             let mut reader = BufReader::new(stderr).lines();
             let mut tx_opt = Some(tx);
             while let Ok(Some(line)) = reader.next_line().await {
-                eprintln!("[cloudflared] {line}");
+                crate::share::tunnel::log::append("cloudflared", &line);
                 if let Some(url) = extract_trycloudflare_url(&line) {
                     if let Some(tx) = tx_opt.take() {
                         let _ = tx.send(Ok(url));

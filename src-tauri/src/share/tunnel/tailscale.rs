@@ -55,7 +55,7 @@ impl TunnelProvider for Tailscale {
         // `tailscale funnel --bg` returns immediately after enabling the funnel.
         // We treat this child as a no-op marker; the actual public surface is
         // managed by the tailscaled daemon already running on the system.
-        let child = Command::new("tailscale")
+        let mut child = Command::new("tailscale")
             .arg("funnel")
             .arg("--bg")
             .arg(local_port.to_string())
@@ -70,6 +70,26 @@ impl TunnelProvider for Tailscale {
                     ProviderError::Spawn { provider: "tailscale", reason: e.to_string() }
                 }
             })?;
+
+        // Tee stdout and stderr to the tunnel log file for post-mortem debugging.
+        if let Some(stdout) = child.stdout.take() {
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let mut reader = BufReader::new(stdout).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    crate::share::tunnel::log::append("tailscale", &line);
+                }
+            });
+        }
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let mut reader = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    crate::share::tunnel::log::append("tailscale", &line);
+                }
+            });
+        }
 
         let url_future: UrlFuture = async move {
             // Allow tailscaled a couple of seconds to register the funnel.

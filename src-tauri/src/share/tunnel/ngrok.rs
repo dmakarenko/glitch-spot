@@ -60,7 +60,7 @@ async fn poll_for_url(deadline: Duration) -> Result<String, String> {
 #[async_trait]
 impl TunnelProvider for Ngrok {
     async fn spawn(&self, local_port: u16) -> Result<(Child, UrlFuture), ProviderError> {
-        let child = Command::new("ngrok")
+        let mut child = Command::new("ngrok")
             .arg("http")
             .arg(local_port.to_string())
             .arg("--log=stdout")
@@ -76,6 +76,26 @@ impl TunnelProvider for Ngrok {
                     ProviderError::Spawn { provider: "ngrok", reason: e.to_string() }
                 }
             })?;
+
+        // Tee stdout (ngrok logs via --log=stdout) and stderr to the tunnel log file.
+        if let Some(stdout) = child.stdout.take() {
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let mut reader = BufReader::new(stdout).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    crate::share::tunnel::log::append("ngrok", &line);
+                }
+            });
+        }
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let mut reader = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    crate::share::tunnel::log::append("ngrok", &line);
+                }
+            });
+        }
 
         let url_future: UrlFuture = async move {
             // Deadline here is intentionally generous (8s); TunnelManager wraps
