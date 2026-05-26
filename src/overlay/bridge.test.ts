@@ -8,7 +8,14 @@ beforeEach(() => {
 })
 
 describe('createBridge', () => {
-  it('returns TauriBridge when __TAURI__ is present', async () => {
+  it('returns TauriBridge when neither __TAURI__ nor glitchSpotBridge is set (Tauri 2 default)', async () => {
+    // Tauri 2 does not set window.__TAURI__ unless withGlobalTauri is enabled
+    const { createBridge } = await import('./bridge')
+    const bridge = createBridge()
+    expect(bridge.constructor.name).toBe('TauriBridge')
+  })
+
+  it('returns TauriBridge when __TAURI__ is present (Tauri 1 / withGlobalTauri)', async () => {
     window.__TAURI__ = {}
     const { createBridge } = await import('./bridge')
     const bridge = createBridge()

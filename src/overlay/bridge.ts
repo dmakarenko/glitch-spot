@@ -88,6 +88,6 @@ class ElectronBridge implements OverlayBridge {
 }
 
 export function createBridge(): OverlayBridge {
-  if (window.__TAURI__) return new TauriBridge()
-  return new ElectronBridge()
+  if (window.glitchSpotBridge) return new ElectronBridge()
+  return new TauriBridge()
 }
