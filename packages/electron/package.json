@@ -21,6 +21,8 @@
   "files": ["dist", "overlay"],
   "scripts": {
     "build": "tsup",
+    "build:overlay": "cd ../.. && npx vite build --config vite.config.electron-overlay.ts",
+    "build:all": "npm run build:overlay && npm run build",
     "test": "vitest run",
     "test:watch": "vitest"
   },

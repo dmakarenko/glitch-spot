@@ -42,7 +42,7 @@ export class GlitchSpot {
       },
     })
 
-    this.overlay.loadFile(path.join(__dirname, '..', 'overlay', 'index.html'))
+    this.overlay.loadFile(path.join(__dirname, '..', 'overlay', 'overlay.html'))
 
     this.setupIpc()
     this.trackMainWindow()
@@ -51,12 +51,13 @@ export class GlitchSpot {
   private setupIpc(): void {
     this.triggerHandler = () => { void this.trigger() }
 
-    this.snapshotHandler = async (_event: Electron.IpcMainEvent, payload: {
-      mode: string
-      annotations: AnnotationPayload[]
-      cleanBase64: string
-      annotatedBase64: string
-    }) => {
+    this.snapshotHandler = async (_event: Electron.IpcMainEvent, rawPayload: unknown) => {
+      const payload = rawPayload as {
+        mode: string
+        annotations: AnnotationPayload[]
+        cleanBase64: string
+        annotatedBase64: string
+      }
       this.overlay.hide()
       this.active = false
 
