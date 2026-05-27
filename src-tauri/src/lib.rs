@@ -177,6 +177,20 @@ pub(crate) async fn do_set_tunnel_provider(
     state.settings.save_provider(&state.config_dir, parsed).map_err(|e| e.to_string())
 }
 
+/// Persists the tray icon appearance. The animation loop reads the same
+/// atomic flags every tick, so the change takes effect on the next ~100ms
+/// tick — no need to wake the task explicitly.
+pub(crate) fn do_set_tray_appearance(
+    state: &AppState,
+    animated: bool,
+    coloured: bool,
+) -> Result<(), String> {
+    state
+        .settings
+        .save_tray_appearance(&state.config_dir, animated, coloured)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn share_latest(
     app: tauri::AppHandle,
@@ -201,6 +215,15 @@ async fn set_tunnel_provider(
     kind: String,
 ) -> Result<(), String> {
     do_set_tunnel_provider(&state, kind).await
+}
+
+#[tauri::command]
+fn set_tray_appearance(
+    state: tauri::State<'_, AppState>,
+    animated: bool,
+    coloured: bool,
+) -> Result<(), String> {
+    do_set_tray_appearance(&state, animated, coloured)
 }
 
 pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Result<()> {
@@ -355,6 +378,7 @@ pub fn run() {
             share_latest,
             current_tunnel_state,
             set_tunnel_provider,
+            set_tray_appearance,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
