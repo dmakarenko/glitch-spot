@@ -138,20 +138,26 @@ pub(super) fn capture_window(
     let monitors = app
         .available_monitors()
         .map_err(|e| CaptureError::Platform(format!("monitors: {e}")))?;
-    let scale_factor = monitors
+
+    // Determine the window's owning display by comparing its logical-point
+    // origin against each SCDisplay's logical frame (origins/sizes in points,
+    // matching the units of SCWindow.frame). Then look up the matching Tauri
+    // monitor's scale_factor by same-index ordering (same convention used in
+    // window_picker/macos.rs and capture_active_monitor's TODO note).
+    let display_index = content
+        .displays()
         .iter()
-        .find(|m| {
-            let pos = m.position();
-            let size = m.size();
-            let mx_min = pos.x as f64;
-            let my_min = pos.y as f64;
-            let mx_max = mx_min + size.width as f64;
-            let my_max = my_min + size.height as f64;
-            frame.origin.x >= mx_min
-                && frame.origin.x < mx_max
-                && frame.origin.y >= my_min
-                && frame.origin.y < my_max
+        .position(|d| {
+            let f = d.frame();
+            frame.origin.x >= f.origin.x
+                && frame.origin.x < f.origin.x + f.size.width
+                && frame.origin.y >= f.origin.y
+                && frame.origin.y < f.origin.y + f.size.height
         })
+        .unwrap_or(0);
+
+    let scale_factor = monitors
+        .get(display_index)
         .map(|m| m.scale_factor() as f32)
         .unwrap_or(1.0);
 
