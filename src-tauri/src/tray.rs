@@ -132,7 +132,7 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
 
 pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon> {
     use tauri::image::Image;
-    let icon = Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
+    let icon = Image::from_bytes(include_bytes!("../icons/tray.png"))?;
     let menu = build_menu(app)?;
 
     let tray = TrayIconBuilder::new()
