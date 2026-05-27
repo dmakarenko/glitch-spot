@@ -204,6 +204,8 @@ export function DrawingLayer({ state, dispatch }: Props) {
                   background: "#ee6633",
                   color: "#ffffff",
                   font: "bold 10px sans-serif",
+                  lineHeight: 1,
+                  fontVariantNumeric: "tabular-nums",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
