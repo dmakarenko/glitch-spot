@@ -1,4 +1,4 @@
-// ABOUTME: Overlay window component. Supports live (transparent) and frozen (screenshot backdrop) modes.
+// ABOUTME: Overlay window component. Supports live (transparent), frozen (screenshot backdrop), and window modes.
 // ABOUTME: Uses the OverlayBridge abstraction to work under both Tauri and Electron.
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { createBridge } from './bridge'
@@ -7,8 +7,9 @@ import { DiscardModal } from './annotations/DiscardModal'
 import { initialState, reducer } from './annotations/state'
 import { Toolbar } from './Toolbar'
 import type { AnnotationPayload } from '../../packages/electron/src/types'
+import type { WindowModePayload } from '../picker/types'
 
-type Mode = 'live' | 'frozen'
+type Mode = 'live' | 'frozen' | 'window'
 
 const CHECKER_BG =
   "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'>" +
@@ -22,6 +23,7 @@ const bridge = createBridge()
 
 export function Overlay() {
   const [mode, setMode] = useState<Mode>('live')
+  const [windowPayload, setWindowPayload] = useState<WindowModePayload | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [annotations, dispatch] = useReducer(reducer, initialState)
   const [showDiscardModal, setShowDiscardModal] = useState(false)
@@ -49,8 +51,9 @@ export function Overlay() {
     // The Rust side calls __glitchSpotPresent via WebviewWindow::eval before
     // showing the window so the mode/state is reset synchronously before first
     // paint. In the Electron path this is not called — the bridge handles reset.
-    ;(window as unknown as { __glitchSpotPresent?: (mode: Mode) => void }).__glitchSpotPresent = (
+    ;(window as unknown as { __glitchSpotPresent?: (mode: Mode, payload?: WindowModePayload) => void }).__glitchSpotPresent = (
       newMode,
+      payload,
     ) => {
       if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);
       currentUrlRef.current = null;
@@ -58,6 +61,7 @@ export function Overlay() {
       setMode(newMode);
       dispatch({ type: "CLEAR" });
       setShowDiscardModal(false);
+      setWindowPayload(newMode === 'window' && payload ? payload : null);
     };
 
     let unlistenFrame: (() => void) | null = null;
@@ -107,7 +111,7 @@ export function Overlay() {
       cancelled = true;
       unlistenFrame?.();
       if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);
-      delete (window as unknown as { __glitchSpotPresent?: (mode: Mode) => void })
+      delete (window as unknown as { __glitchSpotPresent?: (mode: Mode, payload?: WindowModePayload) => void })
         .__glitchSpotPresent;
     };
   }, [])
@@ -137,6 +141,56 @@ export function Overlay() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [annotations.rects, mode])
+
+  if (mode === 'window' && windowPayload) {
+    const { window_rect_css } = windowPayload
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'transparent' }}>
+        {/* dim veil over everything */}
+        <div
+          style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.40)' }}
+          onClick={() => {
+            if (annotations.rects.length === 0) {
+              bridge.cancel()
+            } else {
+              setShowDiscardModal(true)
+            }
+          }}
+        />
+        {/* gray-white checker over the window rect */}
+        <div
+          style={{
+            position: 'absolute',
+            left: window_rect_css.x,
+            top: window_rect_css.y,
+            width: window_rect_css.w,
+            height: window_rect_css.h,
+            backgroundImage: CHECKER_BG,
+            backgroundRepeat: 'repeat',
+            opacity: 0.12,
+            pointerEvents: 'none',
+          }}
+        />
+        {/* drawing layer constrained to window rect */}
+        <DrawingLayer state={annotations} dispatch={dispatch} clipRect={window_rect_css} />
+        <Toolbar rectCount={annotations.rects.length} onSave={handleSave} />
+        {showDiscardModal && (
+          <DiscardModal
+            onDiscard={() => {
+              setShowDiscardModal(false)
+              dispatch({ type: 'CLEAR' })
+              bridge.cancel()
+            }}
+            onSave={() => {
+              setShowDiscardModal(false)
+              handleSave()
+            }}
+            onCancel={() => setShowDiscardModal(false)}
+          />
+        )}
+      </div>
+    )
+  }
 
   const backdrop =
     mode === 'frozen' && imageUrl ? `center / 100% 100% no-repeat url(${imageUrl})` : 'transparent'
