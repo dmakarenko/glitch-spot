@@ -29,7 +29,7 @@ export type HistoryEntry =
   | { kind: 'create'; id: string }
   | { kind: 'delete'; rect: Rect; index: number }
   | { kind: 'noteEdit'; id: string; previousNote: string }
-  | { kind: 'move'; id: string; previousX: number; previousY: number }
+  | { kind: 'move'; id: string; previous: { x: number; y: number } }
   | { kind: 'resize'; id: string; previous: { x: number; y: number; w: number; h: number } };
 
 export type AnnotationsAction =

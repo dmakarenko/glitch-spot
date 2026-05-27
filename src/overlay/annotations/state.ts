@@ -66,7 +66,7 @@ export function reducer(
       };
       const history: HistoryEntry[] = [
         ...state.history,
-        { kind: "move", id: action.id, previousX: rect.x, previousY: rect.y },
+        { kind: "move", id: action.id, previous: { x: rect.x, y: rect.y } },
       ];
       return { ...state, active, history };
     }
@@ -132,8 +132,8 @@ export function reducer(
           last &&
           last.kind === "move" &&
           last.id === id &&
-          last.previousX === rect.x &&
-          last.previousY === rect.y
+          last.previous.x === rect.x &&
+          last.previous.y === rect.y
         ) {
           // No-op move (mousedown without movement). Pop the history entry.
           const history = state.history.slice(0, -1);

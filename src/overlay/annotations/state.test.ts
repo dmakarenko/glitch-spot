@@ -237,7 +237,7 @@ describe("move gesture", () => {
       rectStart: { x: 100, y: 100 },
     });
     const last = s.history[s.history.length - 1];
-    expect(last).toEqual({ kind: "move", id: "r1", previousX: 100, previousY: 100 });
+    expect(last).toEqual({ kind: "move", id: "r1", previous: { x: 100, y: 100 } });
   });
 
   it("POINTER_TO during move translates the rect by the pointer delta", () => {
@@ -283,7 +283,7 @@ describe("move gesture", () => {
     expect(s.active).toBeNull();
     expect(s.rects[0]).toMatchObject({ x: 180, y: 170 });
     const last = s.history[s.history.length - 1];
-    expect(last).toEqual({ kind: "move", id: "r1", previousX: 100, previousY: 100 });
+    expect(last).toEqual({ kind: "move", id: "r1", previous: { x: 100, y: 100 } });
   });
 
   it("END_GESTURE after BEGIN_MOVE with no POINTER_TO pops the no-op history entry", () => {
