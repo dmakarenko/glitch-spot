@@ -119,6 +119,8 @@ export function reducer(
       }
       if (state.active.kind === "resize") {
         const { id, corner, anchor } = state.active;
+        const rect = state.rects.find((r) => r.id === id);
+        if (!rect) return state;
         const geom = clampResize(
           corner,
           anchor,
@@ -187,6 +189,7 @@ export function reducer(
           last.previous.w === rect.w &&
           last.previous.h === rect.h
         ) {
+          // No-op resize (rect ended at its starting geometry). Pop the history entry.
           const history = state.history.slice(0, -1);
           return { ...state, active: null, history };
         }

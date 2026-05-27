@@ -367,6 +367,42 @@ describe("resize gesture", () => {
     }
   });
 
+  it("BEGIN_RESIZE from NE corner anchors at SW", () => {
+    const start = drawn("r1", 100, 100, 200, 150);
+    const s = reducer(start, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      corner: "ne",
+      pointerX: 300,
+      pointerY: 100,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    if (s.active && s.active.kind === "resize") {
+      expect(s.active.anchor).toEqual({ x: 100, y: 250 });
+    } else {
+      throw new Error("expected active resize gesture");
+    }
+  });
+
+  it("BEGIN_RESIZE from SW corner anchors at NE", () => {
+    const start = drawn("r1", 100, 100, 200, 150);
+    const s = reducer(start, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      corner: "sw",
+      pointerX: 100,
+      pointerY: 250,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    if (s.active && s.active.kind === "resize") {
+      expect(s.active.anchor).toEqual({ x: 300, y: 100 });
+    } else {
+      throw new Error("expected active resize gesture");
+    }
+  });
+
   it("POINTER_TO during SE resize extends width/height with NW pinned", () => {
     let s = drawn("r1", 100, 100, 200, 150);
     s = reducer(s, {
