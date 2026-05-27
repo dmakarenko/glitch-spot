@@ -25,7 +25,7 @@ You have:
 
 After integration, the host app gains:
 
-1. A **global hotkey** (configurable, default `Ctrl+Shift+G`) that captures the host's main window and shows the annotation overlay.
+1. A **global hotkey** (configurable; omit to disable) that captures the host's main window and shows the annotation overlay.
 2. A **programmatic API**: `gs.open()` from main-process code, `glitchSpot.open()` from renderer code.
 3. An **optional `<GlitchSpotButton />`** React component — a 40px floating bug-report button that only renders when the SDK is initialised, so it disappears automatically in non-debug builds.
 4. A single **`onSnapshot(snapshot)` callback** that fires with a fully-built `GlitchSnapshot` (annotated PNG + clean PNG + annotations + app metadata). Your host app owns delivery (POST to your backend, write to disk, attach to a Linear issue — your call).
@@ -151,19 +151,20 @@ mainWindow = new BrowserWindow({
 
 (For CommonJS main processes, drop the `createRequire` dance and use `require.resolve('@glitch-spot/electron/preload')` directly.)
 
-**If your app already has its own preload script** — and most non-trivial apps do — import and call `glitchSpotPreload()` from inside it:
+**If your app already has its own preload script** — and most non-trivial apps do — `require` the SDK's preload subpath from inside it. The module self-executes on load, so you do not need to call `glitchSpotPreload()` manually:
 
-```typescript
-// your existing preload.ts
-import { contextBridge } from 'electron'
-import { glitchSpotPreload } from '@glitch-spot/electron'
+```javascript
+// your existing preload.cjs (or .js — Electron preload scripts are CommonJS)
+const { contextBridge } = require('electron')
 
 // Your existing contextBridge.exposeInMainWorld(...) calls
 contextBridge.exposeInMainWorld('myApp', { /* ... */ })
 
-// Add this line — exposes window.glitchSpot
-glitchSpotPreload()
+// Add this line — exposes window.glitchSpot automatically
+require('@glitch-spot/electron/preload')
 ```
+
+> **Don't call `glitchSpotPreload()` after `require`'ing the module** — the module already runs it for you. A second call would throw `An object has already been registered with the name 'glitchSpot'`.
 
 After that, `window.glitchSpot.open()` is callable from the renderer, and `<GlitchSpotButton />` will appear.
 
@@ -465,7 +466,7 @@ With the preload wired and `<GlitchSpotButton position="bottom-right" />` render
 | --------------- | ------------------------------------------------------------------------------------------ |
 | Default state   | A small orange circular button with a bug-report icon is pinned to the bottom-right corner. |
 | Click it        | Overlay appears immediately.                                                                |
-| Comment out the preload `glitchSpotPreload()` call and reload. | Button is gone (it renders nothing when `window.glitchSpot` is absent). |
+| Remove the `require('@glitch-spot/electron/preload')` line from your preload and reload. | Button is gone (it renders nothing when `window.glitchSpot` is absent). |
 
 ### 6.6 — Snapshot shape regression check
 
@@ -568,7 +569,7 @@ So you know what to expect when reviewing a PR that adds Glitch Spot:
 | `[glitch-spot] Could not register hotkey: <accelerator>`                                  | Another app owns that hotkey. Pick a different one in `config.hotkey`.                                                                                       |
 | `[glitch-spot] onSnapshot is required`                                                   | You called `GlitchSpot.init(...)` without an `onSnapshot` function. Add one.                                                                                 |
 | Overlay shows a blank window with no screenshot.                                          | `overlay.html` is loading but assets aren't. Verify `node_modules/@glitch-spot/electron/overlay/assets/` is present. Re-install if missing.                  |
-| `window.glitchSpot is undefined` in the renderer.                                         | Preload not wired. Re-check §3.3 — either point `webPreferences.preload` at `require.resolve('@glitch-spot/electron/preload')`, or call `glitchSpotPreload()` from your own preload. |
+| `window.glitchSpot is undefined` in the renderer.                                         | Preload not wired. Re-check §3.3 — either point `webPreferences.preload` at `require.resolve('@glitch-spot/electron/preload')`, or `require('@glitch-spot/electron/preload')` from your own preload. |
 | `<GlitchSpotButton />` never appears.                                                    | Same as above — the button hides itself when `window.glitchSpot` is absent. Wire the preload.                                                                |
 | `onSnapshot` never fires.                                                                | You closed the overlay without pressing `Cmd+Return`. Esc / clicking outside discards, save requires `Cmd+Return` (or `Ctrl+Enter` on non-mac).             |
 | Annotation rectangles in `annotated.png` are positioned wrong.                            | Coordinates are in **physical** pixels and `screen.width` / `screen.height` are too. If you draw onto a CSS-pixel canvas downstream, divide by `scale_factor`. |
@@ -583,7 +584,7 @@ So you know what to expect when reviewing a PR that adds Glitch Spot:
 ```typescript
 // 1. Remove the integration code from your main process.
 // 2. Remove <GlitchSpotButton /> and any glitchSpot.open() calls from renderer code.
-// 3. Remove glitchSpotPreload() from your preload (if present).
+// 3. Remove require('@glitch-spot/electron/preload') from your preload (if present).
 // 4. Uninstall the package:
 ```
 
