@@ -76,13 +76,16 @@ async fn save_snapshot(
     mode: String,
     annotations: Vec<IncomingAnnotation>,
 ) -> Result<snapshot::Snapshot, String> {
-    let frame = match mode.as_str() {
-        "frozen" => state
-            .latest_frame
-            .lock()
-            .ok()
-            .and_then(|g| g.clone())
-            .ok_or_else(|| "no cached frame for frozen mode".to_string())?,
+    let (frame, crop_origin) = match mode.as_str() {
+        "frozen" => {
+            let frame = state
+                .latest_frame
+                .lock()
+                .ok()
+                .and_then(|g| g.clone())
+                .ok_or_else(|| "no cached frame for frozen mode".to_string())?;
+            (frame, None)
+        }
         "live" => {
             // Hide the overlay BEFORE capturing so the saved screenshot doesn't
             // include our own annotation rectangles + checker pattern. A brief
@@ -90,7 +93,22 @@ async fn save_snapshot(
             // screen-capture sample fires.
             overlay::hide(&app).map_err(|e| e.to_string())?;
             std::thread::sleep(std::time::Duration::from_millis(120));
-            capture::capture_active_monitor(&app).map_err(|e| e.to_string())?
+            let frame = capture::capture_active_monitor(&app).map_err(|e| e.to_string())?;
+            (frame, None)
+        }
+        "window" => {
+            let session = match state.picker_state.current() {
+                picker_session::RunMode::Annotating { session } => session,
+                other => return Err(format!("save_snapshot('window') while in {:?}", other)),
+            };
+            overlay::hide(&app).map_err(|e| e.to_string())?;
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            let mut frame = capture::capture_window(&app, session.window_id)
+                .map_err(|e| e.to_string())?;
+            frame.display_index = session.window.display_index;
+            let crop_x = (session.window.bounds.x - session.display.x) as f32;
+            let crop_y = (session.window.bounds.y - session.display.y) as f32;
+            (frame, Some((crop_x, crop_y)))
         }
         other => return Err(format!("unknown mode: {other}")),
     };
@@ -106,11 +124,28 @@ async fn save_snapshot(
         os_platform,
         &os_version,
         &base,
-        None,
+        crop_origin,
     )
     .map_err(|e| e.to_string())?;
     snapshot::persist::write(&base, &built).map_err(|e| e.to_string())?;
-    let snap = built.snapshot;
+    let mut snap = built.snapshot;
+
+    // If we just saved a window-mode snapshot, attach the captured window metadata.
+    if mode == "window" {
+        if let picker_session::RunMode::Annotating { session } = state.picker_state.current() {
+            snap.context.window = Some(snapshot::WindowInfo {
+                app_name: session.window.app_name.clone(),
+                title: session.window.title.clone(),
+                bounds: snapshot::WindowBounds {
+                    x: session.window.bounds.x,
+                    y: session.window.bounds.y,
+                    w: session.window.bounds.w,
+                    h: session.window.bounds.h,
+                },
+                window_id: session.window_id,
+            });
+        }
+    }
 
     // Notify any waiting MCP caller.
     state.snapshot_store.publish(snap.clone());
@@ -125,6 +160,7 @@ async fn save_snapshot(
         .map_err(|e| format!("clipboard: {e}"))?;
 
     overlay::hide(&app).map_err(|e| e.to_string())?;
+    state.picker_state.reset_to_idle();
     Ok(snap)
 }
 
