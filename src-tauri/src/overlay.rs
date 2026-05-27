@@ -14,6 +14,8 @@ pub enum OverlayError {
     NoMonitor,
     #[error("tauri error: {0}")]
     Tauri(#[from] tauri::Error),
+    #[error("serde: {0}")]
+    Serde(#[from] serde_json::Error),
 }
 
 fn position_over_active_monitor(app: &tauri::AppHandle) -> Result<WebviewWindow, OverlayError> {
@@ -81,5 +83,55 @@ pub fn hide(app: &tauri::AppHandle) -> Result<(), OverlayError> {
         .get_webview_window(OVERLAY_LABEL)
         .ok_or(OverlayError::WindowMissing)?;
     window.hide()?;
+    Ok(())
+}
+
+/// Payload sent to the overlay React tree when transitioning into window mode.
+/// Coordinates are mixed-unit by design: backend keeps physical-px for capture,
+/// frontend renders in CSS-px.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WindowModePayload {
+    pub app_name: String,
+    pub title: String,
+    pub window_id: u32,
+    /// Window rect in CSS pixels relative to the overlay's top-left.
+    pub window_rect_css: CssRect,
+    /// Same window rect in physical pixels; used by the backend at save time.
+    pub window_rect_physical: WindowRectPhysical,
+    pub display_scale_factor: f32,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CssRect { pub x: f32, pub y: f32, pub w: f32, pub h: f32 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WindowRectPhysical { pub x: i32, pub y: i32, pub w: u32, pub h: u32 }
+
+pub fn show_window_mode(
+    app: &tauri::AppHandle,
+    display_index: usize,
+    payload: &WindowModePayload,
+) -> Result<(), OverlayError> {
+    let window: WebviewWindow = app
+        .get_webview_window(OVERLAY_LABEL)
+        .ok_or(OverlayError::WindowMissing)?;
+    let monitors = app.available_monitors()?;
+    let monitor = monitors.get(display_index).ok_or(OverlayError::NoMonitor)?;
+
+    // Cover the *full* physical display (not just work area) so a window that
+    // overlaps the menu bar can be annotated without cropping.
+    let pos = monitor.position();
+    let size = monitor.size();
+    window.set_position(PhysicalPosition::new(pos.x, pos.y))?;
+    window.set_size(PhysicalSize::new(size.width, size.height))?;
+
+    let json = serde_json::to_string(payload)?;
+    let js = format!(
+        "if (window.__glitchSpotPresent) window.__glitchSpotPresent('window', {});",
+        json
+    );
+    let _ = window.eval(&js);
+    window.show()?;
+    window.set_focus()?;
     Ok(())
 }

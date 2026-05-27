@@ -206,16 +206,133 @@ async fn set_tunnel_provider(
     do_set_tunnel_provider(&state, kind).await
 }
 
-pub(crate) async fn trigger_window_picker(_app: &tauri::AppHandle) -> anyhow::Result<()> {
-    Ok(())   // wired up in Task 13
+pub(crate) async fn trigger_window_picker(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    let state = app.state::<AppState>();
+
+    let (windows, displays) = window_picker::macos::enumerate(app)
+        .map_err(|e| anyhow::anyhow!("enumerate: {e}"))?;
+
+    let session = picker_session::PickerSession {
+        windows: windows.clone(),
+        displays: displays.clone(),
+    };
+    state
+        .picker_state
+        .try_enter_picking(session.clone())
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    // Show one picker window per active display, capped at 8.
+    const POOL_SIZE: usize = 8;
+    let count = displays.len().min(POOL_SIZE);
+    if displays.len() > POOL_SIZE {
+        eprintln!("[glitch-spot] {} displays detected, picker covers first {}", displays.len(), POOL_SIZE);
+    }
+    for i in 0..count {
+        let label = format!("picker-{i}");
+        let Some(win) = app.get_webview_window(&label) else {
+            eprintln!("[glitch-spot] picker window `{label}` not configured");
+            continue;
+        };
+        let d = &displays[i];
+        win.set_position(tauri::PhysicalPosition::new(d.x, d.y))?;
+        win.set_size(tauri::PhysicalSize::new(d.w, d.h))?;
+        let payload = serde_json::json!({
+            "windows": windows,
+            "displays": displays,
+            "my_display_index": i,
+        });
+        let js = format!(
+            "if (window.__glitchSpotPickerStart) window.__glitchSpotPickerStart({});",
+            payload
+        );
+        let _ = win.eval(&js);
+        win.show()?;
+        win.set_focus()?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn picker_select(app: tauri::AppHandle, window_id: u32) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let session = match state.picker_state.current() {
+        picker_session::RunMode::Picking { session } => session,
+        other => return Err(format!("picker_select called while in {:?}", other)),
+    };
+    let window = session
+        .windows
+        .iter()
+        .find(|w| w.window_id == window_id)
+        .cloned()
+        .ok_or_else(|| format!("window {window_id} not in session"))?;
+    let display = session
+        .displays
+        .iter()
+        .find(|d| d.display_index == window.display_index)
+        .copied()
+        .ok_or_else(|| format!("display {} not in session", window.display_index))?;
+
+    // Hide all picker windows.
+    for i in 0..8 {
+        let label = format!("picker-{i}");
+        if let Some(w) = app.get_webview_window(&label) { let _ = w.hide(); }
+    }
+
+    let scale = display.scale_factor;
+    let payload = overlay::WindowModePayload {
+        app_name: window.app_name.clone(),
+        title: window.title.clone(),
+        window_id: window.window_id,
+        window_rect_css: overlay::CssRect {
+            x: (window.bounds.x - display.x) as f32 / scale,
+            y: (window.bounds.y - display.y) as f32 / scale,
+            w: window.bounds.w as f32 / scale,
+            h: window.bounds.h as f32 / scale,
+        },
+        window_rect_physical: overlay::WindowRectPhysical {
+            x: window.bounds.x - display.x,
+            y: window.bounds.y - display.y,
+            w: window.bounds.w,
+            h: window.bounds.h,
+        },
+        display_scale_factor: scale,
+    };
+
+    state
+        .picker_state
+        .try_select_window(picker_session::AnnotatingSession {
+            window_id,
+            window: window.clone(),
+            display,
+        })?;
+
+    overlay::show_window_mode(&app, window.display_index, &payload).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn picker_cancel(app: tauri::AppHandle) -> Result<(), String> {
+    for i in 0..8 {
+        let label = format!("picker-{i}");
+        if let Some(w) = app.get_webview_window(&label) { let _ = w.hide(); }
+    }
+    let state = app.state::<AppState>();
+    state.picker_state.reset_to_idle();
+    Ok(())
 }
 
 pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.picker_state.try_enter_live().map_err(anyhow::Error::msg)?;
+    }
     overlay::show_live(app)?;
     Ok(())
 }
 
 pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.picker_state.try_enter_frozen().map_err(anyhow::Error::msg)?;
+    }
     // Clear any stale frame BEFORE capturing the new one. Without this, a fast
     // hotkey press right after switching monitors would let the overlay's
     // mount-time pull return the *previous* monitor's screenshot for a moment.
@@ -364,6 +481,8 @@ pub fn run() {
             share_latest,
             current_tunnel_state,
             set_tunnel_provider,
+            picker_select,
+            picker_cancel,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
