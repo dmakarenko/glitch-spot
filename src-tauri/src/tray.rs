@@ -24,10 +24,12 @@ const CYAN_RGB: (u8, u8, u8) = (0, 245, 255);
 // not a glitch flourish.
 const RED_RGB: (u8, u8, u8) = (255, 59, 48);
 
-// Black tint — same RGB as the bundled monochrome PNG. Used by the
-// "Black + Animated" mode where the icon breathes/glitches without colour
-// (alpha modulation only). For "Black + Static" we render the source as-is.
-const BLACK_RGB: (u8, u8, u8) = (0, 0, 0);
+// Mono tint base RGB — same as the bundled monochrome PNG. The Mono modes
+// render with macOS's template-image flag, so this RGB never reaches the
+// pixel: the system tints the alpha mask to the menu-bar foreground colour
+// (white on dark, black on light). The constant just feeds `tint_frame`
+// for the alpha modulation we still want during the pulse + bursts.
+const MONO_RGB: (u8, u8, u8) = (0, 0, 0);
 
 /// Maximum pixel shift applied to each scanline band during a glitch burst.
 pub(crate) const GLITCH_SHIFT_MAX: i8 = 3;
@@ -54,7 +56,7 @@ pub(crate) fn tint_frame(source_rgba: &[u8], rgb: (u8, u8, u8), alpha_factor: f3
 pub(crate) const PULSE_FRAME_COUNT: usize = 24;
 
 /// 24 frames forming a 2.4s cosine pulse (alpha 30% → 100% → 30%) at the
-/// given tint colour. Used for both cyan (coloured mode) and black tints.
+/// given tint colour. Used for both cyan (coloured mode) and mono tints.
 pub(crate) fn build_pulse_frames(source: &[u8], rgb: (u8, u8, u8)) -> Vec<Vec<u8>> {
     const BASE: f32 = 0.65;
     const AMP: f32 = 0.35;
@@ -70,9 +72,11 @@ pub(crate) fn build_pulse_frames(source: &[u8], rgb: (u8, u8, u8)) -> Vec<Vec<u8
 pub(crate) enum Tint {
     /// Cyan when healthy, red when unhealthy — the at-a-glance status colours.
     Coloured,
-    /// Always the source SVG colour (black). Health is not encoded in the
+    /// Rendered as a macOS template image — the system tints the alpha mask
+    /// to match the menu-bar foreground (white on dark, black on light), so
+    /// it blends in with system menu-bar icons. Health is not encoded in the
     /// icon when this is selected — it only shows in the MCP menu row.
-    Black,
+    Mono,
 }
 
 /// All pre-built frames for a single tint, computed once at startup.
@@ -89,14 +93,14 @@ pub(crate) struct TintAssets {
     pub burst_base_unhealthy: Vec<u8>,
     /// Single frame held while static mode + healthy.
     pub static_healthy: Vec<u8>,
-    /// Single frame held while static mode + unhealthy. For the Black tint
-    /// this is the same as `static_healthy` since Black ignores health.
+    /// Single frame held while static mode + unhealthy. For the Mono tint
+    /// this is the same as `static_healthy` since Mono ignores health.
     pub static_unhealthy: Vec<u8>,
 }
 
 pub(crate) struct AnimationFrames {
     pub coloured: TintAssets,
-    pub black: TintAssets,
+    pub mono: TintAssets,
     pub width: u32,
     pub height: u32,
 }
@@ -105,7 +109,7 @@ impl AnimationFrames {
     pub(crate) fn assets(&self, tint: Tint) -> &TintAssets {
         match tint {
             Tint::Coloured => &self.coloured,
-            Tint::Black => &self.black,
+            Tint::Mono => &self.mono,
         }
     }
 }
@@ -314,12 +318,12 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .id("tray:coloured-static")
         .checked(current_coloured && !current_animated)
         .build(app)?;
-    let tray_ba = CheckMenuItemBuilder::new("Black + Animated")
-        .id("tray:black-animated")
+    let tray_ba = CheckMenuItemBuilder::new("Mono + Animated")
+        .id("tray:mono-animated")
         .checked(!current_coloured && current_animated)
         .build(app)?;
-    let tray_bs = CheckMenuItemBuilder::new("Black + Static")
-        .id("tray:black-static")
+    let tray_bs = CheckMenuItemBuilder::new("Mono + Static")
+        .id("tray:mono-static")
         .checked(!current_coloured && !current_animated)
         .build(app)?;
     let tray_submenu = SubmenuBuilder::new(app, "Tray icon")
@@ -395,19 +399,21 @@ fn build_animation_frames() -> Option<AnimationFrames> {
         static_unhealthy: tint_frame(&source, RED_RGB, 0.85),
     };
 
-    // Black tint: the source PNG is already RGB=(0,0,0), so `tint_frame`
-    // with BLACK_RGB only modulates alpha. The static frames just use the
-    // raw source — Black is health-agnostic by design.
-    let black = TintAssets {
-        pulse: build_pulse_frames(&source, BLACK_RGB),
-        steady_unhealthy: tint_frame(&source, BLACK_RGB, 0.65),
-        burst_base_healthy: tint_frame(&source, BLACK_RGB, 0.80),
-        burst_base_unhealthy: tint_frame(&source, BLACK_RGB, 0.80),
+    // Mono tint: the source PNG is already RGB=(0,0,0), so `tint_frame` with
+    // MONO_RGB only modulates alpha. macOS treats these frames as template
+    // images (see set_icon_as_template wiring) and tints them to the menu
+    // bar's foreground colour, so the RGB doesn't actually reach the pixel.
+    // Static frames just use the raw source — Mono is health-agnostic.
+    let mono = TintAssets {
+        pulse: build_pulse_frames(&source, MONO_RGB),
+        steady_unhealthy: tint_frame(&source, MONO_RGB, 0.65),
+        burst_base_healthy: tint_frame(&source, MONO_RGB, 0.80),
+        burst_base_unhealthy: tint_frame(&source, MONO_RGB, 0.80),
         static_healthy: source.clone(),
         static_unhealthy: source.clone(),
     };
 
-    Some(AnimationFrames { coloured, black, width, height })
+    Some(AnimationFrames { coloured, mono, width, height })
 }
 
 pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon> {
@@ -435,7 +441,7 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
         let state = app.state::<crate::AppState>();
         state.settings.current_tray()
     };
-    let initial_tint = if initial_coloured { Tint::Coloured } else { Tint::Black };
+    let initial_tint = if initial_coloured { Tint::Coloured } else { Tint::Mono };
     let initial_icon: Image<'_> = match &frames {
         Some(f) => {
             let assets = f.assets(initial_tint);
@@ -447,6 +453,10 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
 
     let tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(initial_icon)
+        // Mono modes render as macOS template images so the system tints
+        // them to the menu bar foreground. Coloured modes ship full-RGBA
+        // frames and must NOT be templates, or the colour gets stripped.
+        .icon_as_template(!initial_coloured)
         .menu(&menu)
         .on_menu_event(|app, event| {
             let app = app.clone();
@@ -512,8 +522,8 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                 }
                 "tray:coloured-animated"
                 | "tray:coloured-static"
-                | "tray:black-animated"
-                | "tray:black-static" => {
+                | "tray:mono-animated"
+                | "tray:mono-static" => {
                     let id = event.id.as_ref();
                     let coloured = id.starts_with("tray:coloured");
                     let animated = id.ends_with("-animated");
@@ -629,8 +639,8 @@ enum BurstSide {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Phase {
     /// Static mode, single frame. The bool distinguishes the healthy and
-    /// unhealthy static frames in the Coloured tint; in the Black tint the
-    /// caller collapses both to `Static(true)` because Black ignores health
+    /// unhealthy static frames in the Coloured tint; in the Mono tint the
+    /// caller collapses both to `Static(true)` because Mono ignores health
     /// — that way the dedup doesn't redraw on health flips.
     Static(bool),
     /// Animated healthy: cosine pulse, current frame index.
@@ -668,9 +678,9 @@ fn select_draw_key(
     counter: u64,
     pulse_len: usize,
 ) -> DrawKey {
-    let tint = if coloured { Tint::Coloured } else { Tint::Black };
+    let tint = if coloured { Tint::Coloured } else { Tint::Mono };
     let phase = if !animated {
-        // Black tint paints the same image for healthy/unhealthy, so collapse
+        // Mono tint paints the same image for healthy/unhealthy, so collapse
         // the key — otherwise a health flip would force a no-op set_icon.
         let static_healthy = if coloured { healthy } else { true };
         Phase::Static(static_healthy)
@@ -759,19 +769,26 @@ async fn run_tray_animation(
                 );
                 if last_drawn.as_ref() != Some(&want) {
                     let assets = frames.assets(want.tint);
+                    // Mono frames are painted as macOS template images so the
+                    // system tints the alpha mask to the menu-bar foreground.
+                    // Use set_icon_with_as_template — calling set_icon then
+                    // set_icon_as_template separately produces the flicker
+                    // Tauri's own docs warn about, because set_icon creates a
+                    // fresh NSImage whose template flag defaults to false.
+                    let is_template = matches!(want.tint, Tint::Mono);
                     match &want.phase {
                         Phase::Static(h) => {
                             let bytes = if *h { &assets.static_healthy } else { &assets.static_unhealthy };
                             let img = Image::new(bytes, frames.width, frames.height);
-                            let _ = tray.set_icon(Some(img));
+                            let _ = tray.set_icon_with_as_template(Some(img), is_template);
                         }
                         Phase::Pulse(idx) => {
                             let img = Image::new(&assets.pulse[*idx], frames.width, frames.height);
-                            let _ = tray.set_icon(Some(img));
+                            let _ = tray.set_icon_with_as_template(Some(img), is_template);
                         }
                         Phase::SteadyUnhealthy => {
                             let img = Image::new(&assets.steady_unhealthy, frames.width, frames.height);
-                            let _ = tray.set_icon(Some(img));
+                            let _ = tray.set_icon_with_as_template(Some(img), is_template);
                         }
                         Phase::Burst { side, .. } => {
                             let (base, glitch_state) = match side {
@@ -784,7 +801,7 @@ async fn run_tray_animation(
                                     &sequence[*step_idx].bands,
                                 );
                                 let img = Image::new(&shifted, frames.width, frames.height);
-                                let _ = tray.set_icon(Some(img));
+                                let _ = tray.set_icon_with_as_template(Some(img), is_template);
                             }
                         }
                     }
@@ -971,15 +988,17 @@ mod tests {
     }
 
     #[test]
-    fn pulse_frames_for_black_tint_keep_rgb_at_zero() {
-        // Sanity-check the black-tint variant: alpha modulates exactly the
-        // same as cyan, but RGB stays at (0,0,0) — the source colour. This
-        // is what makes "Black + Animated" feel like the icon is breathing.
+    fn pulse_frames_for_mono_tint_keep_rgb_at_zero() {
+        // Sanity-check the mono-tint variant: alpha modulates exactly the
+        // same as cyan, but RGB stays at (0,0,0) — the source colour. The
+        // macOS template flag (set elsewhere) tints the alpha mask to the
+        // menu-bar foreground, so the icon ends up white-on-dark, even
+        // though these bytes are technically black-with-modulated-alpha.
         let source = vec![0, 0, 0, 255];
-        let frames = build_pulse_frames(&source, BLACK_RGB);
+        let frames = build_pulse_frames(&source, MONO_RGB);
         assert_eq!(frames.len(), PULSE_FRAME_COUNT);
         for (i, frame) in frames.iter().enumerate() {
-            assert_eq!(&frame[0..3], &[0, 0, 0], "frame {i} stays black");
+            assert_eq!(&frame[0..3], &[0, 0, 0], "frame {i} stays at source RGB");
         }
         // Same dimmest-frame alpha as the cyan pulse — only RGB differs.
         let expected_min = (255.0 * 0.30) as u8;
@@ -1140,8 +1159,8 @@ mod tests {
     }
 
     #[test]
-    fn select_draw_key_static_black_collapses_health_to_one_key() {
-        // The Black + Static mode renders the source PNG regardless of
+    fn select_draw_key_static_mono_collapses_health_to_one_key() {
+        // The Mono + Static mode renders the source PNG regardless of
         // health, so the key must collapse — otherwise the dedup would
         // redraw the same image on every health flip.
         let s = pulsing();
@@ -1149,26 +1168,26 @@ mod tests {
         let healthy = select_draw_key(false, false, true,  &s, &r, 0, 24);
         let unhealthy = select_draw_key(false, false, false, &s, &r, 0, 24);
         assert_eq!(healthy, unhealthy);
-        assert_eq!(healthy, key(Tint::Black, Phase::Static(true)));
+        assert_eq!(healthy, key(Tint::Mono, Phase::Static(true)));
     }
 
     #[test]
-    fn select_draw_key_black_animated_carries_black_tint_through_phases() {
+    fn select_draw_key_mono_animated_carries_mono_tint_through_phases() {
         // Same phase progression as coloured-animated, but the tint flips
-        // every key so the render path picks black assets.
+        // every key so the render path picks mono assets.
         let s = pulsing();
         let r = pulsing();
         assert_eq!(
             select_draw_key(true, false, true, &s, &r, 7, 24),
-            key(Tint::Black, Phase::Pulse(7)),
+            key(Tint::Mono, Phase::Pulse(7)),
         );
         assert_eq!(
             select_draw_key(true, false, false, &s, &r, 0, 24),
-            key(Tint::Black, Phase::SteadyUnhealthy),
+            key(Tint::Mono, Phase::SteadyUnhealthy),
         );
         assert_eq!(
             select_draw_key(true, false, true, &glitching_at(4), &r, 0, 24),
-            key(Tint::Black, Phase::Burst { side: BurstSide::Healthy, step_idx: 4 }),
+            key(Tint::Mono, Phase::Burst { side: BurstSide::Healthy, step_idx: 4 }),
         );
     }
 }
