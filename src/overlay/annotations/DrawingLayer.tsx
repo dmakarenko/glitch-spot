@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AnnotationsAction, AnnotationsState } from "./types";
+import type { Corner } from "./types";
 import { MIN_RECT_DIMENSION } from "./state";
 import { RectangleNote } from "./RectangleNote";
 import { formatLabel } from "./label";
@@ -20,11 +21,83 @@ type Props = {
   dispatch: (action: AnnotationsAction) => void;
 };
 
+const CORNERS: Corner[] = ["nw", "ne", "sw", "se"];
+
+function ResizeHandle({
+  corner,
+  rectId,
+  dispatch,
+  eventCoords,
+}: {
+  corner: Corner;
+  rectId: string;
+  dispatch: (action: AnnotationsAction) => void;
+  eventCoords: (e: { clientX: number; clientY: number }) => { x: number; y: number };
+}) {
+  const isDiagNwSe = corner === "nw" || corner === "se";
+  const cursor = isDiagNwSe ? "nwse-resize" : "nesw-resize";
+  const position: React.CSSProperties = {
+    position: "absolute",
+    width: 10,
+    height: 10,
+    background: "#ee6633",
+    boxShadow: "0 0 0 1px rgba(0,0,0,0.35)",
+    pointerEvents: "auto",
+    cursor,
+  };
+  if (corner === "nw") {
+    position.top = -5;
+    position.left = -5;
+  } else if (corner === "ne") {
+    position.top = -5;
+    position.right = -5;
+  } else if (corner === "sw") {
+    position.bottom = -5;
+    position.left = -5;
+  } else {
+    position.bottom = -5;
+    position.right = -5;
+  }
+  return (
+    <div
+      aria-hidden
+      style={position}
+      onMouseDown={(e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const { x: pointerX, y: pointerY } = eventCoords(e);
+        dispatch({
+          type: "BEGIN_RESIZE",
+          id: rectId,
+          corner,
+          pointerX,
+          pointerY,
+          viewportW: window.innerWidth,
+          viewportH: window.innerHeight,
+        });
+      }}
+    />
+  );
+}
+
 export function DrawingLayer({ state, dispatch }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   const [containerHeight, setContainerHeight] = useState<number>(
     typeof window !== "undefined" ? window.innerHeight : 0
+  );
+
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  const eventCoords = useCallback(
+    (e: { clientX: number; clientY: number }) => {
+      const surface = ref.current?.getBoundingClientRect();
+      const offsetX = surface?.left ?? 0;
+      const offsetY = surface?.top ?? 0;
+      return { x: e.clientX - offsetX, y: e.clientY - offsetY };
+    },
+    [],
   );
 
   useEffect(() => {
@@ -35,31 +108,19 @@ export function DrawingLayer({ state, dispatch }: Props) {
 
   const onMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      // Only respond to clicks that started on the drawing surface itself, not
-      // on a child element (e.g., a note input or a delete X). Children stop
-      // propagation via their own handlers.
       if (e.target !== e.currentTarget) return;
-      // Ignore non-primary buttons.
       if (e.button !== 0) return;
-      // Prevent the browser from starting a text selection that would flash
-      // across existing notes and rect contents as the drag passes over them.
       e.preventDefault();
-      const rect = ref.current?.getBoundingClientRect();
-      if (!rect) return;
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      const { x, y } = eventCoords(e);
       dispatch({ type: "BEGIN_CREATE", id: nextRectId(), x, y });
     },
-    [dispatch]
+    [dispatch, eventCoords],
   );
 
   const onMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!state.active) return;
-      const rect = ref.current?.getBoundingClientRect();
-      if (!rect) return;
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      const { x, y } = eventCoords(e);
       dispatch({
         type: "POINTER_TO",
         x,
@@ -68,7 +129,7 @@ export function DrawingLayer({ state, dispatch }: Props) {
         viewportH: window.innerHeight,
       });
     },
-    [dispatch, state.active]
+    [dispatch, eventCoords, state.active],
   );
 
   const onMouseUp = useCallback(() => {
@@ -95,6 +156,26 @@ export function DrawingLayer({ state, dispatch }: Props) {
         <div
           key={r.id}
           data-rect-id={r.id}
+          onMouseEnter={() => setHoveredId(r.id)}
+          onMouseLeave={() => setHoveredId((prev) => (prev === r.id ? null : prev))}
+          onMouseDown={(e) => {
+            // Only respond if the mousedown originated on the rect body itself, not on
+            // a child (handle, delete-X, badge, note textarea). Children stopPropagation
+            // on their own mousedowns.
+            if (e.target !== e.currentTarget) return;
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const { x: pointerX, y: pointerY } = eventCoords(e);
+            dispatch({
+              type: "BEGIN_MOVE",
+              id: r.id,
+              pointerX,
+              pointerY,
+              viewportW: window.innerWidth,
+              viewportH: window.innerHeight,
+            });
+          }}
           style={{
             position: "absolute",
             left: r.x,
@@ -104,7 +185,8 @@ export function DrawingLayer({ state, dispatch }: Props) {
             border: RECT_BORDER,
             background: RECT_FILL,
             boxSizing: "border-box",
-            pointerEvents: "none",
+            pointerEvents: "auto",
+            cursor: "move",
             boxShadow: "-2px 0 0 rgba(255, 0, 60, 0.4), 2px 0 0 rgba(0, 245, 255, 0.4)",
           }}
         >
@@ -160,6 +242,15 @@ export function DrawingLayer({ state, dispatch }: Props) {
               >
                 ×
               </button>
+              {hoveredId === r.id && CORNERS.map((corner) => (
+                <ResizeHandle
+                  key={corner}
+                  corner={corner}
+                  rectId={r.id}
+                  dispatch={dispatch}
+                  eventCoords={eventCoords}
+                />
+              ))}
             </>
           )}
         </div>
