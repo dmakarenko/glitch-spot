@@ -10,10 +10,20 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
-// Cyan from the glitch chromatic palette — see DESIGN.md.
+// Cyan channel of the chromatic split (`--glitch-cyan` in DESIGN.md). Used for
+// both the healthy pulse and the cyan flashes inside the glitch burst.
 const CYAN_RGB: (u8, u8, u8) = (0, 245, 255);
-// Red from the glitch chromatic palette.
-const RED_RGB: (u8, u8, u8) = (255, 0, 60);
+
+// Red for the unhealthy status indicator (`--delete` in DESIGN.md — the
+// destructive/error red also used on the × badge). Semantically a *signal*,
+// not a glitch flourish.
+const RED_RGB: (u8, u8, u8) = (255, 59, 48);
+
+// Accent orange (`--accent` in DESIGN.md, also used on rect borders, note
+// borders, and the Save button). Used inside the glitch burst — warmer and
+// subtler than chromatic red, and ties the icon flicker to the rest of the
+// app's voice rather than reading as an alarm.
+const GLITCH_ACCENT_RGB: (u8, u8, u8) = (238, 102, 51);
 
 /// Replace the RGB channels of every non-transparent pixel with `rgb`, and
 /// scale the existing alpha by `alpha_factor`. Pure — used to build animation
@@ -32,13 +42,16 @@ pub(crate) fn tint_frame(source_rgba: &[u8], rgb: (u8, u8, u8), alpha_factor: f3
     out
 }
 
-/// 12 frames forming a 2.4s cosine pulse (alpha 30% → 100% → 30%).
+/// Number of frames in the cyan pulse cycle. Combined with `ANIM_TICK_MS`,
+/// determines cycle length: 48 × 50ms = 2.4s gentle pulse.
+pub(crate) const CYAN_FRAME_COUNT: usize = 48;
+
+/// 48 frames forming a 2.4s cosine pulse (alpha 30% → 100% → 30%).
 pub(crate) fn build_cyan_frames(source: &[u8]) -> Vec<Vec<u8>> {
-    const N: usize = 12;
     const BASE: f32 = 0.65;
     const AMP: f32 = 0.35;
-    (0..N).map(|i| {
-        let t = i as f32 / N as f32;
+    (0..CYAN_FRAME_COUNT).map(|i| {
+        let t = i as f32 / CYAN_FRAME_COUNT as f32;
         let alpha = BASE + AMP * (2.0 * std::f32::consts::PI * t).cos();
         tint_frame(source, CYAN_RGB, alpha)
     }).collect()
@@ -55,8 +68,82 @@ pub(crate) fn build_red_frames(source: &[u8]) -> Vec<Vec<u8>> {
 pub(crate) struct AnimationFrames {
     pub cyan: Vec<Vec<u8>>,
     pub red: Vec<Vec<u8>>,
+    pub glitch: GlitchFrames,
     pub width: u32,
     pub height: u32,
+}
+
+/// Dedicated palette for the periodic glitch burst. Held at subtler alphas
+/// than the healthy pulse / unhealthy blink so the burst reads as a stylistic
+/// flicker rather than an alarm.
+pub(crate) struct GlitchFrames {
+    pub cyan_full: Vec<u8>,
+    pub cyan_dim: Vec<u8>,
+    pub accent_full: Vec<u8>,
+    pub accent_dim: Vec<u8>,
+}
+
+/// Pre-render the four glitch palette frames once at startup. Alphas tuned
+/// for "subtle stutter" rather than "bright alarm".
+pub(crate) fn build_glitch_frames(source: &[u8]) -> GlitchFrames {
+    GlitchFrames {
+        cyan_full:   tint_frame(source, CYAN_RGB, 0.85),
+        cyan_dim:    tint_frame(source, CYAN_RGB, 0.55),
+        accent_full: tint_frame(source, GLITCH_ACCENT_RGB, 0.65),
+        accent_dim:  tint_frame(source, GLITCH_ACCENT_RGB, 0.30),
+    }
+}
+
+/// Which pre-rendered frame a glitch step shows. Cyan and accent-orange at
+/// two alpha levels each — the burst flickers between them for a digital
+/// stutter feel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GlitchKind {
+    CyanFull,
+    CyanDim,
+    AccentFull,
+    AccentDim,
+}
+
+/// One step of a glitch burst: pick a frame and hold it for `ticks` (1-3) anim
+/// ticks. Non-uniform tick counts across the sequence are what produces the
+/// "jitter" feel — the burst doesn't have a regular beat.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GlitchStep {
+    pub kind: GlitchKind,
+    pub ticks: u8,
+}
+
+/// Generate a randomised glitch burst sequence: 5-9 steps, each holding for
+/// 1-2 ticks. At 50ms/tick the total burst is ~250-900ms — snappy enough to
+/// feel like a digital stutter rather than a deliberate animation.
+pub(crate) fn random_glitch_sequence<R: rand::Rng>(rng: &mut R) -> Vec<GlitchStep> {
+    let n = rng.gen_range(5..=9);
+    (0..n).map(|_| {
+        let kind = match rng.gen_range(0..10) {
+            0..=3 => GlitchKind::AccentFull,  // 40% — the "hit"
+            4..=5 => GlitchKind::CyanFull,    // 20% — recovery flash
+            6..=8 => GlitchKind::AccentDim,   // 30% — dim dropout
+            _     => GlitchKind::CyanDim,     // 10% — partial fade
+        };
+        let ticks = rng.gen_range(1..=2);
+        GlitchStep { kind, ticks }
+    }).collect()
+}
+
+/// Look up the byte buffer for a glitch kind. References the dedicated glitch
+/// palette so the burst uses accent-orange (style) rather than delete-red
+/// (signal).
+pub(crate) fn glitch_frame_bytes<'a>(
+    kind: GlitchKind,
+    frames: &'a AnimationFrames,
+) -> &'a [u8] {
+    match kind {
+        GlitchKind::CyanFull   => &frames.glitch.cyan_full,
+        GlitchKind::CyanDim    => &frames.glitch.cyan_dim,
+        GlitchKind::AccentFull => &frames.glitch.accent_full,
+        GlitchKind::AccentDim  => &frames.glitch.accent_dim,
+    }
 }
 
 pub(crate) fn mcp_status_label(healthy: bool, port: u16) -> String {
@@ -212,6 +299,7 @@ fn build_animation_frames() -> Option<AnimationFrames> {
     Some(AnimationFrames {
         cyan: build_cyan_frames(&source),
         red: build_red_frames(&source),
+        glitch: build_glitch_frames(&source),
         width,
         height,
     })
@@ -347,37 +435,91 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
     Ok(tray)
 }
 
+const ANIM_TICK_MS: u64 = 50;
+/// Min/max ticks between glitch bursts during healthy state.
+/// At 50ms/tick: 160-300 ticks = 8-15 seconds.
+const GLITCH_GAP_MIN: u64 = 160;
+const GLITCH_GAP_MAX: u64 = 300;
+
+enum AnimState {
+    Pulsing,
+    Glitching {
+        sequence: Vec<GlitchStep>,
+        step_idx: usize,
+        ticks_in_step: u8,
+    },
+}
+
 async fn run_tray_animation(
     tray: tauri::tray::TrayIcon,
     frames: AnimationFrames,
     port: u16,
 ) {
+    use rand::{Rng, SeedableRng};
     use tauri::image::Image;
     use tokio::time::{interval, Duration};
 
-    let mut anim_tick = interval(Duration::from_millis(100));
+    let mut anim_tick = interval(Duration::from_millis(ANIM_TICK_MS));
     let mut health_tick = interval(Duration::from_secs(3));
     let mut healthy = mcp_is_healthy(port);
     let mut counter: u64 = 0;
+    // StdRng is Send, so the future is Send and can be scheduled across threads
+    // by tokio. thread_rng() isn't Send because it holds thread-local state.
+    let mut rng = rand::rngs::StdRng::from_entropy();
+    let mut state = AnimState::Pulsing;
+    let mut next_glitch_at: u64 = rng.gen_range(GLITCH_GAP_MIN..=GLITCH_GAP_MAX);
 
     loop {
         tokio::select! {
             _ = anim_tick.tick() => {
-                let bytes: &[u8] = if healthy {
-                    // 12 cyan frames, advance every 2 ticks → 200ms/frame, 2.4s cycle.
-                    let idx = ((counter / 2) % frames.cyan.len() as u64) as usize;
-                    &frames.cyan[idx]
-                } else {
-                    // 2 red frames, advance every tick → 200ms on/off cycle.
-                    let idx = (counter % frames.red.len() as u64) as usize;
+                let bytes: &[u8] = if !healthy {
+                    // Red blink: 2 frames, advance every 4 ticks → 200ms/frame, 400ms cycle.
+                    let idx = ((counter / 4) % frames.red.len() as u64) as usize;
                     &frames.red[idx]
+                } else {
+                    match &mut state {
+                        AnimState::Pulsing => {
+                            // 48 cyan frames, advance every tick → 50ms/frame, 2.4s cycle.
+                            let idx = (counter % frames.cyan.len() as u64) as usize;
+                            let bytes = &frames.cyan[idx];
+                            if counter >= next_glitch_at {
+                                state = AnimState::Glitching {
+                                    sequence: random_glitch_sequence(&mut rng),
+                                    step_idx: 0,
+                                    ticks_in_step: 0,
+                                };
+                            }
+                            bytes
+                        }
+                        AnimState::Glitching { sequence, step_idx, ticks_in_step } => {
+                            let step = sequence[*step_idx];
+                            let bytes = glitch_frame_bytes(step.kind, &frames);
+                            *ticks_in_step += 1;
+                            if *ticks_in_step >= step.ticks {
+                                *step_idx += 1;
+                                *ticks_in_step = 0;
+                                if *step_idx >= sequence.len() {
+                                    state = AnimState::Pulsing;
+                                    next_glitch_at = counter
+                                        + rng.gen_range(GLITCH_GAP_MIN..=GLITCH_GAP_MAX);
+                                }
+                            }
+                            bytes
+                        }
+                    }
                 };
                 let img = Image::new(bytes, frames.width, frames.height);
                 let _ = tray.set_icon(Some(img));
                 counter = counter.wrapping_add(1);
             }
             _ = health_tick.tick() => {
-                healthy = mcp_is_healthy(port);
+                let new_healthy = mcp_is_healthy(port);
+                if !new_healthy {
+                    // If health drops mid-glitch, drop back to the pulse path so
+                    // the next tick renders red blink cleanly.
+                    state = AnimState::Pulsing;
+                }
+                healthy = new_healthy;
             }
         }
     }
@@ -459,24 +601,103 @@ mod tests {
     }
 
     #[test]
-    fn cyan_frames_produce_twelve_with_full_alpha_peak() {
+    fn cyan_frames_produce_full_set_with_full_alpha_peak() {
         let source = vec![0, 0, 0, 255];
         let frames = build_cyan_frames(&source);
-        assert_eq!(frames.len(), 12);
+        assert_eq!(frames.len(), CYAN_FRAME_COUNT);
         // Frame 0 starts at the cosine peak → alpha factor = BASE + AMP * 1.0 = 1.0.
         assert_eq!(frames[0][3], 255, "frame 0 is fully opaque");
-        // Frame 6 (half cycle) → cos(π) = -1.0 → alpha factor = BASE - AMP = 0.30.
+        // Frame N/2 (half cycle) → cos(π) = -1.0 → alpha factor = BASE - AMP = 0.30.
         let expected_min = (255.0 * 0.30) as u8;
-        assert_eq!(frames[6][3], expected_min, "frame 6 is the dimmest");
+        assert_eq!(
+            frames[CYAN_FRAME_COUNT / 2][3],
+            expected_min,
+            "halfway frame is the dimmest"
+        );
     }
 
     #[test]
-    fn red_frames_produce_two_distinct_alphas() {
+    fn glitch_sequence_has_5_to_9_steps_with_ticks_in_range() {
+        use rand::SeedableRng;
+        for seed in 0..20u64 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let seq = random_glitch_sequence(&mut rng);
+            assert!(
+                seq.len() >= 5 && seq.len() <= 9,
+                "seed {seed} produced {} steps", seq.len()
+            );
+            for (i, step) in seq.iter().enumerate() {
+                assert!(
+                    step.ticks >= 1 && step.ticks <= 2,
+                    "seed {seed} step {i} has ticks={}", step.ticks
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn glitch_sequence_mixes_accent_and_cyan_across_many_seeds() {
+        use rand::SeedableRng;
+        let mut saw_accent = false;
+        let mut saw_cyan = false;
+        for seed in 0..50u64 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let seq = random_glitch_sequence(&mut rng);
+            for step in &seq {
+                match step.kind {
+                    GlitchKind::AccentFull | GlitchKind::AccentDim => saw_accent = true,
+                    GlitchKind::CyanFull | GlitchKind::CyanDim => saw_cyan = true,
+                }
+            }
+        }
+        assert!(saw_accent && saw_cyan, "should produce a mix of accent and cyan over many seeds");
+    }
+
+    #[test]
+    fn glitch_frame_bytes_resolves_to_glitch_palette() {
+        let source = vec![0, 0, 0, 255];
+        let frames = AnimationFrames {
+            cyan: build_cyan_frames(&source),
+            red: build_red_frames(&source),
+            glitch: build_glitch_frames(&source),
+            width: 1,
+            height: 1,
+        };
+        // Glitch palette has subtle alphas — different from cyan[0]/red[0] peaks.
+        assert_eq!(
+            glitch_frame_bytes(GlitchKind::AccentFull, &frames)[3],
+            (255.0 * 0.65) as u8
+        );
+        assert_eq!(
+            glitch_frame_bytes(GlitchKind::AccentDim, &frames)[3],
+            (255.0 * 0.30) as u8
+        );
+        // And accent glitch frames use --accent orange, not any red variant.
+        assert_eq!(&glitch_frame_bytes(GlitchKind::AccentFull, &frames)[0..3], &[238, 102, 51]);
+    }
+
+    #[test]
+    fn red_frames_use_delete_red_for_unhealthy_signal() {
         let source = vec![0, 0, 0, 255];
         let frames = build_red_frames(&source);
         assert_eq!(frames.len(), 2);
         assert_eq!(frames[0][3], 255, "on frame is fully opaque");
         assert_eq!(frames[1][3], (255.0 * 0.20) as u8, "off frame is dim");
-        assert_eq!(&frames[0][0..3], &[255, 0, 60]);
+        // --delete in DESIGN.md (not the chromatic-split red).
+        assert_eq!(&frames[0][0..3], &[255, 59, 48]);
+    }
+
+    #[test]
+    fn glitch_frames_use_accent_orange_at_subtle_alphas() {
+        let source = vec![0, 0, 0, 255];
+        let glitch = build_glitch_frames(&source);
+        // RGB matches --accent from DESIGN.md (#ee6633).
+        assert_eq!(&glitch.accent_full[0..3], &[238, 102, 51]);
+        assert_eq!(&glitch.accent_dim[0..3], &[238, 102, 51]);
+        // Subtle alphas — not full 255, not too dim to disappear.
+        assert_eq!(glitch.accent_full[3], (255.0 * 0.65) as u8);
+        assert_eq!(glitch.accent_dim[3], (255.0 * 0.30) as u8);
+        assert_eq!(glitch.cyan_full[3], (255.0 * 0.85) as u8);
+        assert_eq!(glitch.cyan_dim[3], (255.0 * 0.55) as u8);
     }
 }
