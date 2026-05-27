@@ -31,21 +31,21 @@ function handleStyle(handle: Handle): React.CSSProperties {
   };
   switch (handle) {
     case "nw":
-      return { ...base, width: 10, height: 10, top: -5, left: -5, cursor: "nwse-resize" };
+      return { ...base, width: 8, height: 8, top: -4, left: -4, cursor: "nwse-resize" };
     case "ne":
-      return { ...base, width: 10, height: 10, top: -5, right: -5, cursor: "nesw-resize" };
+      return { ...base, width: 8, height: 8, top: -4, right: -4, cursor: "nesw-resize" };
     case "sw":
-      return { ...base, width: 10, height: 10, bottom: -5, left: -5, cursor: "nesw-resize" };
+      return { ...base, width: 8, height: 8, bottom: -4, left: -4, cursor: "nesw-resize" };
     case "se":
-      return { ...base, width: 10, height: 10, bottom: -5, right: -5, cursor: "nwse-resize" };
+      return { ...base, width: 8, height: 8, bottom: -4, right: -4, cursor: "nwse-resize" };
     case "n":
-      return { ...base, width: 20, height: 6, top: -3, left: "50%", marginLeft: -10, cursor: "ns-resize" };
+      return { ...base, width: 16, height: 4, top: -2, left: "50%", marginLeft: -8, cursor: "ns-resize" };
     case "s":
-      return { ...base, width: 20, height: 6, bottom: -3, left: "50%", marginLeft: -10, cursor: "ns-resize" };
+      return { ...base, width: 16, height: 4, bottom: -2, left: "50%", marginLeft: -8, cursor: "ns-resize" };
     case "w":
-      return { ...base, width: 6, height: 20, left: -3, top: "50%", marginTop: -10, cursor: "ew-resize" };
+      return { ...base, width: 4, height: 16, left: -2, top: "50%", marginTop: -8, cursor: "ew-resize" };
     case "e":
-      return { ...base, width: 6, height: 20, right: -3, top: "50%", marginTop: -10, cursor: "ew-resize" };
+      return { ...base, width: 4, height: 16, right: -2, top: "50%", marginTop: -8, cursor: "ew-resize" };
   }
 }
 
@@ -198,19 +198,19 @@ export function DrawingLayer({ state, dispatch }: Props) {
                 aria-hidden
                 style={{
                   position: "absolute",
-                  top: -9,
-                  left: -13,
-                  width: 26,
-                  height: 18,
-                  borderRadius: 9,
+                  width: 22,
+                  height: 14,
+                  borderRadius: 7,
                   background: "#ee6633",
                   color: "#ffffff",
-                  font: "bold 11px sans-serif",
+                  font: "bold 10px sans-serif",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   pointerEvents: "none",
                   boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                  top: 4,
+                  left: 4,
                 }}
               >
                 {formatLabel(idx)}
@@ -225,21 +225,20 @@ export function DrawingLayer({ state, dispatch }: Props) {
                 aria-label="Delete rectangle"
                 style={{
                   position: "absolute",
-                  top: -10,
-                  right: -10,
                   width: 20,
                   height: 20,
                   padding: 0,
                   border: "none",
-                  borderRadius: "50%",
-                  background: "#ff3b30",
-                  color: "white",
-                  fontSize: 14,
+                  background: "transparent",
+                  color: "#ee6633",
+                  font: "bold 20px sans-serif",
                   lineHeight: "20px",
                   textAlign: "center",
                   cursor: "pointer",
                   pointerEvents: "auto",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                  textShadow: "0 0 3px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.5)",
+                  top: 2,
+                  right: 2,
                 }}
               >
                 ×
