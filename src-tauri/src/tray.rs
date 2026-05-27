@@ -156,14 +156,11 @@ pub(crate) fn mcp_status_label(healthy: bool, port: u16) -> String {
     format!("{indicator} MCP Server :{port}")
 }
 
-fn mcp_is_healthy(port: u16) -> bool {
-    use std::net::{SocketAddr, TcpStream};
-    use std::time::Duration;
-    let addr: SocketAddr = match format!("127.0.0.1:{port}").parse() {
-        Ok(a) => a,
-        Err(_) => return false,
-    };
-    TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok()
+/// Read the shared `bound` flag that the MCP server toggles around its
+/// bind+serve loop. True ⇒ *this* process owns the listener (not just "some
+/// process is on the port"), which is what we want to communicate to the user.
+fn mcp_is_healthy(bound: &std::sync::atomic::AtomicBool) -> bool {
+    bound.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 pub(crate) fn format_snapshot_age(snapshot_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
@@ -225,7 +222,7 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .build(app)?;
 
     let port = state.settings.mcp_port();
-    let mcp_status = MenuItemBuilder::new(mcp_status_label(mcp_is_healthy(port), port))
+    let mcp_status = MenuItemBuilder::new(mcp_status_label(mcp_is_healthy(&state.mcp_bound), port))
         .id("mcp_status")
         .enabled(false)
         .build(app)?;
@@ -463,11 +460,11 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
     // aggressive red blink when down. Polls health every 3s.
     if let Some(frames) = frames {
         let tray_for_anim = tray.clone();
-        let port = {
+        let mcp_bound = {
             let state = app.state::<crate::AppState>();
-            state.settings.mcp_port()
+            state.mcp_bound.clone()
         };
-        tauri::async_runtime::spawn(run_tray_animation(tray_for_anim, frames, port));
+        tauri::async_runtime::spawn(run_tray_animation(tray_for_anim, frames, mcp_bound));
     }
 
     Ok(tray)
@@ -491,7 +488,7 @@ enum AnimState {
 async fn run_tray_animation(
     tray: tauri::tray::TrayIcon,
     frames: AnimationFrames,
-    port: u16,
+    mcp_bound: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     use rand::{Rng, SeedableRng};
     use tauri::image::Image;
@@ -499,7 +496,7 @@ async fn run_tray_animation(
 
     let mut anim_tick = interval(Duration::from_millis(ANIM_TICK_MS));
     let mut health_tick = interval(Duration::from_secs(3));
-    let mut healthy = mcp_is_healthy(port);
+    let mut healthy = mcp_is_healthy(&mcp_bound);
     let mut counter: u64 = 0;
     // StdRng is Send, so the future is Send and can be scheduled across threads
     // by tokio. thread_rng() isn't Send because it holds thread-local state.
@@ -551,7 +548,7 @@ async fn run_tray_animation(
                 counter = counter.wrapping_add(1);
             }
             _ = health_tick.tick() => {
-                let new_healthy = mcp_is_healthy(port);
+                let new_healthy = mcp_is_healthy(&mcp_bound);
                 if !new_healthy {
                     // If health drops mid-glitch, drop back to the pulse path so
                     // the next tick renders red blink cleanly.

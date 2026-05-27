@@ -191,9 +191,16 @@ pub fn build_router(store: Arc<SnapshotStore>) -> Router {
         .with_state(store)
 }
 
-/// Start the MCP server. Binds to 127.0.0.1:port and runs forever.
-/// Call this with `tauri::async_runtime::spawn(mcp::server::serve(store, port))`.
-pub async fn serve(store: Arc<SnapshotStore>, port: u16) {
+/// Start the MCP server. Binds to 127.0.0.1:port and runs forever. The shared
+/// `bound` flag is set to true on successful bind and cleared if/when serve
+/// returns — the tray uses it as a deterministic health signal (true ⇒ *this*
+/// process owns the port, not just "something is listening").
+pub async fn serve(
+    store: Arc<SnapshotStore>,
+    port: u16,
+    bound: Arc<std::sync::atomic::AtomicBool>,
+) {
+    use std::sync::atomic::Ordering;
     let app = build_router(store);
     let addr = format!("127.0.0.1:{port}");
     let listener = match tokio::net::TcpListener::bind(&addr).await {
@@ -203,9 +210,11 @@ pub async fn serve(store: Arc<SnapshotStore>, port: u16) {
             return;
         }
     };
+    bound.store(true, Ordering::SeqCst);
     if let Err(e) = axum::serve(listener, app).await {
         eprintln!("[glitch-spot mcp] server error: {e}");
     }
+    bound.store(false, Ordering::SeqCst);
 }
 
 // ---------- Tests ----------
@@ -425,5 +434,47 @@ mod tests {
         // Should have caught the snapshot, not returned pending
         assert_eq!(body["id"], "snap_gap_01");
         assert!(body.get("pending").is_none());
+    }
+
+    #[tokio::test]
+    async fn serve_sets_bound_after_successful_bind() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let store = Arc::new(SnapshotStore::new());
+        let bound = Arc::new(AtomicBool::new(false));
+        let bound_clone = bound.clone();
+
+        // port=0 → OS picks a free ephemeral port. Fine for this test; we're
+        // only verifying that the flag flips, not that the port is reachable.
+        let task = tokio::spawn(async move {
+            serve(store, 0, bound_clone).await;
+        });
+
+        // serve does an async bind; poll briefly for the transition.
+        for _ in 0..50 {
+            if bound.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
+        assert!(bound.load(Ordering::SeqCst), "bound should be set after successful bind");
+
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn serve_leaves_bound_false_when_bind_fails() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        // Pre-bind a port so serve's bind will fail with AddrInUse.
+        let blocker = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = blocker.local_addr().unwrap().port();
+
+        let store = Arc::new(SnapshotStore::new());
+        let bound = Arc::new(AtomicBool::new(false));
+
+        serve(store, port, bound.clone()).await;
+
+        assert!(!bound.load(Ordering::SeqCst), "bind failure must not flip the flag");
     }
 }
