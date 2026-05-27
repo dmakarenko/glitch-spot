@@ -66,8 +66,8 @@ mod tests {
             created_at: "2026-05-26T12:00:00Z".to_string(),
             mode: "frozen".to_string(),
             annotations: vec![
-                Annotation { id: "a1".into(), shape: "rect".into(), coords: Coords { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }, note: "the close button is misaligned".into() },
-                Annotation { id: "a2".into(), shape: "rect".into(), coords: Coords { x: 20.0, y: 0.0, w: 10.0, h: 10.0 }, note: "this label has a typo".into() },
+                Annotation { id: "a1".into(), shape: "rect".into(), coords: Coords { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }, note: "the close button is misaligned".into(), label: "01".into() },
+                Annotation { id: "a2".into(), shape: "rect".into(), coords: Coords { x: 20.0, y: 0.0, w: 10.0, h: 10.0 }, note: "this label has a typo".into(), label: "02".into() },
             ],
             context: Context {
                 screen: ScreenInfo { width: 1440, height: 900, scale_factor: 2.0, display_index: 0 },

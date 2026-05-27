@@ -1,6 +1,7 @@
 // ABOUTME: Canvas-based annotation renderer used by the Electron overlay path.
-// ABOUTME: Draws annotation rectangles and badges onto the clean captured image.
+// ABOUTME: Draws annotation rectangles and pill badges onto the clean captured image.
 import type { AnnotationPayload } from '../../packages/electron/src/types'
+import { formatLabel } from './annotations/label'
 
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -12,7 +13,7 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 /**
- * Renders annotation rectangles and numbered badges onto cleanBlobUrl.
+ * Renders annotation rectangles and pill-shaped labels onto cleanBlobUrl.
  * Returns the result as a raw base64 PNG string (no data: prefix).
  * scaleFactor converts CSS coords to physical pixels (window.devicePixelRatio).
  */
@@ -29,6 +30,10 @@ export async function renderAnnotated(
 
   ctx.drawImage(img, 0, 0)
 
+  const PILL_W = 26 * scaleFactor
+  const PILL_H = 18 * scaleFactor
+  const PILL_R = 9 * scaleFactor
+
   annotations.forEach((rect, idx) => {
     const x = rect.x * scaleFactor
     const y = rect.y * scaleFactor
@@ -39,19 +44,19 @@ export async function renderAnnotated(
     ctx.lineWidth = 2 * scaleFactor
     ctx.strokeRect(x, y, w, h)
 
-    const badgeR = 10 * scaleFactor
-    const badgeCx = x + badgeR
-    const badgeCy = y + badgeR
+    // Pill badge straddling the rect's top-left corner (half outside).
+    const pillX = x - PILL_W / 2
+    const pillY = y - PILL_H / 2
     ctx.fillStyle = '#EE6633'
     ctx.beginPath()
-    ctx.arc(badgeCx, badgeCy, badgeR, 0, Math.PI * 2)
+    ctx.roundRect(pillX, pillY, PILL_W, PILL_H, PILL_R)
     ctx.fill()
 
     ctx.fillStyle = '#ffffff'
     ctx.font = `bold ${11 * scaleFactor}px sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(String(idx + 1), badgeCx, badgeCy)
+    ctx.fillText(formatLabel(idx), pillX + PILL_W / 2, pillY + PILL_H / 2)
     ctx.textAlign = 'left'
     ctx.textBaseline = 'alphabetic'
   })

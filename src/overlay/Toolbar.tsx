@@ -53,7 +53,7 @@ export function Toolbar({ rectCount, onSave }: Props) {
             cursor: "pointer",
           }}
         >
-          Save (⌘↩)
+          Save (⌘⇧↩)
         </button>
       </div>
     </div>

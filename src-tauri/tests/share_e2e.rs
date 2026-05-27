@@ -18,7 +18,8 @@ fn write_real_snapshot(base: &std::path::Path, id: &str) -> std::path::PathBuf {
         "annotations": [{
             "id": "a1", "shape": "rect",
             "coords": { "x": 0.0, "y": 0.0, "w": 10.0, "h": 10.0 },
-            "note": "the cancel button is misaligned by 3 px"
+            "note": "the cancel button is misaligned by 3 px",
+            "label": "01"
         }],
         "context": {
             "screen": { "width": 1440, "height": 900, "scale_factor": 2.0, "display_index": 0 },
@@ -26,9 +27,9 @@ fn write_real_snapshot(base: &std::path::Path, id: &str) -> std::path::PathBuf {
         },
         "images": { "clean": "x", "annotated": "y" }
     });
-    std::fs::write(dir.join("snapshot.json"), serde_json::to_vec_pretty(&snap).unwrap()).unwrap();
-    std::fs::write(dir.join("clean.png"), b"\x89PNG-fixture-clean").unwrap();
-    std::fs::write(dir.join("annotated.png"), b"\x89PNG-fixture-annotated").unwrap();
+    std::fs::write(dir.join(glitch_spot::snapshot::snapshot_json_filename(id)), serde_json::to_vec_pretty(&snap).unwrap()).unwrap();
+    std::fs::write(dir.join(glitch_spot::snapshot::clean_png_filename(id)), b"\x89PNG-fixture-clean").unwrap();
+    std::fs::write(dir.join(glitch_spot::snapshot::annotated_png_filename(id)), b"\x89PNG-fixture-annotated").unwrap();
     dir
 }
 

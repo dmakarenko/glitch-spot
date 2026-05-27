@@ -11,6 +11,11 @@ import {
 } from 'electron'
 import type { GlitchSnapshot, GlitchSpotConfig, GlitchSpotInstance, AnnotationPayload } from './types'
 
+// Mirrors src/overlay/annotations/label.ts. Inlined to keep this package self-contained.
+function formatLabel(idx: number): string {
+  return String(idx + 1).padStart(2, '0')
+}
+
 export class GlitchSpot {
   private overlay: BrowserWindow
   private mainWindow: BrowserWindow
@@ -72,7 +77,7 @@ export class GlitchSpot {
         id: `snap_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
         created_at: new Date().toISOString(),
         mode: 'frozen',
-        annotations: payload.annotations.map((a) => ({
+        annotations: payload.annotations.map((a, idx) => ({
           id: a.id,
           shape: 'rect',
           coords: {
@@ -82,6 +87,7 @@ export class GlitchSpot {
             h: a.h * display.scaleFactor,
           },
           note: a.note,
+          label: formatLabel(idx),
         })),
         context: {
           screen: {

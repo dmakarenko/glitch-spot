@@ -17,6 +17,7 @@ fn sample_snapshot() -> Snapshot {
                 h: 120.0,
             },
             note: "make this smaller".into(),
+            label: "01".into(),
         }],
         context: Context {
             screen: ScreenInfo {
@@ -59,6 +60,16 @@ fn json_uses_snake_case_keys() {
 }
 
 #[test]
+fn annotation_serializes_with_label() {
+    let s = sample_snapshot();
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(
+        json.contains("\"label\":\"01\""),
+        "expected label field on annotation, got {json}"
+    );
+}
+
+#[test]
 fn annotated_serializes_as_null_when_none() {
     let s = sample_snapshot();
     let json = serde_json::to_string(&s).unwrap();
@@ -69,14 +80,32 @@ fn annotated_serializes_as_null_when_none() {
 }
 
 #[test]
-fn new_id_has_snap_prefix_and_reasonable_length() {
+fn new_id_is_sortable_timestamp_with_uuid_suffix() {
     let id = new_id();
-    assert!(id.starts_with("snap_"));
-    assert_eq!(id.len(), "snap_".len() + 12);
+    // `YYYY-MM-DD_HH-MM-SS_<12-char uuid>` = 19 + 1 + 12 = 32 chars.
+    assert_eq!(id.len(), 32, "unexpected id length: {id}");
+    let mut parts = id.splitn(3, '_');
+    let date = parts.next().expect("date segment");
+    let time = parts.next().expect("time segment");
+    let uuid = parts.next().expect("uuid segment");
+    assert_eq!(date.len(), 10, "date should be YYYY-MM-DD, got {date}");
+    assert_eq!(time.len(), 8, "time should be HH-MM-SS, got {time}");
+    assert_eq!(uuid.len(), 12, "uuid should be 12 chars, got {uuid}");
+    assert!(date.chars().nth(4) == Some('-') && date.chars().nth(7) == Some('-'));
+    assert!(time.chars().nth(2) == Some('-') && time.chars().nth(5) == Some('-'));
+}
+
+#[test]
+fn new_id_at_renders_a_known_timestamp() {
+    let t = chrono::DateTime::parse_from_rfc3339("2026-05-27T11:50:52Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let id = new_id_at(t);
+    assert!(id.starts_with("2026-05-27_11-50-52_"), "got {id}");
 }
 
 use crate::capture::CapturedFrame;
-use crate::snapshot::build::{build, IncomingAnnotation};
+use crate::snapshot::build::{build, format_label, IncomingAnnotation};
 
 fn fake_frame() -> CapturedFrame {
     // Real 2x2 white PNG produced via the image crate so the bytes pass strict
@@ -120,6 +149,44 @@ fn build_scales_annotation_coords_by_scale_factor() {
 }
 
 #[test]
+fn build_assigns_zero_padded_labels_from_array_position() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let incoming = (0..11)
+        .map(|i| IncomingAnnotation {
+            id: format!("anno_{i}"),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            note: String::new(),
+        })
+        .collect();
+    let built = build(&fake_frame(), "frozen", incoming, "macos", "26.0", temp.path(), None).unwrap();
+    let labels: Vec<String> = built
+        .snapshot
+        .annotations
+        .iter()
+        .map(|a| a.label.clone())
+        .collect();
+    assert_eq!(
+        labels,
+        vec![
+            "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11",
+        ]
+    );
+}
+
+#[test]
+fn format_label_zero_pads_and_expands() {
+    assert_eq!(format_label(0), "01");
+    assert_eq!(format_label(8), "09");
+    assert_eq!(format_label(9), "10");
+    assert_eq!(format_label(98), "99");
+    assert_eq!(format_label(99), "100");
+    assert_eq!(format_label(998), "999");
+}
+
+#[test]
 fn build_returns_paths_under_base_dir_and_bytes_match_frame() {
     let temp = tempfile::TempDir::new().unwrap();
     let frame = fake_frame();
@@ -127,8 +194,8 @@ fn build_returns_paths_under_base_dir_and_bytes_match_frame() {
 
     // Embedded paths point under `temp/{id}/...`
     let id = &built.snapshot.id;
-    let expected_clean = temp.path().join(id).join("clean.png");
-    let expected_annotated = temp.path().join(id).join("annotated.png");
+    let expected_clean = temp.path().join(id).join(format!("{id}_clean.png"));
+    let expected_annotated = temp.path().join(id).join(format!("{id}_annotated.png"));
     assert_eq!(
         std::path::Path::new(&built.snapshot.images.clean),
         expected_clean
@@ -158,6 +225,8 @@ fn build_returns_paths_under_base_dir_and_bytes_match_frame() {
 use crate::snapshot::annotate::render_annotated_png;
 use image::Rgba;
 
+const ACCENT: Rgba<u8> = Rgba([238, 102, 51, 255]);
+
 fn solid_white_png(width: u32, height: u32) -> Vec<u8> {
     let img: image::RgbaImage =
         image::ImageBuffer::from_pixel(width, height, Rgba([255u8, 255, 255, 255]));
@@ -183,37 +252,66 @@ fn annotated_png_round_trips_with_no_annotations() {
 }
 
 #[test]
-fn annotated_png_draws_red_pixels_on_rect_border() {
-    let clean = solid_white_png(64, 64);
+fn annotated_png_draws_accent_pixels_on_rect_border() {
+    let clean = solid_white_png(128, 128);
     let annos = vec![Annotation {
         id: "anno_1".into(),
         shape: "rect".into(),
         coords: Coords {
-            x: 10.0,
-            y: 10.0,
-            w: 20.0,
-            h: 20.0,
+            x: 40.0,
+            y: 40.0,
+            w: 40.0,
+            h: 40.0,
         },
         note: String::new(),
+        label: "01".into(),
     }];
     let bytes = render_annotated_png(&clean, &annos, 2.0).unwrap();
     let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
-    let top_left = img.get_pixel(10, 10);
+    let top_left = img.get_pixel(40, 40);
     assert_eq!(
-        top_left,
-        &Rgba([255, 59, 48, 255]),
-        "top-left of rect must be red, got {top_left:?}"
+        top_left, &ACCENT,
+        "top-left of rect must be the accent colour, got {top_left:?}"
     );
-    let interior = img.get_pixel(20, 20);
+    let interior = img.get_pixel(60, 60);
     assert_ne!(
-        interior,
-        &Rgba([255, 59, 48, 255]),
+        interior, &ACCENT,
         "rect interior must not be filled, got {interior:?}"
     );
 }
 
 #[test]
-fn annotated_png_renders_note_panel_for_non_empty_notes() {
+fn annotated_png_draws_pill_badge_at_rect_top_left() {
+    // Rect at (50,50). Pill (26x18 scaled by 2 → 52x36) is centered on top-left
+    // corner, so its body spans roughly x in [24, 76] and y in [32, 68]. A point
+    // a few pixels above the rect's top edge sits inside the badge.
+    let clean = solid_white_png(160, 160);
+    let annos = vec![Annotation {
+        id: "anno_1".into(),
+        shape: "rect".into(),
+        coords: Coords {
+            x: 50.0,
+            y: 50.0,
+            w: 60.0,
+            h: 60.0,
+        },
+        note: String::new(),
+        label: "01".into(),
+    }];
+    let bytes = render_annotated_png(&clean, &annos, 2.0).unwrap();
+    let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
+    // Sample a pixel that should sit inside the badge body (above the rect's top).
+    let inside_badge = img.get_pixel(50, 40);
+    assert_eq!(
+        inside_badge, &ACCENT,
+        "expected accent badge pixel above rect's top-left, got {inside_badge:?}"
+    );
+}
+
+#[test]
+fn annotated_png_does_not_draw_note_panel() {
+    // Note panels were removed when the renderer was unified with the canvas
+    // exporter. Below the rect, pixels must stay white.
     let clean = solid_white_png(200, 200);
     let annos = vec![Annotation {
         id: "anno_1".into(),
@@ -224,62 +322,16 @@ fn annotated_png_renders_note_panel_for_non_empty_notes() {
             w: 60.0,
             h: 30.0,
         },
-        note: "hello".into(),
+        note: "this used to render a panel".into(),
+        label: "01".into(),
     }];
     let bytes = render_annotated_png(&clean, &annos, 2.0).unwrap();
     let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
-    // Panel area sits at y >= rect.y + rect.h + gap.
-    let panel_top_y: i32 = 20 + 30 + 6;
-    let mut found_dark = false;
-    'outer: for y in panel_top_y..(panel_top_y + 60).min(img.height() as i32) {
-        for x in 20..(20 + 140).min(img.width() as i32) {
-            let pix = img.get_pixel(x as u32, y as u32);
-            if pix.0[0] < 80 && pix.0[1] < 80 && pix.0[2] < 80 {
-                found_dark = true;
-                break 'outer;
-            }
-        }
-    }
-    assert!(
-        found_dark,
-        "expected dark text pixels in the panel region below the rect"
-    );
-}
-
-#[test]
-fn annotated_png_caps_panel_width_for_long_notes() {
-    // Wide rect (500 px) + a very long single-line note. Cap should keep the
-    // panel from extending past 480 px from the rect's left edge.
-    let clean = solid_white_png(600, 200);
-    let long_note: String = "x".repeat(200);
-    let annos = vec![Annotation {
-        id: "anno_1".into(),
-        shape: "rect".into(),
-        coords: Coords {
-            x: 0.0,
-            y: 10.0,
-            w: 500.0,
-            h: 30.0,
-        },
-        note: long_note,
-    }];
-    let bytes = render_annotated_png(&clean, &annos, 2.0).unwrap();
-    let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
-    // Panel sits at y = 10 + 30 + 6 = 46. Sample a y row clearly inside the panel.
-    let panel_inside_y: u32 = 46 + 8 + 5;
-    // At x = 485 (past the 480-px cap, still inside the image) the pixel must be
-    // pure white — i.e. NOT covered by the panel fill (which writes alpha=245).
-    let outside_panel = img.get_pixel(485, panel_inside_y);
+    let below_rect = img.get_pixel(40, 70);
     assert_eq!(
-        outside_panel,
+        below_rect,
         &Rgba([255, 255, 255, 255]),
-        "panel must not extend past the 480px cap, got {outside_panel:?} at (485, {panel_inside_y})"
-    );
-    // And the panel itself should exist somewhere left of the cap.
-    let inside_panel = img.get_pixel(50, panel_inside_y);
-    assert_eq!(
-        inside_panel.0[3], 245,
-        "expected panel-fill alpha at (50, {panel_inside_y}), got {inside_panel:?}"
+        "no panel below the rect, got {below_rect:?}"
     );
 }
 
@@ -361,29 +413,4 @@ fn context_window_omitted_when_none() {
     s.context.window = None;
     let json = serde_json::to_string(&s).unwrap();
     assert!(!json.contains("\"window\""), "expected `window` key omitted, got: {json}");
-}
-
-#[test]
-fn annotated_png_skips_panel_for_empty_notes() {
-    let clean = solid_white_png(200, 200);
-    let annos = vec![Annotation {
-        id: "anno_1".into(),
-        shape: "rect".into(),
-        coords: Coords {
-            x: 20.0,
-            y: 20.0,
-            w: 60.0,
-            h: 30.0,
-        },
-        note: String::new(),
-    }];
-    let bytes = render_annotated_png(&clean, &annos, 2.0).unwrap();
-    let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
-    // Below the rect, in empty space — must still be white.
-    let pix = img.get_pixel(40, (20 + 30 + 10) as u32);
-    assert_eq!(
-        pix,
-        &Rgba([255, 255, 255, 255]),
-        "empty note ⇒ no panel pixels, got {pix:?}"
-    );
 }

@@ -7,7 +7,10 @@ use chrono::Utc;
 
 use crate::capture::CapturedFrame;
 use crate::snapshot::annotate::{render_annotated_png, AnnotateError};
-use crate::snapshot::{new_id, Annotation, Context, Coords, Images, OsInfo, ScreenInfo, Snapshot};
+use crate::snapshot::{
+    annotated_png_filename, clean_png_filename, new_id, Annotation, Context, Coords, Images,
+    OsInfo, ScreenInfo, Snapshot,
+};
 
 /// One annotation as received from the React side. Coordinates are CSS pixels
 /// relative to the overlay's content area; we multiply by `scale_factor` to
@@ -38,6 +41,18 @@ pub enum BuildError {
     Annotate(#[from] AnnotateError),
 }
 
+/// Derives a region's visible label from its array index. Zero-pads to two
+/// characters minimum, expands further for 100+ regions, never truncates.
+/// Mirrors the TypeScript `formatLabel` in `src/overlay/annotations/label.ts`.
+pub fn format_label(idx: usize) -> String {
+    let n = idx + 1;
+    if n < 10 {
+        format!("0{n}")
+    } else {
+        n.to_string()
+    }
+}
+
 /// Assemble a `BuiltSnapshot` from the captured frame + incoming annotations.
 /// Pure function — no filesystem writes. The embedded `images.{clean,annotated}`
 /// paths are computed as `{base_dir}/{id}/clean.png` and `…/annotated.png`,
@@ -53,14 +68,15 @@ pub fn build(
 ) -> Result<BuiltSnapshot, BuildError> {
     let id = new_id();
     let dir = base_dir.join(&id);
-    let clean_path = dir.join("clean.png");
-    let annotated_path = dir.join("annotated.png");
+    let clean_path = dir.join(clean_png_filename(&id));
+    let annotated_path = dir.join(annotated_png_filename(&id));
 
     let scale = frame.scale_factor;
     let (crop_x, crop_y) = crop_origin.unwrap_or((0.0, 0.0));
     let annotations: Vec<Annotation> = annotations
         .into_iter()
-        .map(|a| Annotation {
+        .enumerate()
+        .map(|(idx, a)| Annotation {
             id: a.id,
             shape: "rect".into(),
             coords: Coords {
@@ -70,6 +86,7 @@ pub fn build(
                 h: a.h * scale,
             },
             note: a.note,
+            label: format_label(idx),
         })
         .collect();
 

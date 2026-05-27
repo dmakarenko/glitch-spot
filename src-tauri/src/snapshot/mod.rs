@@ -19,6 +19,7 @@ pub struct Annotation {
     pub shape: String,
     pub coords: Coords,
     pub note: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -79,9 +80,31 @@ pub mod persist;
 
 pub use build::BuiltSnapshot;
 
+/// Returns a sortable snapshot identifier: `YYYY-MM-DD_HH-MM-SS_<12-char uuid>`.
+/// Used as the on-disk folder name, the `id` field of [`Snapshot`], and the
+/// `:id` segment of the share-server URL routes.
 pub fn new_id() -> String {
+    new_id_at(chrono::Utc::now())
+}
+
+pub fn new_id_at(now: chrono::DateTime<chrono::Utc>) -> String {
     let uuid = uuid::Uuid::new_v4().simple().to_string();
-    format!("snap_{}", &uuid[..12])
+    format!("{}_{}", now.format("%Y-%m-%d_%H-%M-%S"), &uuid[..12])
+}
+
+/// On-disk filename for the unannotated PNG inside `{base}/{id}/`.
+pub fn clean_png_filename(id: &str) -> String {
+    format!("{id}_clean.png")
+}
+
+/// On-disk filename for the annotated PNG inside `{base}/{id}/`.
+pub fn annotated_png_filename(id: &str) -> String {
+    format!("{id}_annotated.png")
+}
+
+/// On-disk filename for the serialised snapshot inside `{base}/{id}/`.
+pub fn snapshot_json_filename(id: &str) -> String {
+    format!("{id}.json")
 }
 
 #[cfg(test)]

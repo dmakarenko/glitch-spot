@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AnnotationsAction, AnnotationsState } from "./types";
 import { MIN_RECT_DIMENSION } from "./state";
 import { RectangleNote } from "./RectangleNote";
+import { formatLabel } from "./label";
 
 const RECT_BORDER = "1.5px solid rgba(238, 102, 51, 0.9)";
 const RECT_FILL = "rgba(238, 102, 51, 0.05)";
@@ -110,7 +111,7 @@ export function DrawingLayer({ state, dispatch, clipRect }: Props) {
         WebkitUserSelect: "none",
       }}
     >
-      {state.rects.map((r) => (
+      {state.rects.map((r, idx) => (
         <div
           key={r.id}
           data-rect-id={r.id}
@@ -128,35 +129,58 @@ export function DrawingLayer({ state, dispatch, clipRect }: Props) {
           }}
         >
           {r.w >= MIN_RECT_DIMENSION && r.h >= MIN_RECT_DIMENSION && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                dispatch({ type: "DELETE_RECT", id: r.id });
-              }}
-              onMouseDown={(e) => e.stopPropagation()}
-              aria-label="Delete rectangle"
-              style={{
-                position: "absolute",
-                top: -10,
-                right: -10,
-                width: 20,
-                height: 20,
-                padding: 0,
-                border: "none",
-                borderRadius: "50%",
-                background: "#ff3b30",
-                color: "white",
-                fontSize: 14,
-                lineHeight: "20px",
-                textAlign: "center",
-                cursor: "pointer",
-                pointerEvents: "auto",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-              }}
-            >
-              ×
-            </button>
+            <>
+              <div
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  top: -9,
+                  left: -13,
+                  width: 26,
+                  height: 18,
+                  borderRadius: 9,
+                  background: "#ee6633",
+                  color: "#ffffff",
+                  font: "bold 11px sans-serif",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  pointerEvents: "none",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                }}
+              >
+                {formatLabel(idx)}
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  dispatch({ type: "DELETE_RECT", id: r.id });
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+                aria-label="Delete rectangle"
+                style={{
+                  position: "absolute",
+                  top: -10,
+                  right: -10,
+                  width: 20,
+                  height: 20,
+                  padding: 0,
+                  border: "none",
+                  borderRadius: "50%",
+                  background: "#ff3b30",
+                  color: "white",
+                  fontSize: 14,
+                  lineHeight: "20px",
+                  textAlign: "center",
+                  cursor: "pointer",
+                  pointerEvents: "auto",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                }}
+              >
+                ×
+              </button>
+            </>
           )}
         </div>
       ))}
