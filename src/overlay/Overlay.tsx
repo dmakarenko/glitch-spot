@@ -123,7 +123,7 @@ export function Overlay() {
         }
         return
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'Enter') {
         e.preventDefault()
         if (annotations.rects.length > 0) handleSave()
         return
