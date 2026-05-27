@@ -10,11 +10,14 @@ use serde::{Deserialize, Serialize};
 pub use crate::share::tunnel::provider::ProviderKind;
 
 const CONFIG_FILE: &str = "config.toml";
+const DEFAULT_MCP_PORT: u16 = 7820;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct ConfigFile {
     #[serde(default)]
     tunnel: TunnelSection,
+    #[serde(default)]
+    mcp: McpSection,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -23,8 +26,15 @@ struct TunnelSection {
     provider: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct McpSection {
+    #[serde(default)]
+    port: Option<u16>,
+}
+
 pub struct Settings {
     provider: RwLock<ProviderKind>,
+    mcp_port: u16,
 }
 
 impl Settings {
@@ -52,11 +62,16 @@ impl Settings {
             .as_deref()
             .and_then(ProviderKind::from_name)
             .unwrap_or_default();
-        Ok(Settings { provider: RwLock::new(provider) })
+        let mcp_port = parsed.mcp.port.unwrap_or(DEFAULT_MCP_PORT);
+        Ok(Settings { provider: RwLock::new(provider), mcp_port })
     }
 
     pub fn current_provider(&self) -> ProviderKind {
         *self.provider.read().expect("settings lock poisoned")
+    }
+
+    pub fn mcp_port(&self) -> u16 {
+        self.mcp_port
     }
 
     /// Update the in-memory provider AND persist the new value to disk.
@@ -67,6 +82,7 @@ impl Settings {
         }
         let cfg = ConfigFile {
             tunnel: TunnelSection { provider: Some(kind.as_str().to_string()) },
+            mcp: McpSection { port: Some(self.mcp_port) },
         };
         let text = toml::to_string_pretty(&cfg).map_err(io::Error::other)?;
         std::fs::create_dir_all(dir)?;
@@ -118,5 +134,36 @@ mod tests {
 
         let settings2 = Settings::load_from(temp.path()).unwrap();
         assert_eq!(settings2.current_provider(), ProviderKind::Tailscale);
+    }
+
+    #[test]
+    fn missing_mcp_section_yields_default_port() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.mcp_port(), 7820);
+    }
+
+    #[test]
+    fn explicit_mcp_port_is_parsed() {
+        let temp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            b"[mcp]\nport = 9090\n",
+        )
+        .unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.mcp_port(), 9090);
+    }
+
+    #[test]
+    fn malformed_mcp_section_falls_back_to_default_port() {
+        let temp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            b"[mcp]\nport = \"not-a-number\"\n",
+        )
+        .unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.mcp_port(), 7820);
     }
 }

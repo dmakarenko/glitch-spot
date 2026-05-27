@@ -250,11 +250,30 @@ mod tests {
 }
 
 pub fn run() {
+    let config_dir = std::path::PathBuf::from(
+        std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
+    )
+    .join(".glitch-spot");
+
+    let settings = match settings::Settings::load_from(&config_dir) {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            eprintln!("[glitch-spot] settings load failed: {e}; using defaults");
+            let temp = std::env::temp_dir().join("glitch-spot-fallback");
+            let _ = std::fs::create_dir_all(&temp);
+            Arc::new(
+                settings::Settings::load_from(&temp)
+                    .expect("default settings construction must succeed"),
+            )
+        }
+    };
+
     let snapshot_store = Arc::new(mcp::store::SnapshotStore::new());
     let store_for_mcp = snapshot_store.clone();
+    let mcp_port = settings.mcp_port();
 
     tauri::async_runtime::spawn(async move {
-        mcp::server::serve(store_for_mcp).await;
+        mcp::server::serve(store_for_mcp, mcp_port).await;
     });
 
     let share_base = snapshot::persist::snapshots_dir().ok();
@@ -276,24 +295,6 @@ pub fn run() {
         }
         Err(e) => eprintln!("[glitch-spot] could not resolve snapshots dir: {e}"),
     }
-
-    let config_dir = std::path::PathBuf::from(
-        std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
-    )
-    .join(".glitch-spot");
-
-    let settings = match settings::Settings::load_from(&config_dir) {
-        Ok(s) => Arc::new(s),
-        Err(e) => {
-            eprintln!("[glitch-spot] settings load failed: {e}; using defaults");
-            let temp = std::env::temp_dir().join("glitch-spot-fallback");
-            let _ = std::fs::create_dir_all(&temp);
-            Arc::new(
-                settings::Settings::load_from(&temp)
-                    .expect("default settings construction must succeed"),
-            )
-        }
-    };
 
     let tunnel = Arc::new(share::tunnel::TunnelManager::new());
 
