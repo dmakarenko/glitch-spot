@@ -9,6 +9,11 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_notification::NotificationExt;
+
+/// Stable id for the single tray icon, so background tasks can fetch it via
+/// `app.tray_by_id` and refresh the menu without holding a clone.
+pub const TRAY_ID: &str = "glitch-spot";
 
 // Cyan channel of the chromatic split (`--glitch-cyan` in DESIGN.md). Used for
 // both the healthy pulse and the cyan flashes inside the glitch burst.
@@ -181,6 +186,21 @@ pub(crate) fn format_snapshot_age(snapshot_at: DateTime<Utc>, now: DateTime<Utc>
     }
 }
 
+/// Rebuilds the tray menu from current AppState and installs it.
+///
+/// On macOS, `on_tray_icon_event` does not fire for left-clicks when the tray
+/// has an attached menu — the click opens the menu directly. So state changes
+/// (snapshot saved, MCP port changed, etc.) must trigger this eagerly rather
+/// than relying on a click-time rebuild.
+pub fn refresh_menu(app: &AppHandle) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+    if let Ok(menu) = build_menu(app) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
 pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let state = app.state::<crate::AppState>();
 
@@ -319,7 +339,7 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
         None => Image::from_bytes(include_bytes!("../icons/tray.png"))?,
     };
 
-    let tray = TrayIconBuilder::new()
+    let tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(initial_icon)
         .menu(&menu)
         .on_menu_event(|app, event| {
@@ -341,11 +361,28 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                 }
                 "latest_snapshot" => {
                     let state = app.state::<crate::AppState>();
-                    if let Some(snap) = state.snapshot_store.get_latest() {
-                        if let Ok(json) = serde_json::to_string_pretty(&snap) {
-                            let _ = app.clipboard().write_text(json);
-                        }
-                    }
+                    let Some(snap) = state.snapshot_store.get_latest() else {
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title("Glitch Spot")
+                            .body("No snapshot yet — capture one first.")
+                            .show();
+                        return;
+                    };
+                    let body = match serde_json::to_string_pretty(&snap) {
+                        Ok(json) => match app.clipboard().write_text(json) {
+                            Ok(()) => format!("Copied JSON for {} to clipboard.", snap.id),
+                            Err(e) => format!("Couldn't copy to clipboard: {e}"),
+                        },
+                        Err(e) => format!("Couldn't serialize snapshot: {e}"),
+                    };
+                    let _ = app
+                        .notification()
+                        .builder()
+                        .title("Glitch Spot")
+                        .body(body)
+                        .show();
                 }
                 "share_latest" => {
                     let app2 = app.clone();
@@ -364,6 +401,7 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                         if let Err(e) = crate::do_set_tunnel_provider(&state, kind).await {
                             eprintln!("tray: set provider failed: {e}");
                         }
+                        refresh_menu(&app2);
                     });
                 }
                 "launch_at_login" => {
@@ -374,6 +412,7 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                     } else {
                         let _ = manager.enable();
                     }
+                    refresh_menu(&app);
                 }
                 "quit" => {
                     app.exit(0);
@@ -406,7 +445,6 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
             // Fire notification on transition INTO Error from any non-Error state.
             if let crate::share::tunnel::TunnelState::Error { reason } = &new_state {
                 if !matches!(last_state, crate::share::tunnel::TunnelState::Error { .. }) {
-                    use tauri_plugin_notification::NotificationExt;
                     let _ = app_handle.notification()
                         .builder()
                         .title("Glitch Spot — tunnel error")

@@ -108,6 +108,7 @@ async fn save_snapshot(
     if let Ok(mut ts) = state.latest_snapshot_at.lock() {
         *ts = Some(chrono::Utc::now());
     }
+    tray::refresh_menu(&app);
 
     let json = serde_json::to_string_pretty(&snap).map_err(|e| e.to_string())?;
     app.clipboard()
