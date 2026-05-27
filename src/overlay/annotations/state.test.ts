@@ -212,3 +212,107 @@ describe("min-size guard on END_GESTURE", () => {
     expect(s.history).toEqual([{ kind: "create", id: "r1" }]);
   });
 });
+
+describe("move gesture", () => {
+  function drawn(id: string, x: number, y: number, w: number, h: number): import("./types").AnnotationsState {
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id, x, y });
+    s = reducer(s, pointerTo(x + w, y + h));
+    return reducer(s, { type: "END_GESTURE" });
+  }
+
+  it("BEGIN_MOVE sets active=move and records the previous position in history", () => {
+    const start = drawn("r1", 100, 100, 50, 50);
+    const s = reducer(start, {
+      type: "BEGIN_MOVE",
+      id: "r1",
+      pointerX: 120,
+      pointerY: 130,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    expect(s.active).toEqual({
+      kind: "move",
+      id: "r1",
+      pointerStart: { x: 120, y: 130 },
+      rectStart: { x: 100, y: 100 },
+    });
+    const last = s.history[s.history.length - 1];
+    expect(last).toEqual({ kind: "move", id: "r1", previousX: 100, previousY: 100 });
+  });
+
+  it("POINTER_TO during move translates the rect by the pointer delta", () => {
+    let s = drawn("r1", 100, 100, 50, 50);
+    s = reducer(s, {
+      type: "BEGIN_MOVE",
+      id: "r1",
+      pointerX: 120,
+      pointerY: 130,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(200, 200));
+    expect(s.rects[0]).toMatchObject({ x: 180, y: 170, w: 50, h: 50 });
+  });
+
+  it("POINTER_TO during move clamps to viewport edges", () => {
+    let s = drawn("r1", 100, 100, 50, 50);
+    s = reducer(s, {
+      type: "BEGIN_MOVE",
+      id: "r1",
+      pointerX: 110,
+      pointerY: 110,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(-500, -500));
+    expect(s.rects[0]).toMatchObject({ x: 0, y: 0, w: 50, h: 50 });
+  });
+
+  it("END_GESTURE after a move clears active and keeps the move history entry", () => {
+    let s = drawn("r1", 100, 100, 50, 50);
+    s = reducer(s, {
+      type: "BEGIN_MOVE",
+      id: "r1",
+      pointerX: 120,
+      pointerY: 130,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(200, 200));
+    s = reducer(s, { type: "END_GESTURE" });
+    expect(s.active).toBeNull();
+    expect(s.rects[0]).toMatchObject({ x: 180, y: 170 });
+    const last = s.history[s.history.length - 1];
+    expect(last).toEqual({ kind: "move", id: "r1", previousX: 100, previousY: 100 });
+  });
+
+  it("END_GESTURE after BEGIN_MOVE with no POINTER_TO pops the no-op history entry", () => {
+    let s = drawn("r1", 100, 100, 50, 50);
+    const before = s.history.length;
+    s = reducer(s, {
+      type: "BEGIN_MOVE",
+      id: "r1",
+      pointerX: 120,
+      pointerY: 130,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    expect(s.history.length).toBe(before + 1);
+    s = reducer(s, { type: "END_GESTURE" });
+    expect(s.history.length).toBe(before);
+    expect(s.history[s.history.length - 1]).not.toMatchObject({ kind: "move" });
+  });
+
+  it("BEGIN_MOVE on a non-existent id is a no-op", () => {
+    const start = drawn("r1", 100, 100, 50, 50);
+    const s = reducer(start, {
+      type: "BEGIN_MOVE",
+      id: "ghost",
+      pointerX: 0,
+      pointerY: 0,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    expect(s).toEqual(start);
+  });
+});

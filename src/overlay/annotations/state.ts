@@ -8,6 +8,7 @@ import type {
   HistoryEntry,
   Rect,
 } from "./types";
+import { clampMoveDelta } from "./transform";
 
 // Smallest committed-rectangle dimension. Aligned with DrawingLayer's delete-X
 // visibility threshold so every saved rectangle has a working delete button,
@@ -54,6 +55,22 @@ export function reducer(
       };
     }
 
+    case "BEGIN_MOVE": {
+      const rect = state.rects.find((r) => r.id === action.id);
+      if (!rect) return state;
+      const active: ActiveGesture = {
+        kind: "move",
+        id: action.id,
+        pointerStart: { x: action.pointerX, y: action.pointerY },
+        rectStart: { x: rect.x, y: rect.y },
+      };
+      const history: HistoryEntry[] = [
+        ...state.history,
+        { kind: "move", id: action.id, previousX: rect.x, previousY: rect.y },
+      ];
+      return { ...state, active, history };
+    }
+
     case "POINTER_TO": {
       if (!state.active) return state;
       if (state.active.kind === "create") {
@@ -61,6 +78,22 @@ export function reducer(
         const rects = state.rects.map((r) =>
           r.id === id ? extendTo(r, action.x, action.y, anchorX, anchorY) : r,
         );
+        return { ...state, rects };
+      }
+      if (state.active.kind === "move") {
+        const { id, pointerStart, rectStart } = state.active;
+        const rect = state.rects.find((r) => r.id === id);
+        if (!rect) return state;
+        const deltaX = action.x - pointerStart.x;
+        const deltaY = action.y - pointerStart.y;
+        const startRect = { ...rect, x: rectStart.x, y: rectStart.y };
+        const { x, y } = clampMoveDelta(
+          startRect,
+          deltaX,
+          deltaY,
+          { w: action.viewportW, h: action.viewportH },
+        );
+        const rects = state.rects.map((r) => (r.id === id ? { ...r, x, y } : r));
         return { ...state, rects };
       }
       return state;
@@ -87,6 +120,24 @@ export function reducer(
             lastCreatedId:
               state.lastCreatedId === id ? null : state.lastCreatedId,
           };
+        }
+        return { ...state, active: null };
+      }
+      if (state.active.kind === "move") {
+        const { id } = state.active;
+        const rect = state.rects.find((r) => r.id === id);
+        const last = state.history[state.history.length - 1];
+        if (
+          rect &&
+          last &&
+          last.kind === "move" &&
+          last.id === id &&
+          last.previousX === rect.x &&
+          last.previousY === rect.y
+        ) {
+          // No-op move (mousedown without movement). Pop the history entry.
+          const history = state.history.slice(0, -1);
+          return { ...state, active: null, history };
         }
         return { ...state, active: null };
       }
