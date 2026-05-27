@@ -1,0 +1,60 @@
+// ABOUTME: Tests for the DrawingLayer's clipRect prop — restricts rect creation
+// ABOUTME: and drag to a sub-rectangle (used by window mode).
+
+// @vitest-environment jsdom
+
+import { describe, expect, it, afterEach } from "vitest";
+import { render, fireEvent, cleanup } from "@testing-library/react";
+import { useReducer } from "react";
+import { DrawingLayer } from "./DrawingLayer";
+import { initialState, reducer } from "./state";
+
+afterEach(cleanup);
+
+function Harness({ clipRect }: { clipRect?: { x: number; y: number; w: number; h: number } }) {
+  const [state, dispatch] = useReducer(reducer, initialState);
+  return <DrawingLayer state={state} dispatch={dispatch} clipRect={clipRect} />;
+}
+
+describe("DrawingLayer with clipRect", () => {
+  it("ignores mouse-down outside clipRect", () => {
+    const { container } = render(<Harness clipRect={{ x: 100, y: 100, w: 200, h: 200 }} />);
+    const surface = container.firstChild as HTMLDivElement;
+    fireEvent.mouseDown(surface, { clientX: 50, clientY: 50, button: 0 });
+    fireEvent.mouseMove(surface, { clientX: 60, clientY: 60 });
+    fireEvent.mouseUp(surface);
+    expect(surface.querySelectorAll('[data-rect-id]')).toHaveLength(0);
+  });
+
+  it("starts a rect when mouse-down inside clipRect", () => {
+    const { container } = render(<Harness clipRect={{ x: 100, y: 100, w: 200, h: 200 }} />);
+    const surface = container.firstChild as HTMLDivElement;
+    fireEvent.mouseDown(surface, { clientX: 150, clientY: 150, button: 0 });
+    fireEvent.mouseMove(surface, { clientX: 200, clientY: 200 });
+    fireEvent.mouseUp(surface);
+    const rects = surface.querySelectorAll('[data-rect-id]');
+    expect(rects.length).toBe(1);
+  });
+
+  it("clamps rect drag to clipRect bounds", () => {
+    const { container } = render(<Harness clipRect={{ x: 100, y: 100, w: 200, h: 200 }} />);
+    const surface = container.firstChild as HTMLDivElement;
+    fireEvent.mouseDown(surface, { clientX: 150, clientY: 150, button: 0 });
+    fireEvent.mouseMove(surface, { clientX: 500, clientY: 500 });
+    fireEvent.mouseUp(surface);
+    const rect = surface.querySelector('[data-rect-id]') as HTMLDivElement | null;
+    expect(rect).toBeTruthy();
+    const left = parseFloat(rect!.style.left);
+    const width = parseFloat(rect!.style.width);
+    expect(left + width).toBeLessThanOrEqual(300);
+  });
+
+  it("when clipRect is undefined, behaves like the existing layer (no clamp)", () => {
+    const { container } = render(<Harness />);
+    const surface = container.firstChild as HTMLDivElement;
+    fireEvent.mouseDown(surface, { clientX: 10, clientY: 10, button: 0 });
+    fireEvent.mouseMove(surface, { clientX: 100, clientY: 100 });
+    fireEvent.mouseUp(surface);
+    expect(surface.querySelectorAll('[data-rect-id]').length).toBe(1);
+  });
+});

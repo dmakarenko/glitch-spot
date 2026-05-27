@@ -14,12 +14,15 @@ export function nextRectId(): string {
   return `r${_nextId++}`;
 }
 
+type ClipRect = { x: number; y: number; w: number; h: number };
+
 type Props = {
   state: AnnotationsState;
   dispatch: (action: AnnotationsAction) => void;
+  clipRect?: ClipRect;
 };
 
-export function DrawingLayer({ state, dispatch }: Props) {
+export function DrawingLayer({ state, dispatch, clipRect }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   const [containerHeight, setContainerHeight] = useState<number>(
@@ -31,6 +34,21 @@ export function DrawingLayer({ state, dispatch }: Props) {
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
+
+  // Returns the point if it is inside clipRect (or if no clipRect is set),
+  // null otherwise. Used to gate BEGIN_DRAG.
+  const clamp = (x: number, y: number): { x: number; y: number } | null => {
+    if (!clipRect) return { x, y };
+    const inside =
+      x >= clipRect.x &&
+      x < clipRect.x + clipRect.w &&
+      y >= clipRect.y &&
+      y < clipRect.y + clipRect.h;
+    if (!inside) return null;
+    const clampedX = Math.max(clipRect.x, Math.min(x, clipRect.x + clipRect.w));
+    const clampedY = Math.max(clipRect.y, Math.min(y, clipRect.y + clipRect.h));
+    return { x: clampedX, y: clampedY };
+  };
 
   const onMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -47,9 +65,11 @@ export function DrawingLayer({ state, dispatch }: Props) {
       if (!rect) return;
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      dispatch({ type: "BEGIN_DRAG", id: nextRectId(), x, y });
+      const startInside = clamp(x, y);
+      if (!startInside) return;
+      dispatch({ type: "BEGIN_DRAG", id: nextRectId(), x: startInside.x, y: startInside.y });
     },
-    [dispatch]
+    [dispatch, clipRect]
   );
 
   const onMouseMove = useCallback(
@@ -59,9 +79,15 @@ export function DrawingLayer({ state, dispatch }: Props) {
       if (!rect) return;
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      dispatch({ type: "DRAG_TO", x, y });
+      let nx = x;
+      let ny = y;
+      if (clipRect) {
+        nx = Math.max(clipRect.x, Math.min(x, clipRect.x + clipRect.w));
+        ny = Math.max(clipRect.y, Math.min(y, clipRect.y + clipRect.h));
+      }
+      dispatch({ type: "DRAG_TO", x: nx, y: ny });
     },
-    [dispatch, state.draggingId]
+    [dispatch, state.draggingId, clipRect]
   );
 
   const onMouseUp = useCallback(() => {
