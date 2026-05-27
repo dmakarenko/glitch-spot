@@ -45,10 +45,10 @@ pub(crate) fn tint_frame(source_rgba: &[u8], rgb: (u8, u8, u8), alpha_factor: f3
 }
 
 /// Number of frames in the cyan pulse cycle. Combined with `ANIM_TICK_MS`,
-/// determines cycle length: 68 × 35ms ≈ 2.4s gentle pulse.
-pub(crate) const CYAN_FRAME_COUNT: usize = 68;
+/// determines cycle length: 24 × 100ms = 2.4s gentle pulse.
+pub(crate) const CYAN_FRAME_COUNT: usize = 24;
 
-/// 48 frames forming a 2.4s cosine pulse (alpha 30% → 100% → 30%).
+/// 24 frames forming a 2.4s cosine pulse (alpha 30% → 100% → 30%).
 pub(crate) fn build_cyan_frames(source: &[u8]) -> Vec<Vec<u8>> {
     const BASE: f32 = 0.65;
     const AMP: f32 = 0.35;
@@ -497,15 +497,15 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
     Ok(tray)
 }
 
-const ANIM_TICK_MS: u64 = 35;
+const ANIM_TICK_MS: u64 = 100;
 /// Min/max ticks between glitch bursts during healthy state.
-/// At 35ms/tick: 90-165 ticks ≈ 3.2-5.8s, centred around 4.5s.
-const GLITCH_GAP_MIN: u64 = 90;
-const GLITCH_GAP_MAX: u64 = 165;
+/// At 100ms/tick: 32-58 ticks ≈ 3.2-5.8s, centred around 4.5s.
+const GLITCH_GAP_MIN: u64 = 32;
+const GLITCH_GAP_MAX: u64 = 58;
 /// Min/max ticks between scanline bursts during unhealthy state.
-/// At 35ms/tick: 60-120 ticks ≈ 2.1-4.2s — more agitated than healthy.
-const RED_GAP_MIN: u64 = 60;
-const RED_GAP_MAX: u64 = 120;
+/// At 100ms/tick: 21-42 ticks ≈ 2.1-4.2s — more agitated than healthy.
+const RED_GAP_MIN: u64 = 21;
+const RED_GAP_MAX: u64 = 42;
 
 enum AnimState {
     Pulsing,
@@ -514,6 +514,42 @@ enum AnimState {
         step_idx: usize,
         ticks_in_step: u8,
     },
+}
+
+/// Stable key identifying which icon image a tick wants to draw. Used to skip
+/// `set_icon` (and the `apply_scanline_shift` allocation that feeds it) when
+/// the previous tick already drew the same content — biggest win is during the
+/// unhealthy steady-red interval where the icon is constant for ~2-4 seconds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DrawKey {
+    Cyan(usize),
+    RedSteady,
+    HealthyBurst(usize),
+    UnhealthyBurst(usize),
+}
+
+/// Pick the icon to draw this tick. Pure function — does no allocation and
+/// does not touch the tray. The animation loop calls this first and only
+/// performs the expensive `apply_scanline_shift` + `set_icon` when the key
+/// differs from the previous tick.
+fn select_draw_key(
+    healthy: bool,
+    state: &AnimState,
+    red_state: &AnimState,
+    counter: u64,
+    cyan_len: usize,
+) -> DrawKey {
+    if !healthy {
+        match red_state {
+            AnimState::Pulsing => DrawKey::RedSteady,
+            AnimState::Glitching { step_idx, .. } => DrawKey::UnhealthyBurst(*step_idx),
+        }
+    } else {
+        match state {
+            AnimState::Pulsing => DrawKey::Cyan((counter % cyan_len as u64) as usize),
+            AnimState::Glitching { step_idx, .. } => DrawKey::HealthyBurst(*step_idx),
+        }
+    }
 }
 
 async fn run_tray_animation(
@@ -549,15 +585,55 @@ async fn run_tray_animation(
     let mut next_glitch_at: u64 = rng.gen_range(GLITCH_GAP_MIN..=GLITCH_GAP_MAX);
     let mut red_state = AnimState::Pulsing;
     let mut next_red_glitch_at: u64 = rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
+    // Last icon we asked the OS to render. Skipping `set_icon` when the key
+    // matches eliminates ~3-4s of redundant set_icon calls every gap between
+    // red bursts, plus one redundant call inside any burst step held for 2
+    // ticks. None during the healthy cyan pulse — every tick is a new frame.
+    let mut last_drawn: Option<DrawKey> = None;
 
     loop {
         tokio::select! {
             _ = anim_tick.tick() => {
+                let want = select_draw_key(
+                    healthy, &state, &red_state, counter, frames.cyan.len(),
+                );
+                if last_drawn.as_ref() != Some(&want) {
+                    match &want {
+                        DrawKey::Cyan(idx) => {
+                            let img = Image::new(&frames.cyan[*idx], frames.width, frames.height);
+                            let _ = tray.set_icon(Some(img));
+                        }
+                        DrawKey::RedSteady => {
+                            let img = Image::new(&frames.red_steady, frames.width, frames.height);
+                            let _ = tray.set_icon(Some(img));
+                        }
+                        DrawKey::HealthyBurst(_) => {
+                            if let AnimState::Glitching { sequence, step_idx, .. } = &state {
+                                let shifted = apply_scanline_shift(
+                                    &frames.burst_base, frames.width, frames.height,
+                                    &sequence[*step_idx].bands,
+                                );
+                                let img = Image::new(&shifted, frames.width, frames.height);
+                                let _ = tray.set_icon(Some(img));
+                            }
+                        }
+                        DrawKey::UnhealthyBurst(_) => {
+                            if let AnimState::Glitching { sequence, step_idx, .. } = &red_state {
+                                let shifted = apply_scanline_shift(
+                                    &frames.red_burst_base, frames.width, frames.height,
+                                    &sequence[*step_idx].bands,
+                                );
+                                let img = Image::new(&shifted, frames.width, frames.height);
+                                let _ = tray.set_icon(Some(img));
+                            }
+                        }
+                    }
+                    last_drawn = Some(want);
+                }
+
                 if !healthy {
                     match &mut red_state {
                         AnimState::Pulsing => {
-                            let img = Image::new(&frames.red_steady, frames.width, frames.height);
-                            let _ = tray.set_icon(Some(img));
                             if counter >= next_red_glitch_at {
                                 red_state = AnimState::Glitching {
                                     sequence: random_scanline_sequence(&mut rng, frames.height),
@@ -567,12 +643,6 @@ async fn run_tray_animation(
                             }
                         }
                         AnimState::Glitching { sequence, step_idx, ticks_in_step } => {
-                            let shifted = apply_scanline_shift(
-                                &frames.red_burst_base, frames.width, frames.height,
-                                &sequence[*step_idx].bands,
-                            );
-                            let img = Image::new(&shifted, frames.width, frames.height);
-                            let _ = tray.set_icon(Some(img));
                             *ticks_in_step += 1;
                             if *ticks_in_step >= sequence[*step_idx].ticks {
                                 *step_idx += 1;
@@ -588,10 +658,6 @@ async fn run_tray_animation(
                 } else {
                     match &mut state {
                         AnimState::Pulsing => {
-                            // 68 cyan frames, advance every tick → 35ms/frame, ~2.4s cycle.
-                            let idx = (counter % frames.cyan.len() as u64) as usize;
-                            let img = Image::new(&frames.cyan[idx], frames.width, frames.height);
-                            let _ = tray.set_icon(Some(img));
                             if counter >= next_glitch_at {
                                 state = AnimState::Glitching {
                                     sequence: random_scanline_sequence(&mut rng, frames.height),
@@ -601,12 +667,6 @@ async fn run_tray_animation(
                             }
                         }
                         AnimState::Glitching { sequence, step_idx, ticks_in_step } => {
-                            let shifted = apply_scanline_shift(
-                                &frames.burst_base, frames.width, frames.height,
-                                &sequence[*step_idx].bands,
-                            );
-                            let img = Image::new(&shifted, frames.width, frames.height);
-                            let _ = tray.set_icon(Some(img));
                             *ticks_in_step += 1;
                             if *ticks_in_step >= sequence[*step_idx].ticks {
                                 *step_idx += 1;
@@ -835,5 +895,59 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn pulsing() -> AnimState { AnimState::Pulsing }
+    fn glitching_at(step_idx: usize) -> AnimState {
+        AnimState::Glitching { sequence: vec![], step_idx, ticks_in_step: 0 }
+    }
+
+    #[test]
+    fn select_draw_key_healthy_pulsing_advances_each_tick() {
+        // During the dominant healthy-pulse state, every tick produces a fresh
+        // frame index — the dedup in the loop won't skip these, by design.
+        let s = pulsing();
+        let r = pulsing();
+        assert_eq!(select_draw_key(true, &s, &r, 0,  24), DrawKey::Cyan(0));
+        assert_eq!(select_draw_key(true, &s, &r, 5,  24), DrawKey::Cyan(5));
+        assert_eq!(select_draw_key(true, &s, &r, 25, 24), DrawKey::Cyan(1), "wraps at cycle end");
+    }
+
+    #[test]
+    fn select_draw_key_unhealthy_pulsing_is_steady_regardless_of_counter() {
+        // This is where dedup pays off: the key is constant for the entire
+        // 2-4s gap between red bursts, so set_icon is called exactly once
+        // when entering this state instead of ~25-40 times.
+        let s = pulsing();
+        let r = pulsing();
+        for c in [0u64, 1, 17, 999, u64::MAX] {
+            assert_eq!(select_draw_key(false, &s, &r, c, 24), DrawKey::RedSteady);
+        }
+    }
+
+    #[test]
+    fn select_draw_key_burst_keys_use_step_index() {
+        // Healthy burst — only `state` matters.
+        let r = pulsing();
+        assert_eq!(
+            select_draw_key(true, &glitching_at(3), &r, 0, 24),
+            DrawKey::HealthyBurst(3),
+        );
+        // Unhealthy burst — only `red_state` matters.
+        let s = pulsing();
+        assert_eq!(
+            select_draw_key(false, &s, &glitching_at(2), 0, 24),
+            DrawKey::UnhealthyBurst(2),
+        );
+    }
+
+    #[test]
+    fn select_draw_key_stable_across_a_multi_tick_burst_step() {
+        // A burst step held for 2 ticks should produce the same key both
+        // times — proving the dedup will skip the second set_icon.
+        let r = pulsing();
+        let k0 = select_draw_key(true, &glitching_at(1), &r, 10, 24);
+        let k1 = select_draw_key(true, &glitching_at(1), &r, 11, 24);
+        assert_eq!(k0, k1);
     }
 }
