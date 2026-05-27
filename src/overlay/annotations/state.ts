@@ -256,9 +256,18 @@ export function reducer(
           );
           return { ...state, rects, history };
         }
-        case "move":
-        case "resize":
-          return state;
+        case "move": {
+          const rects = state.rects.map((r) =>
+            r.id === last.id ? { ...r, x: last.previous.x, y: last.previous.y } : r,
+          );
+          return { ...state, rects, history };
+        }
+        case "resize": {
+          const rects = state.rects.map((r) =>
+            r.id === last.id ? { ...r, ...last.previous } : r,
+          );
+          return { ...state, rects, history };
+        }
       }
       assertNever(last);
     }

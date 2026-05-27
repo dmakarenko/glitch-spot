@@ -163,6 +163,81 @@ describe("undo", () => {
     s = reducer(s, { type: "UNDO" });
     expect(s.lastCreatedId).toBeNull();
   });
+
+  it("UNDO of a move restores the previous position", () => {
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 100 });
+    s = reducer(s, pointerTo(150, 150));
+    s = reducer(s, { type: "END_GESTURE" });
+    s = reducer(s, {
+      type: "BEGIN_MOVE",
+      id: "r1",
+      pointerX: 120,
+      pointerY: 120,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(220, 220));
+    s = reducer(s, { type: "END_GESTURE" });
+    expect(s.rects[0]).toMatchObject({ x: 200, y: 200 });
+    s = reducer(s, { type: "UNDO" });
+    expect(s.rects[0]).toMatchObject({ x: 100, y: 100, w: 50, h: 50 });
+  });
+
+  it("UNDO of a resize restores the full previous geometry", () => {
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 100 });
+    s = reducer(s, pointerTo(300, 250));
+    s = reducer(s, { type: "END_GESTURE" });
+    s = reducer(s, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      corner: "se",
+      pointerX: 300,
+      pointerY: 250,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(400, 300));
+    s = reducer(s, { type: "END_GESTURE" });
+    expect(s.rects[0]).toMatchObject({ x: 100, y: 100, w: 300, h: 200 });
+    s = reducer(s, { type: "UNDO" });
+    expect(s.rects[0]).toMatchObject({ x: 100, y: 100, w: 200, h: 150 });
+  });
+
+  it("UNDO walks back through move → resize in reverse order", () => {
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 100 });
+    s = reducer(s, pointerTo(200, 200));
+    s = reducer(s, { type: "END_GESTURE" });
+    // first move (100,100) -> (150,150)
+    s = reducer(s, {
+      type: "BEGIN_MOVE",
+      id: "r1",
+      pointerX: 120,
+      pointerY: 120,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(170, 170));
+    s = reducer(s, { type: "END_GESTURE" });
+    // then resize from (150,150,100,100) to wider
+    s = reducer(s, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      corner: "se",
+      pointerX: 250,
+      pointerY: 250,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(300, 300));
+    s = reducer(s, { type: "END_GESTURE" });
+    expect(s.rects[0]).toMatchObject({ x: 150, y: 150, w: 150, h: 150 });
+    // Undo the resize first.
+    s = reducer(s, { type: "UNDO" });
+    expect(s.rects[0]).toMatchObject({ x: 150, y: 150, w: 100, h: 100 });
+    // Then undo the move.
+    s = reducer(s, { type: "UNDO" });
+    expect(s.rects[0]).toMatchObject({ x: 100, y: 100, w: 100, h: 100 });
+  });
 });
 
 describe("min-size guard on END_GESTURE", () => {
