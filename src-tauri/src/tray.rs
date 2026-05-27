@@ -512,6 +512,11 @@ async fn run_tray_animation(
     let mut anim_tick = interval(Duration::from_millis(ANIM_TICK_MS));
     let mut health_tick = interval(Duration::from_secs(3));
     let mut healthy = mcp_is_healthy(&mcp_bound);
+    // Tracks whether we've done the one-time startup menu sync. Deferred to
+    // the first health_tick (≥3s) so set_menu is never called at task-start
+    // while the OS menu system is still initialising (which caused a first-
+    // hover glitch on the Tunnel Provider submenu).
+    let mut initial_sync_done = false;
     let mut counter: u64 = 0;
     // StdRng is Send, so the future is Send and can be scheduled across threads
     // by tokio. thread_rng() isn't Send because it holds thread-local state.
@@ -595,7 +600,13 @@ async fn run_tray_animation(
             }
             _ = health_tick.tick() => {
                 let new_healthy = mcp_is_healthy(&mcp_bound);
-                if !new_healthy {
+                if !initial_sync_done {
+                    // First tick: sync menu to actual MCP state regardless of
+                    // whether health changed — covers the startup race where MCP
+                    // bound after build_menu but before this task read healthy.
+                    refresh_menu(&app);
+                    initial_sync_done = true;
+                } else if !new_healthy {
                     // Always reset the healthy state machine so the cyan pulse
                     // resumes cleanly when health recovers.
                     state = AnimState::Pulsing;
