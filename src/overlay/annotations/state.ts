@@ -151,14 +151,20 @@ export function reducer(
           );
           return { ...state, rects, history };
         }
-        // The "move" and "resize" undo branches are added in later tasks.
+        case "move":
+        case "resize":
+          return state;
       }
-      return state;
+      assertNever(last);
     }
 
     default:
       return state;
   }
+}
+
+function assertNever(x: never): never {
+  throw new Error(`Unhandled history kind: ${JSON.stringify(x)}`);
 }
 
 function extendTo(

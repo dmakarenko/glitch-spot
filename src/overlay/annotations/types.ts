@@ -19,6 +19,7 @@ export type ActiveGesture =
 
 export type AnnotationsState = {
   rects: Rect[];
+  // Stack of reversible actions; the head is the most recent.
   history: HistoryEntry[];
   active: ActiveGesture | null;
   lastCreatedId: string | null;
