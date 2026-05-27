@@ -507,10 +507,16 @@ async fn run_tray_animation(
 ) {
     use rand::{Rng, SeedableRng};
     use tauri::image::Image;
-    use tokio::time::{interval, Duration};
+    use tokio::time::{interval, interval_at, Duration, Instant};
 
     let mut anim_tick = interval(Duration::from_millis(ANIM_TICK_MS));
-    let mut health_tick = interval(Duration::from_secs(3));
+    // interval_at so the first tick fires after 3s, not immediately.
+    // The initial menu sync deferred to this tick must not race with
+    // macOS menu system initialisation at task startup.
+    let mut health_tick = interval_at(
+        Instant::now() + Duration::from_secs(3),
+        Duration::from_secs(3),
+    );
     let mut healthy = mcp_is_healthy(&mcp_bound);
     // Tracks whether we've done the one-time startup menu sync. Deferred to
     // the first health_tick (≥3s) so set_menu is never called at task-start
