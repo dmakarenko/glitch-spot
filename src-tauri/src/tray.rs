@@ -24,6 +24,13 @@ const CYAN_RGB: (u8, u8, u8) = (0, 245, 255);
 // not a glitch flourish.
 const RED_RGB: (u8, u8, u8) = (255, 59, 48);
 
+// Mono tint base RGB — same as the bundled monochrome PNG. The Mono modes
+// render with macOS's template-image flag, so this RGB never reaches the
+// pixel: the system tints the alpha mask to the menu-bar foreground colour
+// (white on dark, black on light). The constant just feeds `tint_frame`
+// for the alpha modulation we still want during the pulse + bursts.
+const MONO_RGB: (u8, u8, u8) = (0, 0, 0);
+
 /// Maximum pixel shift applied to each scanline band during a glitch burst.
 pub(crate) const GLITCH_SHIFT_MAX: i8 = 3;
 
@@ -44,44 +51,67 @@ pub(crate) fn tint_frame(source_rgba: &[u8], rgb: (u8, u8, u8), alpha_factor: f3
     out
 }
 
-/// Number of frames in the cyan pulse cycle. Combined with `ANIM_TICK_MS`,
-/// determines cycle length: 68 × 35ms ≈ 2.4s gentle pulse.
-pub(crate) const CYAN_FRAME_COUNT: usize = 68;
+/// Number of frames in the pulse cycle. Combined with `ANIM_TICK_MS`,
+/// determines cycle length: 24 × 100ms = 2.4s gentle pulse.
+pub(crate) const PULSE_FRAME_COUNT: usize = 24;
 
-/// 48 frames forming a 2.4s cosine pulse (alpha 30% → 100% → 30%).
-pub(crate) fn build_cyan_frames(source: &[u8]) -> Vec<Vec<u8>> {
+/// 24 frames forming a 2.4s cosine pulse (alpha 30% → 100% → 30%) at the
+/// given tint colour. Used for both cyan (coloured mode) and mono tints.
+pub(crate) fn build_pulse_frames(source: &[u8], rgb: (u8, u8, u8)) -> Vec<Vec<u8>> {
     const BASE: f32 = 0.65;
     const AMP: f32 = 0.35;
-    (0..CYAN_FRAME_COUNT).map(|i| {
-        let t = i as f32 / CYAN_FRAME_COUNT as f32;
+    (0..PULSE_FRAME_COUNT).map(|i| {
+        let t = i as f32 / PULSE_FRAME_COUNT as f32;
         let alpha = BASE + AMP * (2.0 * std::f32::consts::PI * t).cos();
-        tint_frame(source, CYAN_RGB, alpha)
+        tint_frame(source, rgb, alpha)
     }).collect()
 }
 
-/// Steady red frame shown between bursts during the unhealthy state.
-pub(crate) fn build_red_steady(source: &[u8]) -> Vec<u8> {
-    tint_frame(source, RED_RGB, 0.65)
+/// One of the two icon tints the user can pick from the tray menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Tint {
+    /// Cyan when healthy, red when unhealthy — the at-a-glance status colours.
+    Coloured,
+    /// Rendered as a macOS template image — the system tints the alpha mask
+    /// to match the menu-bar foreground (white on dark, black on light), so
+    /// it blends in with system menu-bar icons. Health is not encoded in the
+    /// icon when this is selected — it only shows in the MCP menu row.
+    Mono,
 }
 
-/// Brighter red base used as input to scanline shift during unhealthy bursts.
-pub(crate) fn build_red_burst_base(source: &[u8]) -> Vec<u8> {
-    tint_frame(source, RED_RGB, 0.80)
+/// All pre-built frames for a single tint, computed once at startup.
+pub(crate) struct TintAssets {
+    /// Cosine pulse cycle, used during animated-healthy state.
+    pub pulse: Vec<Vec<u8>>,
+    /// Constant-alpha frame held between scanline bursts during animated-
+    /// unhealthy state. Slightly dimmer than the burst peak.
+    pub steady_unhealthy: Vec<u8>,
+    /// Brighter base fed into scanline-shift during animated-healthy bursts,
+    /// so displaced pixels stay tinted rather than reverting to raw black.
+    pub burst_base_healthy: Vec<u8>,
+    /// Brighter base fed into scanline-shift during animated-unhealthy bursts.
+    pub burst_base_unhealthy: Vec<u8>,
+    /// Single frame held while static mode + healthy.
+    pub static_healthy: Vec<u8>,
+    /// Single frame held while static mode + unhealthy. For the Mono tint
+    /// this is the same as `static_healthy` since Mono ignores health.
+    pub static_unhealthy: Vec<u8>,
 }
 
 pub(crate) struct AnimationFrames {
-    pub cyan: Vec<Vec<u8>>,
-    /// Constant-alpha red frame shown between unhealthy scanline bursts.
-    pub red_steady: Vec<u8>,
-    /// Brighter red base fed into scanline-shift during unhealthy bursts.
-    pub red_burst_base: Vec<u8>,
-    /// Raw source bytes kept for runtime scanline-shift rendering.
-    pub source: Vec<u8>,
-    /// Cyan-tinted base frame used as input to scanline-shift during bursts,
-    /// so the displaced pixels stay cyan rather than reverting to raw black.
-    pub burst_base: Vec<u8>,
+    pub coloured: TintAssets,
+    pub mono: TintAssets,
     pub width: u32,
     pub height: u32,
+}
+
+impl AnimationFrames {
+    pub(crate) fn assets(&self, tint: Tint) -> &TintAssets {
+        match tint {
+            Tint::Coloured => &self.coloured,
+            Tint::Mono => &self.mono,
+        }
+    }
 }
 
 /// One horizontal band to shift during a glitch burst step.
@@ -284,6 +314,30 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&provider_ts)
         .build()?;
 
+    let (current_animated, current_coloured) = state.settings.current_tray();
+    let tray_ca = CheckMenuItemBuilder::new("Coloured + Animated")
+        .id("tray:coloured-animated")
+        .checked(current_coloured && current_animated)
+        .build(app)?;
+    let tray_cs = CheckMenuItemBuilder::new("Coloured + Static")
+        .id("tray:coloured-static")
+        .checked(current_coloured && !current_animated)
+        .build(app)?;
+    let tray_ba = CheckMenuItemBuilder::new("Mono + Animated")
+        .id("tray:mono-animated")
+        .checked(!current_coloured && current_animated)
+        .build(app)?;
+    let tray_bs = CheckMenuItemBuilder::new("Mono + Static")
+        .id("tray:mono-static")
+        .checked(!current_coloured && !current_animated)
+        .build(app)?;
+    let tray_submenu = SubmenuBuilder::new(app, "Tray icon")
+        .item(&tray_ca)
+        .item(&tray_cs)
+        .item(&tray_ba)
+        .item(&tray_bs)
+        .build()?;
+
     let launch_at_login = CheckMenuItemBuilder::new("Launch at Login")
         .id("launch_at_login")
         .checked(autostart_on)
@@ -315,6 +369,7 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&tunnel_status_item)
         .item(&provider_submenu)
         .item(&PredefinedMenuItem::separator(app)?)
+        .item(&tray_submenu)
         .item(&launch_at_login)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&build_branch)
@@ -325,8 +380,8 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
 }
 
 /// Decode the bundled monochrome tray PNG into raw RGBA + dimensions, then
-/// pre-compute the cyan pulse and red blink frames. Done once at startup; the
-/// animation task just cycles through these.
+/// pre-compute every animated/static frame for both tints. Done once at
+/// startup; the animation task just looks frames up by `(tint, phase)`.
 fn build_animation_frames() -> Option<AnimationFrames> {
     let bytes = include_bytes!("../icons/tray.png");
     let img = match image::load_from_memory(bytes) {
@@ -338,17 +393,33 @@ fn build_animation_frames() -> Option<AnimationFrames> {
     };
     let (width, height) = img.dimensions();
     let source = img.into_raw();
-    let cyan_frames = build_cyan_frames(&source);
-    let burst_base = tint_frame(&source, CYAN_RGB, 0.80);
-    Some(AnimationFrames {
-        cyan: cyan_frames,
-        red_steady: build_red_steady(&source),
-        red_burst_base: build_red_burst_base(&source),
-        source,
-        burst_base,
-        width,
-        height,
-    })
+
+    let coloured = TintAssets {
+        pulse: build_pulse_frames(&source, CYAN_RGB),
+        steady_unhealthy: tint_frame(&source, RED_RGB, 0.65),
+        burst_base_healthy: tint_frame(&source, CYAN_RGB, 0.80),
+        burst_base_unhealthy: tint_frame(&source, RED_RGB, 0.80),
+        static_healthy: tint_frame(&source, CYAN_RGB, 1.0),
+        // 0.85 not 1.0 — full-alpha red on a 22px icon reads as alarmist
+        // even when the rest of the system is fine.
+        static_unhealthy: tint_frame(&source, RED_RGB, 0.85),
+    };
+
+    // Mono tint: the source PNG is already RGB=(0,0,0), so `tint_frame` with
+    // MONO_RGB only modulates alpha. macOS treats these frames as template
+    // images (see set_icon_as_template wiring) and tints them to the menu
+    // bar's foreground colour, so the RGB doesn't actually reach the pixel.
+    // Static frames just use the raw source — Mono is health-agnostic.
+    let mono = TintAssets {
+        pulse: build_pulse_frames(&source, MONO_RGB),
+        steady_unhealthy: tint_frame(&source, MONO_RGB, 0.65),
+        burst_base_healthy: tint_frame(&source, MONO_RGB, 0.80),
+        burst_base_unhealthy: tint_frame(&source, MONO_RGB, 0.80),
+        static_healthy: source.clone(),
+        static_unhealthy: source.clone(),
+    };
+
+    Some(AnimationFrames { coloured, mono, width, height })
 }
 
 pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon> {
@@ -358,23 +429,40 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
     // Read health state before build_menu so we know what the menu was built
     // with; passed to the animation task to avoid a spurious refresh at the
     // first health_tick when nothing actually changed.
-    let mcp_bound = {
+    let (mcp_bound, tray_animated_flag, tray_coloured_flag) = {
         let state = app.state::<crate::AppState>();
-        state.mcp_bound.clone()
+        (
+            state.mcp_bound.clone(),
+            state.settings.tray_animated_flag(),
+            state.settings.tray_coloured_flag(),
+        )
     };
     let menu_built_healthy = mcp_is_healthy(&mcp_bound);
     let menu = build_menu(app)?;
 
-    // Initial icon: cyan frame 0 if frames decoded, otherwise the raw black PNG
-    // (which would have been rendered via icon_as_template before this change —
-    // here it just shows up as black, only used in the failure fallback).
+    // Initial icon matches the first frame the animation loop will draw at
+    // counter=0 — read the user's saved tray appearance so we don't flash a
+    // colour they switched off. Falls back to the raw PNG on decode failure.
+    let (initial_animated, initial_coloured) = {
+        let state = app.state::<crate::AppState>();
+        state.settings.current_tray()
+    };
+    let initial_tint = if initial_coloured { Tint::Coloured } else { Tint::Mono };
     let initial_icon: Image<'_> = match &frames {
-        Some(f) => Image::new(&f.cyan[0], f.width, f.height),
+        Some(f) => {
+            let assets = f.assets(initial_tint);
+            let bytes = if initial_animated { &assets.pulse[0] } else { &assets.static_healthy };
+            Image::new(bytes, f.width, f.height)
+        }
         None => Image::from_bytes(include_bytes!("../icons/tray.png"))?,
     };
 
     let tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(initial_icon)
+        // Mono modes render as macOS template images so the system tints
+        // them to the menu bar foreground. Coloured modes ship full-RGBA
+        // frames and must NOT be templates, or the colour gets stripped.
+        .icon_as_template(!initial_coloured)
         .menu(&menu)
         .on_menu_event(|app, event| {
             let app = app.clone();
@@ -445,6 +533,19 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                         refresh_menu(&app2);
                     });
                 }
+                "tray:coloured-animated"
+                | "tray:coloured-static"
+                | "tray:mono-animated"
+                | "tray:mono-static" => {
+                    let id = event.id.as_ref();
+                    let coloured = id.starts_with("tray:coloured");
+                    let animated = id.ends_with("-animated");
+                    let state = app.state::<crate::AppState>();
+                    if let Err(e) = crate::do_set_tray_appearance(&state, animated, coloured) {
+                        eprintln!("tray: set tray appearance failed: {e}");
+                    }
+                    refresh_menu(&app);
+                }
                 "launch_at_login" => {
                     let manager = app.autolaunch();
                     let is_on = manager.is_enabled().unwrap_or(false);
@@ -504,21 +605,29 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
     // aggressive red blink when down. Polls health every 3s.
     if let Some(frames) = frames {
         let tray_for_anim = tray.clone();
-        tauri::async_runtime::spawn(run_tray_animation(tray_for_anim, frames, mcp_bound, app.clone(), menu_built_healthy));
+        tauri::async_runtime::spawn(run_tray_animation(
+            tray_for_anim,
+            frames,
+            mcp_bound,
+            tray_animated_flag,
+            tray_coloured_flag,
+            app.clone(),
+            menu_built_healthy,
+        ));
     }
 
     Ok(tray)
 }
 
-const ANIM_TICK_MS: u64 = 35;
+const ANIM_TICK_MS: u64 = 100;
 /// Min/max ticks between glitch bursts during healthy state.
-/// At 35ms/tick: 90-165 ticks ≈ 3.2-5.8s, centred around 4.5s.
-const GLITCH_GAP_MIN: u64 = 90;
-const GLITCH_GAP_MAX: u64 = 165;
+/// At 100ms/tick: 32-58 ticks ≈ 3.2-5.8s, centred around 4.5s.
+const GLITCH_GAP_MIN: u64 = 32;
+const GLITCH_GAP_MAX: u64 = 58;
 /// Min/max ticks between scanline bursts during unhealthy state.
-/// At 35ms/tick: 60-120 ticks ≈ 2.1-4.2s — more agitated than healthy.
-const RED_GAP_MIN: u64 = 60;
-const RED_GAP_MAX: u64 = 120;
+/// At 100ms/tick: 21-42 ticks ≈ 2.1-4.2s — more agitated than healthy.
+const RED_GAP_MIN: u64 = 21;
+const RED_GAP_MAX: u64 = 42;
 
 enum AnimState {
     Pulsing,
@@ -529,14 +638,96 @@ enum AnimState {
     },
 }
 
+/// Which burst sequence a step belongs to — needed in the key because a
+/// healthy and an unhealthy burst at the same `step_idx` paint different
+/// frames and must dedup as distinct.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BurstSide {
+    Healthy,
+    Unhealthy,
+}
+
+/// The animation phase the tick wants to draw. Independent of tint so the
+/// same phase can be combined with any tint to produce the final image.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Phase {
+    /// Static mode, single frame. The bool distinguishes the healthy and
+    /// unhealthy static frames in the Coloured tint; in the Mono tint the
+    /// caller collapses both to `Static(true)` because Mono ignores health
+    /// — that way the dedup doesn't redraw on health flips.
+    Static(bool),
+    /// Animated healthy: cosine pulse, current frame index.
+    Pulse(usize),
+    /// Animated unhealthy: constant frame held between scanline bursts.
+    SteadyUnhealthy,
+    /// Animated burst step — the actual band-shift pattern is drawn from
+    /// the current `AnimState::Glitching` payload, but only the side +
+    /// step_idx are in the dedup key (the shift pattern is deterministic
+    /// for that step).
+    Burst { side: BurstSide, step_idx: usize },
+}
+
+/// Stable key identifying which icon image a tick wants to draw. Used to skip
+/// `set_icon` (and the `apply_scanline_shift` allocation that feeds it) when
+/// the previous tick already drew the same content — biggest win is during
+/// the unhealthy steady-red interval and during Static modes where the icon
+/// is constant for as long as the user leaves the mode set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DrawKey {
+    tint: Tint,
+    phase: Phase,
+}
+
+/// Pick the icon to draw this tick. Pure function — does no allocation and
+/// does not touch the tray. The animation loop calls this first and only
+/// performs the expensive `apply_scanline_shift` + `set_icon` when the key
+/// differs from the previous tick.
+fn select_draw_key(
+    animated: bool,
+    coloured: bool,
+    healthy: bool,
+    state: &AnimState,
+    red_state: &AnimState,
+    counter: u64,
+    pulse_len: usize,
+) -> DrawKey {
+    let tint = if coloured { Tint::Coloured } else { Tint::Mono };
+    let phase = if !animated {
+        // Mono tint paints the same image for healthy/unhealthy, so collapse
+        // the key — otherwise a health flip would force a no-op set_icon.
+        let static_healthy = if coloured { healthy } else { true };
+        Phase::Static(static_healthy)
+    } else if !healthy {
+        match red_state {
+            AnimState::Pulsing => Phase::SteadyUnhealthy,
+            AnimState::Glitching { step_idx, .. } => Phase::Burst {
+                side: BurstSide::Unhealthy,
+                step_idx: *step_idx,
+            },
+        }
+    } else {
+        match state {
+            AnimState::Pulsing => Phase::Pulse((counter % pulse_len as u64) as usize),
+            AnimState::Glitching { step_idx, .. } => Phase::Burst {
+                side: BurstSide::Healthy,
+                step_idx: *step_idx,
+            },
+        }
+    };
+    DrawKey { tint, phase }
+}
+
 async fn run_tray_animation(
     tray: tauri::tray::TrayIcon,
     frames: AnimationFrames,
     mcp_bound: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    tray_animated: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    tray_coloured: std::sync::Arc<std::sync::atomic::AtomicBool>,
     app: AppHandle,
     menu_built_healthy: bool,
 ) {
     use rand::{Rng, SeedableRng};
+    use std::sync::atomic::Ordering;
     use tauri::image::Image;
     use tokio::time::{interval, interval_at, Duration, Instant};
 
@@ -562,72 +753,123 @@ async fn run_tray_animation(
     let mut next_glitch_at: u64 = rng.gen_range(GLITCH_GAP_MIN..=GLITCH_GAP_MAX);
     let mut red_state = AnimState::Pulsing;
     let mut next_red_glitch_at: u64 = rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
+    // Last icon we asked the OS to render. Skipping `set_icon` when the key
+    // matches eliminates ~3-4s of redundant set_icon calls every gap between
+    // red bursts, every Static-mode tick once the first frame lands, plus
+    // one redundant call inside any burst step held for 2 ticks.
+    let mut last_drawn: Option<DrawKey> = None;
+    // Detect when the user flips Animated or Coloured so we can reset the
+    // burst state machines — otherwise turning animation back on could
+    // resume a stale burst mid-step with garbled output.
+    let mut last_mode: Option<(bool, bool)> = None;
 
     loop {
         tokio::select! {
             _ = anim_tick.tick() => {
-                if !healthy {
-                    match &mut red_state {
-                        AnimState::Pulsing => {
-                            let img = Image::new(&frames.red_steady, frames.width, frames.height);
-                            let _ = tray.set_icon(Some(img));
-                            if counter >= next_red_glitch_at {
-                                red_state = AnimState::Glitching {
-                                    sequence: random_scanline_sequence(&mut rng, frames.height),
-                                    step_idx: 0,
-                                    ticks_in_step: 0,
-                                };
-                            }
+                let animated = tray_animated.load(Ordering::Relaxed);
+                let coloured = tray_coloured.load(Ordering::Relaxed);
+                if last_mode != Some((animated, coloured)) {
+                    state = AnimState::Pulsing;
+                    red_state = AnimState::Pulsing;
+                    next_glitch_at = counter + rng.gen_range(GLITCH_GAP_MIN..=GLITCH_GAP_MAX);
+                    next_red_glitch_at = counter + rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
+                    last_mode = Some((animated, coloured));
+                }
+
+                let pulse_len = frames.assets(Tint::Coloured).pulse.len();
+                let want = select_draw_key(
+                    animated, coloured, healthy, &state, &red_state, counter, pulse_len,
+                );
+                if last_drawn.as_ref() != Some(&want) {
+                    let assets = frames.assets(want.tint);
+                    // Mono frames are painted as macOS template images so the
+                    // system tints the alpha mask to the menu-bar foreground.
+                    // Use set_icon_with_as_template — calling set_icon then
+                    // set_icon_as_template separately produces the flicker
+                    // Tauri's own docs warn about, because set_icon creates a
+                    // fresh NSImage whose template flag defaults to false.
+                    let is_template = matches!(want.tint, Tint::Mono);
+                    match &want.phase {
+                        Phase::Static(h) => {
+                            let bytes = if *h { &assets.static_healthy } else { &assets.static_unhealthy };
+                            let img = Image::new(bytes, frames.width, frames.height);
+                            let _ = tray.set_icon_with_as_template(Some(img), is_template);
                         }
-                        AnimState::Glitching { sequence, step_idx, ticks_in_step } => {
-                            let shifted = apply_scanline_shift(
-                                &frames.red_burst_base, frames.width, frames.height,
-                                &sequence[*step_idx].bands,
-                            );
-                            let img = Image::new(&shifted, frames.width, frames.height);
-                            let _ = tray.set_icon(Some(img));
-                            *ticks_in_step += 1;
-                            if *ticks_in_step >= sequence[*step_idx].ticks {
-                                *step_idx += 1;
-                                *ticks_in_step = 0;
-                                if *step_idx >= sequence.len() {
-                                    red_state = AnimState::Pulsing;
-                                    next_red_glitch_at = counter
-                                        + rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
-                                }
+                        Phase::Pulse(idx) => {
+                            let img = Image::new(&assets.pulse[*idx], frames.width, frames.height);
+                            let _ = tray.set_icon_with_as_template(Some(img), is_template);
+                        }
+                        Phase::SteadyUnhealthy => {
+                            let img = Image::new(&assets.steady_unhealthy, frames.width, frames.height);
+                            let _ = tray.set_icon_with_as_template(Some(img), is_template);
+                        }
+                        Phase::Burst { side, .. } => {
+                            let (base, glitch_state) = match side {
+                                BurstSide::Healthy => (&assets.burst_base_healthy, &state),
+                                BurstSide::Unhealthy => (&assets.burst_base_unhealthy, &red_state),
+                            };
+                            if let AnimState::Glitching { sequence, step_idx, .. } = glitch_state {
+                                let shifted = apply_scanline_shift(
+                                    base, frames.width, frames.height,
+                                    &sequence[*step_idx].bands,
+                                );
+                                let img = Image::new(&shifted, frames.width, frames.height);
+                                let _ = tray.set_icon_with_as_template(Some(img), is_template);
                             }
                         }
                     }
-                } else {
-                    match &mut state {
-                        AnimState::Pulsing => {
-                            // 68 cyan frames, advance every tick → 35ms/frame, ~2.4s cycle.
-                            let idx = (counter % frames.cyan.len() as u64) as usize;
-                            let img = Image::new(&frames.cyan[idx], frames.width, frames.height);
-                            let _ = tray.set_icon(Some(img));
-                            if counter >= next_glitch_at {
-                                state = AnimState::Glitching {
-                                    sequence: random_scanline_sequence(&mut rng, frames.height),
-                                    step_idx: 0,
-                                    ticks_in_step: 0,
-                                };
+                    last_drawn = Some(want);
+                }
+
+                // Burst state machines only advance in Animated mode — Static
+                // mode never enters Glitching so the timers would just churn
+                // counters that select_draw_key ignores anyway.
+                if animated {
+                    if !healthy {
+                        match &mut red_state {
+                            AnimState::Pulsing => {
+                                if counter >= next_red_glitch_at {
+                                    red_state = AnimState::Glitching {
+                                        sequence: random_scanline_sequence(&mut rng, frames.height),
+                                        step_idx: 0,
+                                        ticks_in_step: 0,
+                                    };
+                                }
+                            }
+                            AnimState::Glitching { sequence, step_idx, ticks_in_step } => {
+                                *ticks_in_step += 1;
+                                if *ticks_in_step >= sequence[*step_idx].ticks {
+                                    *step_idx += 1;
+                                    *ticks_in_step = 0;
+                                    if *step_idx >= sequence.len() {
+                                        red_state = AnimState::Pulsing;
+                                        next_red_glitch_at = counter
+                                            + rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
+                                    }
+                                }
                             }
                         }
-                        AnimState::Glitching { sequence, step_idx, ticks_in_step } => {
-                            let shifted = apply_scanline_shift(
-                                &frames.burst_base, frames.width, frames.height,
-                                &sequence[*step_idx].bands,
-                            );
-                            let img = Image::new(&shifted, frames.width, frames.height);
-                            let _ = tray.set_icon(Some(img));
-                            *ticks_in_step += 1;
-                            if *ticks_in_step >= sequence[*step_idx].ticks {
-                                *step_idx += 1;
-                                *ticks_in_step = 0;
-                                if *step_idx >= sequence.len() {
-                                    state = AnimState::Pulsing;
-                                    next_glitch_at = counter
-                                        + rng.gen_range(GLITCH_GAP_MIN..=GLITCH_GAP_MAX);
+                    } else {
+                        match &mut state {
+                            AnimState::Pulsing => {
+                                if counter >= next_glitch_at {
+                                    state = AnimState::Glitching {
+                                        sequence: random_scanline_sequence(&mut rng, frames.height),
+                                        step_idx: 0,
+                                        ticks_in_step: 0,
+                                    };
+                                }
+                            }
+                            AnimState::Glitching { sequence, step_idx, ticks_in_step } => {
+                                *ticks_in_step += 1;
+                                if *ticks_in_step >= sequence[*step_idx].ticks {
+                                    *step_idx += 1;
+                                    *ticks_in_step = 0;
+                                    if *step_idx >= sequence.len() {
+                                        state = AnimState::Pulsing;
+                                        next_glitch_at = counter
+                                            + rng.gen_range(GLITCH_GAP_MIN..=GLITCH_GAP_MAX);
+                                    }
                                 }
                             }
                         }
@@ -743,38 +985,37 @@ mod tests {
     }
 
     #[test]
-    fn cyan_frames_produce_full_set_with_full_alpha_peak() {
+    fn pulse_frames_produce_full_set_with_full_alpha_peak() {
         let source = vec![0, 0, 0, 255];
-        let frames = build_cyan_frames(&source);
-        assert_eq!(frames.len(), CYAN_FRAME_COUNT);
+        let frames = build_pulse_frames(&source, CYAN_RGB);
+        assert_eq!(frames.len(), PULSE_FRAME_COUNT);
         // Frame 0 starts at the cosine peak → alpha factor = BASE + AMP * 1.0 = 1.0.
         assert_eq!(frames[0][3], 255, "frame 0 is fully opaque");
         // Frame N/2 (half cycle) → cos(π) = -1.0 → alpha factor = BASE - AMP = 0.30.
         let expected_min = (255.0 * 0.30) as u8;
         assert_eq!(
-            frames[CYAN_FRAME_COUNT / 2][3],
+            frames[PULSE_FRAME_COUNT / 2][3],
             expected_min,
             "halfway frame is the dimmest"
         );
     }
 
     #[test]
-    fn red_steady_uses_delete_red_at_constant_alpha() {
+    fn pulse_frames_for_mono_tint_keep_rgb_at_zero() {
+        // Sanity-check the mono-tint variant: alpha modulates exactly the
+        // same as cyan, but RGB stays at (0,0,0) — the source colour. The
+        // macOS template flag (set elsewhere) tints the alpha mask to the
+        // menu-bar foreground, so the icon ends up white-on-dark, even
+        // though these bytes are technically black-with-modulated-alpha.
         let source = vec![0, 0, 0, 255];
-        let frame = build_red_steady(&source);
-        // --delete from DESIGN.md, clearly visible but not alarm-bright.
-        assert_eq!(&frame[0..3], &[255, 59, 48]);
-        assert_eq!(frame[3], (255.0 * 0.65) as u8);
-    }
-
-    #[test]
-    fn red_burst_base_uses_delete_red_brighter_than_steady() {
-        let source = vec![0, 0, 0, 255];
-        let steady = build_red_steady(&source);
-        let burst = build_red_burst_base(&source);
-        assert_eq!(&burst[0..3], &[255, 59, 48]);
-        assert!(burst[3] > steady[3], "burst base should be brighter than steady");
-        assert_eq!(burst[3], (255.0 * 0.80) as u8);
+        let frames = build_pulse_frames(&source, MONO_RGB);
+        assert_eq!(frames.len(), PULSE_FRAME_COUNT);
+        for (i, frame) in frames.iter().enumerate() {
+            assert_eq!(&frame[0..3], &[0, 0, 0], "frame {i} stays at source RGB");
+        }
+        // Same dimmest-frame alpha as the cyan pulse — only RGB differs.
+        let expected_min = (255.0 * 0.30) as u8;
+        assert_eq!(frames[PULSE_FRAME_COUNT / 2][3], expected_min);
     }
 
     #[test]
@@ -848,5 +1089,118 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn pulsing() -> AnimState { AnimState::Pulsing }
+    fn glitching_at(step_idx: usize) -> AnimState {
+        AnimState::Glitching { sequence: vec![], step_idx, ticks_in_step: 0 }
+    }
+    fn key(tint: Tint, phase: Phase) -> DrawKey { DrawKey { tint, phase } }
+
+    #[test]
+    fn select_draw_key_coloured_animated_healthy_advances_each_tick() {
+        // During the dominant healthy-pulse state, every tick produces a fresh
+        // frame index — the dedup in the loop won't skip these, by design.
+        let s = pulsing();
+        let r = pulsing();
+        assert_eq!(
+            select_draw_key(true, true, true, &s, &r, 0, 24),
+            key(Tint::Coloured, Phase::Pulse(0)),
+        );
+        assert_eq!(
+            select_draw_key(true, true, true, &s, &r, 5, 24),
+            key(Tint::Coloured, Phase::Pulse(5)),
+        );
+        assert_eq!(
+            select_draw_key(true, true, true, &s, &r, 25, 24),
+            key(Tint::Coloured, Phase::Pulse(1)),
+            "wraps at cycle end",
+        );
+    }
+
+    #[test]
+    fn select_draw_key_coloured_animated_unhealthy_is_steady_regardless_of_counter() {
+        // This is where dedup pays off most in the original (pre-static) modes:
+        // the key is constant for the entire 2-4s gap between red bursts.
+        let s = pulsing();
+        let r = pulsing();
+        for c in [0u64, 1, 17, 999, u64::MAX] {
+            assert_eq!(
+                select_draw_key(true, true, false, &s, &r, c, 24),
+                key(Tint::Coloured, Phase::SteadyUnhealthy),
+            );
+        }
+    }
+
+    #[test]
+    fn select_draw_key_burst_keys_carry_side_and_step_index() {
+        // Healthy burst — only `state` matters.
+        let r = pulsing();
+        assert_eq!(
+            select_draw_key(true, true, true, &glitching_at(3), &r, 0, 24),
+            key(Tint::Coloured, Phase::Burst { side: BurstSide::Healthy, step_idx: 3 }),
+        );
+        // Unhealthy burst — only `red_state` matters, and the side flips.
+        let s = pulsing();
+        assert_eq!(
+            select_draw_key(true, true, false, &s, &glitching_at(2), 0, 24),
+            key(Tint::Coloured, Phase::Burst { side: BurstSide::Unhealthy, step_idx: 2 }),
+        );
+    }
+
+    #[test]
+    fn select_draw_key_stable_across_a_multi_tick_burst_step() {
+        // A burst step held for 2 ticks produces the same key both times —
+        // proving the dedup will skip the second set_icon.
+        let r = pulsing();
+        let k0 = select_draw_key(true, true, true, &glitching_at(1), &r, 10, 24);
+        let k1 = select_draw_key(true, true, true, &glitching_at(1), &r, 11, 24);
+        assert_eq!(k0, k1);
+    }
+
+    #[test]
+    fn select_draw_key_static_coloured_distinguishes_health() {
+        // In static-coloured mode we still want at-a-glance status, so healthy
+        // and unhealthy must map to distinct keys (cyan vs red static frame).
+        let s = pulsing();
+        let r = pulsing();
+        let healthy = select_draw_key(false, true, true,  &s, &r, 0, 24);
+        let unhealthy = select_draw_key(false, true, false, &s, &r, 0, 24);
+        assert_eq!(healthy,   key(Tint::Coloured, Phase::Static(true)));
+        assert_eq!(unhealthy, key(Tint::Coloured, Phase::Static(false)));
+        assert_ne!(healthy, unhealthy);
+    }
+
+    #[test]
+    fn select_draw_key_static_mono_collapses_health_to_one_key() {
+        // The Mono + Static mode renders the source PNG regardless of
+        // health, so the key must collapse — otherwise the dedup would
+        // redraw the same image on every health flip.
+        let s = pulsing();
+        let r = pulsing();
+        let healthy = select_draw_key(false, false, true,  &s, &r, 0, 24);
+        let unhealthy = select_draw_key(false, false, false, &s, &r, 0, 24);
+        assert_eq!(healthy, unhealthy);
+        assert_eq!(healthy, key(Tint::Mono, Phase::Static(true)));
+    }
+
+    #[test]
+    fn select_draw_key_mono_animated_carries_mono_tint_through_phases() {
+        // Same phase progression as coloured-animated, but the tint flips
+        // every key so the render path picks mono assets.
+        let s = pulsing();
+        let r = pulsing();
+        assert_eq!(
+            select_draw_key(true, false, true, &s, &r, 7, 24),
+            key(Tint::Mono, Phase::Pulse(7)),
+        );
+        assert_eq!(
+            select_draw_key(true, false, false, &s, &r, 0, 24),
+            key(Tint::Mono, Phase::SteadyUnhealthy),
+        );
+        assert_eq!(
+            select_draw_key(true, false, true, &glitching_at(4), &r, 0, 24),
+            key(Tint::Mono, Phase::Burst { side: BurstSide::Healthy, step_idx: 4 }),
+        );
     }
 }
