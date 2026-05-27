@@ -293,6 +293,16 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .id("quit")
         .build(app)?;
 
+    let build_branch = MenuItemBuilder::new(format!("branch: {}", env!("GIT_BRANCH")))
+        .id("build_branch")
+        .enabled(false)
+        .build(app)?;
+
+    let build_commit = MenuItemBuilder::new(format!("commit: {}", env!("GIT_SHA")))
+        .id("build_commit")
+        .enabled(false)
+        .build(app)?;
+
     MenuBuilder::new(app)
         .item(&capture_live)
         .item(&capture_frozen)
@@ -306,6 +316,9 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&provider_submenu)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&launch_at_login)
+        .item(&PredefinedMenuItem::separator(app)?)
+        .item(&build_branch)
+        .item(&build_commit)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&quit)
         .build()
