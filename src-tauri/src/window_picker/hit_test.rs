@@ -68,4 +68,39 @@ mod tests {
     fn empty_window_list_returns_none() {
         assert_eq!(hit_test(&[], 0, 0), None);
     }
+
+    #[test]
+    fn parity_with_shared_fixture() {
+        use serde::Deserialize;
+
+        #[derive(Deserialize)]
+        struct Fixture { cases: Vec<Case> }
+        #[derive(Deserialize)]
+        struct Case {
+            name: String,
+            windows: Vec<FixtureWindow>,
+            cursor: Cursor,
+            expected: Option<u32>,
+        }
+        #[derive(Deserialize)]
+        struct FixtureWindow { window_id: u32, bounds: WindowBounds }
+        #[derive(Deserialize)]
+        struct Cursor { x: i32, y: i32 }
+
+        let raw = include_str!("../../../tests/fixtures/hit-test-cases.json");
+        let fixture: Fixture = serde_json::from_str(raw).expect("fixture parses");
+
+        for case in fixture.cases {
+            let ws: Vec<PickableWindow> = case.windows.into_iter().map(|w| PickableWindow {
+                window_id: w.window_id,
+                app_name: String::new(),
+                title: String::new(),
+                bounds: w.bounds,
+                display_index: 0,
+                layer: 0,
+            }).collect();
+            let got = hit_test(&ws, case.cursor.x, case.cursor.y);
+            assert_eq!(got, case.expected, "case `{}` mismatch", case.name);
+        }
+    }
 }

@@ -1,0 +1,45 @@
+{
+  "cases": [
+    {
+      "name": "inside-single",
+      "windows": [
+        { "window_id": 1, "bounds": { "x": 100, "y": 100, "w": 400, "h": 300 } }
+      ],
+      "cursor": { "x": 200, "y": 200 },
+      "expected": 1
+    },
+    {
+      "name": "outside-all",
+      "windows": [
+        { "window_id": 1, "bounds": { "x": 100, "y": 100, "w": 400, "h": 300 } }
+      ],
+      "cursor": { "x": 50, "y": 50 },
+      "expected": null
+    },
+    {
+      "name": "front-wins-on-overlap",
+      "windows": [
+        { "window_id": 2, "bounds": { "x": 150, "y": 150, "w": 300, "h": 300 } },
+        { "window_id": 1, "bounds": { "x": 100, "y": 100, "w": 400, "h": 400 } }
+      ],
+      "cursor": { "x": 200, "y": 200 },
+      "expected": 2
+    },
+    {
+      "name": "right-edge-is-half-open",
+      "windows": [
+        { "window_id": 1, "bounds": { "x": 100, "y": 100, "w": 50, "h": 50 } }
+      ],
+      "cursor": { "x": 150, "y": 120 },
+      "expected": null
+    },
+    {
+      "name": "left-edge-is-inside",
+      "windows": [
+        { "window_id": 1, "bounds": { "x": 100, "y": 100, "w": 50, "h": 50 } }
+      ],
+      "cursor": { "x": 100, "y": 120 },
+      "expected": 1
+    }
+  ]
+}
