@@ -191,14 +191,15 @@ pub fn build_router(store: Arc<SnapshotStore>) -> Router {
         .with_state(store)
 }
 
-/// Start the MCP server. Binds to 127.0.0.1:7820 and runs forever.
-/// Call this with `tauri::async_runtime::spawn(mcp::server::serve(store))`.
-pub async fn serve(store: Arc<SnapshotStore>) {
+/// Start the MCP server. Binds to 127.0.0.1:port and runs forever.
+/// Call this with `tauri::async_runtime::spawn(mcp::server::serve(store, port))`.
+pub async fn serve(store: Arc<SnapshotStore>, port: u16) {
     let app = build_router(store);
-    let listener = match tokio::net::TcpListener::bind("127.0.0.1:7820").await {
+    let addr = format!("127.0.0.1:{port}");
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("[glitch-spot mcp] failed to bind port 7820: {e}");
+            eprintln!("[glitch-spot mcp] failed to bind {addr}: {e}");
             return;
         }
     };
