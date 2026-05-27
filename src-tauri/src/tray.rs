@@ -470,7 +470,7 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
             let state = app.state::<crate::AppState>();
             state.mcp_bound.clone()
         };
-        tauri::async_runtime::spawn(run_tray_animation(tray_for_anim, frames, mcp_bound));
+        tauri::async_runtime::spawn(run_tray_animation(tray_for_anim, frames, mcp_bound, app.clone()));
     }
 
     Ok(tray)
@@ -495,6 +495,7 @@ async fn run_tray_animation(
     tray: tauri::tray::TrayIcon,
     frames: AnimationFrames,
     mcp_bound: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    app: AppHandle,
 ) {
     use rand::{Rng, SeedableRng};
     use tauri::image::Image;
@@ -561,6 +562,10 @@ async fn run_tray_animation(
                     // If health drops mid-glitch, drop back to the pulse path so
                     // the next tick renders red blink cleanly.
                     state = AnimState::Pulsing;
+                } else if !healthy {
+                    // Transitioned to healthy after a delayed bind — refresh the
+                    // tray menu so the MCP status item shows 🟢 immediately.
+                    refresh_menu(&app);
                 }
                 healthy = new_healthy;
             }
