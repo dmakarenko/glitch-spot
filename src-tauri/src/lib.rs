@@ -61,6 +61,8 @@ async fn open_overlay_frozen(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    state.picker_state.reset_to_idle();
     overlay::hide(&app).map_err(|e| e.to_string())
 }
 
@@ -103,8 +105,21 @@ async fn save_snapshot(
             };
             overlay::hide(&app).map_err(|e| e.to_string())?;
             std::thread::sleep(std::time::Duration::from_millis(120));
-            let mut frame = capture::capture_window(&app, session.window_id)
-                .map_err(|e| e.to_string())?;
+            let frame_result = capture::capture_window(&app, session.window_id);
+            let mut frame = match frame_result {
+                Ok(f) => f,
+                Err(e) => {
+                    use tauri_plugin_notification::NotificationExt;
+                    let _ = app.notification()
+                        .builder()
+                        .title("Glitch Spot")
+                        .body("Selected window closed — annotations discarded")
+                        .show();
+                    eprintln!("[glitch-spot] window capture failed: {e}");
+                    state.picker_state.reset_to_idle();
+                    return Err(format!("window capture failed: {e}"));
+                }
+            };
             frame.display_index = session.window.display_index;
             let crop_x = (session.window.bounds.x - session.display.x) as f32;
             let crop_y = (session.window.bounds.y - session.display.y) as f32;
