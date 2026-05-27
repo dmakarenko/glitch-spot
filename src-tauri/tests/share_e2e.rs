@@ -27,9 +27,9 @@ fn write_real_snapshot(base: &std::path::Path, id: &str) -> std::path::PathBuf {
         },
         "images": { "clean": "x", "annotated": "y" }
     });
-    std::fs::write(dir.join("snapshot.json"), serde_json::to_vec_pretty(&snap).unwrap()).unwrap();
-    std::fs::write(dir.join("clean.png"), b"\x89PNG-fixture-clean").unwrap();
-    std::fs::write(dir.join("annotated.png"), b"\x89PNG-fixture-annotated").unwrap();
+    std::fs::write(dir.join(glitch_spot::snapshot::snapshot_json_filename(id)), serde_json::to_vec_pretty(&snap).unwrap()).unwrap();
+    std::fs::write(dir.join(glitch_spot::snapshot::clean_png_filename(id)), b"\x89PNG-fixture-clean").unwrap();
+    std::fs::write(dir.join(glitch_spot::snapshot::annotated_png_filename(id)), b"\x89PNG-fixture-annotated").unwrap();
     dir
 }
 

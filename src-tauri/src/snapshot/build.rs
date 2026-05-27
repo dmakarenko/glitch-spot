@@ -7,7 +7,10 @@ use chrono::Utc;
 
 use crate::capture::CapturedFrame;
 use crate::snapshot::annotate::{render_annotated_png, AnnotateError};
-use crate::snapshot::{new_id, Annotation, Context, Coords, Images, OsInfo, ScreenInfo, Snapshot};
+use crate::snapshot::{
+    annotated_png_filename, clean_png_filename, new_id, Annotation, Context, Coords, Images,
+    OsInfo, ScreenInfo, Snapshot,
+};
 
 /// One annotation as received from the React side. Coordinates are CSS pixels
 /// relative to the overlay's content area; we multiply by `scale_factor` to
@@ -64,8 +67,8 @@ pub fn build(
 ) -> Result<BuiltSnapshot, BuildError> {
     let id = new_id();
     let dir = base_dir.join(&id);
-    let clean_path = dir.join("clean.png");
-    let annotated_path = dir.join("annotated.png");
+    let clean_path = dir.join(clean_png_filename(&id));
+    let annotated_path = dir.join(annotated_png_filename(&id));
 
     let scale = frame.scale_factor;
     let annotations: Vec<Annotation> = annotations

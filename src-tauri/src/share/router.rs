@@ -67,7 +67,7 @@ async fn landing(
     let Some(dir) = authorize(&state, &id, &tok) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let json_bytes = match std::fs::read(dir.join("snapshot.json")) {
+    let json_bytes = match std::fs::read(dir.join(crate::snapshot::snapshot_json_filename(&id))) {
         Ok(b) => b,
         Err(_) => return StatusCode::NOT_FOUND.into_response(),
     };
@@ -86,7 +86,7 @@ async fn snapshot_json(
     let Some(dir) = authorize(&state, &id, &tok) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    match std::fs::read(dir.join("snapshot.json")) {
+    match std::fs::read(dir.join(crate::snapshot::snapshot_json_filename(&id))) {
         Ok(bytes) => (
             [(header::CONTENT_TYPE, "application/json")],
             bytes,
@@ -95,35 +95,34 @@ async fn snapshot_json(
     }
 }
 
-async fn serve_png(
-    State(state): State<ShareState>,
-    AxumPath((id, tok)): AxumPath<(String, String)>,
-    filename: &'static str,
-) -> Response {
-    let Some(dir) = authorize(&state, &id, &tok) else {
+async fn serve_png(state: ShareState, id: &str, tok: &str, filename: String) -> Response {
+    let Some(dir) = authorize(&state, id, tok) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    match std::fs::read(dir.join(filename)) {
+    match std::fs::read(dir.join(&filename)) {
         Ok(bytes) => (
             [(header::CONTENT_TYPE, "image/png")],
             Body::from(bytes),
-        ).into_response(),
+        )
+            .into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 async fn serve_clean_png(
     State(state): State<ShareState>,
-    path: AxumPath<(String, String)>,
+    AxumPath((id, tok)): AxumPath<(String, String)>,
 ) -> Response {
-    serve_png(State(state), path, "clean.png").await
+    let filename = crate::snapshot::clean_png_filename(&id);
+    serve_png(state, &id, &tok, filename).await
 }
 
 async fn serve_annotated_png(
     State(state): State<ShareState>,
-    path: AxumPath<(String, String)>,
+    AxumPath((id, tok)): AxumPath<(String, String)>,
 ) -> Response {
-    serve_png(State(state), path, "annotated.png").await
+    let filename = crate::snapshot::annotated_png_filename(&id);
+    serve_png(state, &id, &tok, filename).await
 }
 
 /// Start the share server. Binds 127.0.0.1:7821; logs and returns on bind failure.
@@ -167,9 +166,9 @@ mod tests {
             },
             "images": { "clean": "x", "annotated": "y" }
         });
-        std::fs::write(dir.join("snapshot.json"), serde_json::to_vec_pretty(&snapshot_json).unwrap()).unwrap();
-        std::fs::write(dir.join("clean.png"), b"clean-bytes").unwrap();
-        std::fs::write(dir.join("annotated.png"), b"annotated-bytes").unwrap();
+        std::fs::write(dir.join(crate::snapshot::snapshot_json_filename(id)), serde_json::to_vec_pretty(&snapshot_json).unwrap()).unwrap();
+        std::fs::write(dir.join(crate::snapshot::clean_png_filename(id)), b"clean-bytes").unwrap();
+        std::fs::write(dir.join(crate::snapshot::annotated_png_filename(id)), b"annotated-bytes").unwrap();
         crate::share::token::write_for(&dir, token).unwrap();
         dir
     }
@@ -252,7 +251,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let dir = temp.path().join("snap_eee");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("snapshot.json"), b"{}").unwrap();
+        std::fs::write(dir.join(crate::snapshot::snapshot_json_filename("snap_eee")), b"{}").unwrap();
         let app = build_share_router(temp.path().to_path_buf());
         let (status, _, _) = get(app, "/share/snap_eee/whatever/snapshot.json").await;
         assert_eq!(status, StatusCode::NOT_FOUND);
@@ -271,7 +270,7 @@ mod tests {
     async fn valid_token_missing_file_returns_404() {
         let temp = tempfile::TempDir::new().unwrap();
         let dir = write_fixture(temp.path(), "snap_ggg", "tok-ggg");
-        std::fs::remove_file(dir.join("clean.png")).unwrap();
+        std::fs::remove_file(dir.join(crate::snapshot::clean_png_filename("snap_ggg"))).unwrap();
         let app = build_share_router(temp.path().to_path_buf());
         let (status, _, _) = get(app, "/share/snap_ggg/tok-ggg/clean.png").await;
         assert_eq!(status, StatusCode::NOT_FOUND);

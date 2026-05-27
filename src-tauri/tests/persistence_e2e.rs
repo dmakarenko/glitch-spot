@@ -70,8 +70,12 @@ fn build_then_persist_writes_files_at_paths_in_snapshot_images() {
         "annotated.png must be PNG-encoded"
     );
 
-    // snapshot.json round-trips back to an equal Snapshot.
-    let json_path = temp.path().join(&built.snapshot.id).join("snapshot.json");
+    // The serialised snapshot round-trips back to an equal Snapshot.
+    let id = &built.snapshot.id;
+    let json_path = temp
+        .path()
+        .join(id)
+        .join(glitch_spot::snapshot::snapshot_json_filename(id));
     let parsed: Snapshot = serde_json::from_slice(&std::fs::read(&json_path).unwrap()).unwrap();
     assert_eq!(parsed, built.snapshot);
 }

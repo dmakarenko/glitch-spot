@@ -79,10 +79,28 @@ fn annotated_serializes_as_null_when_none() {
 }
 
 #[test]
-fn new_id_has_snap_prefix_and_reasonable_length() {
+fn new_id_is_sortable_timestamp_with_uuid_suffix() {
     let id = new_id();
-    assert!(id.starts_with("snap_"));
-    assert_eq!(id.len(), "snap_".len() + 12);
+    // `YYYY-MM-DD_HH-MM-SS_<12-char uuid>` = 19 + 1 + 12 = 32 chars.
+    assert_eq!(id.len(), 32, "unexpected id length: {id}");
+    let mut parts = id.splitn(3, '_');
+    let date = parts.next().expect("date segment");
+    let time = parts.next().expect("time segment");
+    let uuid = parts.next().expect("uuid segment");
+    assert_eq!(date.len(), 10, "date should be YYYY-MM-DD, got {date}");
+    assert_eq!(time.len(), 8, "time should be HH-MM-SS, got {time}");
+    assert_eq!(uuid.len(), 12, "uuid should be 12 chars, got {uuid}");
+    assert!(date.chars().nth(4) == Some('-') && date.chars().nth(7) == Some('-'));
+    assert!(time.chars().nth(2) == Some('-') && time.chars().nth(5) == Some('-'));
+}
+
+#[test]
+fn new_id_at_renders_a_known_timestamp() {
+    let t = chrono::DateTime::parse_from_rfc3339("2026-05-27T11:50:52Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let id = new_id_at(t);
+    assert!(id.starts_with("2026-05-27_11-50-52_"), "got {id}");
 }
 
 use crate::capture::CapturedFrame;
@@ -174,8 +192,8 @@ fn build_returns_paths_under_base_dir_and_bytes_match_frame() {
 
     // Embedded paths point under `temp/{id}/...`
     let id = &built.snapshot.id;
-    let expected_clean = temp.path().join(id).join("clean.png");
-    let expected_annotated = temp.path().join(id).join("annotated.png");
+    let expected_clean = temp.path().join(id).join(format!("{id}_clean.png"));
+    let expected_annotated = temp.path().join(id).join(format!("{id}_annotated.png"));
     assert_eq!(
         std::path::Path::new(&built.snapshot.images.clean),
         expected_clean
