@@ -38,6 +38,18 @@ pub enum BuildError {
     Annotate(#[from] AnnotateError),
 }
 
+/// Derives a region's visible label from its array index. Zero-pads to two
+/// characters minimum, expands further for 100+ regions, never truncates.
+/// Mirrors the TypeScript `formatLabel` in `src/overlay/annotations/label.ts`.
+pub fn format_label(idx: usize) -> String {
+    let n = idx + 1;
+    if n < 10 {
+        format!("0{n}")
+    } else {
+        n.to_string()
+    }
+}
+
 /// Assemble a `BuiltSnapshot` from the captured frame + incoming annotations.
 /// Pure function — no filesystem writes. The embedded `images.{clean,annotated}`
 /// paths are computed as `{base_dir}/{id}/clean.png` and `…/annotated.png`,
@@ -58,7 +70,8 @@ pub fn build(
     let scale = frame.scale_factor;
     let annotations: Vec<Annotation> = annotations
         .into_iter()
-        .map(|a| Annotation {
+        .enumerate()
+        .map(|(idx, a)| Annotation {
             id: a.id,
             shape: "rect".into(),
             coords: Coords {
@@ -68,6 +81,7 @@ pub fn build(
                 h: a.h * scale,
             },
             note: a.note,
+            label: format_label(idx),
         })
         .collect();
 

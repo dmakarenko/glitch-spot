@@ -18,7 +18,8 @@ fn write_real_snapshot(base: &std::path::Path, id: &str) -> std::path::PathBuf {
         "annotations": [{
             "id": "a1", "shape": "rect",
             "coords": { "x": 0.0, "y": 0.0, "w": 10.0, "h": 10.0 },
-            "note": "the cancel button is misaligned by 3 px"
+            "note": "the cancel button is misaligned by 3 px",
+            "label": "01"
         }],
         "context": {
             "screen": { "width": 1440, "height": 900, "scale_factor": 2.0, "display_index": 0 },

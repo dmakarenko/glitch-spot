@@ -108,6 +108,7 @@ mod tests {
                 shape: "rect".to_string(),
                 coords: Coords { x: 0.0, y: 0.0, w: 10.0, h: 10.0 },
                 note: "fix this".to_string(),
+                label: "01".to_string(),
             }],
             context: Context {
                 screen: ScreenInfo { width: 1440, height: 900, scale_factor: 2.0, display_index: 0 },

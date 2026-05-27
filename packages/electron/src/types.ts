@@ -26,6 +26,7 @@ export interface Annotation {
   shape: 'rect'
   coords: { x: number; y: number; w: number; h: number }
   note: string
+  label: string
 }
 
 export interface AnnotationPayload {

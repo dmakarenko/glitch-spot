@@ -279,6 +279,7 @@ interface Annotation {
     h: number
   }
   note: string               // user-typed text (may be empty)
+  label: string              // auto-derived display label ("01", "02", ..., "100")
 }
 ```
 

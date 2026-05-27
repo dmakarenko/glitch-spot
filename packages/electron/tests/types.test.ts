@@ -10,7 +10,7 @@ describe('GlitchSnapshot shape', () => {
       created_at: '2026-05-26T10:00:00.000Z',
       mode: 'frozen',
       annotations: [
-        { id: 'a1', shape: 'rect', coords: { x: 10, y: 20, w: 100, h: 50 }, note: 'broken button' },
+        { id: 'a1', shape: 'rect', coords: { x: 10, y: 20, w: 100, h: 50 }, note: 'broken button', label: '01' },
       ],
       context: {
         screen: { width: 1440, height: 900, scale_factor: 2 },

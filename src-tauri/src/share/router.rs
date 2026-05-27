@@ -158,7 +158,8 @@ mod tests {
             "annotations": [{
                 "id": "a1", "shape": "rect",
                 "coords": { "x": 0.0, "y": 0.0, "w": 10.0, "h": 10.0 },
-                "note": "fixture note"
+                "note": "fixture note",
+                "label": "01"
             }],
             "context": {
                 "screen": { "width": 1440, "height": 900, "scale_factor": 2.0, "display_index": 0 },

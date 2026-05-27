@@ -1,25 +1,24 @@
-// ABOUTME: Renders rectangle borders + note text labels onto a clone of the captured
-// ABOUTME: clean PNG to produce the v0.2 annotated PNG for snapshot.images.annotated.
+// ABOUTME: Renders rectangle borders + numbered pill badges onto a clone of the
+// ABOUTME: clean captured PNG to produce the annotated PNG for snapshot.images.annotated.
 
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{ImageError, Rgba, RgbaImage};
-use imageproc::drawing::{draw_filled_rect_mut, draw_hollow_rect_mut, draw_text_mut};
+use imageproc::drawing::{
+    draw_filled_circle_mut, draw_filled_rect_mut, draw_hollow_rect_mut, draw_text_mut,
+};
 use imageproc::rect::Rect as IpRect;
 
 use crate::snapshot::Annotation;
 
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/DejaVuSans.ttf");
-const BORDER_COLOR: Rgba<u8> = Rgba([255, 59, 48, 255]);
-const TEXT_COLOR: Rgba<u8> = Rgba([17, 17, 17, 255]);
-const PANEL_BG: Rgba<u8> = Rgba([255, 255, 255, 245]);
-const BORDER_WIDTH: i32 = 3;
-const PANEL_PADDING: i32 = 8;
-const PANEL_GAP: i32 = 6;
-const BASE_FONT_PX: f32 = 24.0;
-const PANEL_MIN_W: i32 = 120;
-const PANEL_MAX_W_HARD: i32 = 480;
-const PANEL_MAX_W_NARROW_RECT: i32 = 240;
-const NARROW_RECT_THRESHOLD: i32 = 240;
+const ACCENT: Rgba<u8> = Rgba([238, 102, 51, 255]);
+const BADGE_TEXT: Rgba<u8> = Rgba([255, 255, 255, 255]);
+const BORDER_WIDTH_CSS: f32 = 2.0;
+// CSS-pixel pill geometry; matches src/overlay/annotate.ts.
+const PILL_W_CSS: f32 = 26.0;
+const PILL_H_CSS: f32 = 18.0;
+const PILL_R_CSS: f32 = 9.0;
+const BADGE_FONT_PX_CSS: f32 = 11.0;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AnnotateError {
@@ -29,11 +28,11 @@ pub enum AnnotateError {
     Font,
 }
 
-/// Decode the clean PNG, draw rectangle borders + note panels, re-encode.
+/// Decode the clean PNG, draw rectangle borders + numbered badges, re-encode.
 ///
-/// `scale_factor` is the snapshot's `frame.scale_factor`. We use it to keep the
-/// rendered text roughly the same physical size across 1x and Retina displays:
-/// the base size is calibrated for 2x, so at 1x we draw smaller.
+/// `scale_factor` is the snapshot's `frame.scale_factor`. All CSS-pixel constants
+/// are multiplied by it so the rendered geometry matches the live overlay's
+/// physical-pixel rendering on the captured image.
 pub fn render_annotated_png(
     clean_png: &[u8],
     annotations: &[Annotation],
@@ -42,14 +41,16 @@ pub fn render_annotated_png(
     let mut img =
         image::load_from_memory_with_format(clean_png, image::ImageFormat::Png)?.to_rgba8();
     let font = FontRef::try_from_slice(FONT_BYTES).map_err(|_| AnnotateError::Font)?;
-    let font_px = BASE_FONT_PX * (scale_factor / 2.0).max(1.0);
-    let scale = PxScale::from(font_px);
+
+    let border_width = (BORDER_WIDTH_CSS * scale_factor).round().max(1.0) as i32;
+    let pill_w = (PILL_W_CSS * scale_factor).round() as i32;
+    let pill_h = (PILL_H_CSS * scale_factor).round() as i32;
+    let pill_r = (PILL_R_CSS * scale_factor).round() as i32;
+    let badge_scale = PxScale::from(BADGE_FONT_PX_CSS * scale_factor);
 
     for anno in annotations {
-        draw_rect_border(&mut img, anno);
-        if !anno.note.is_empty() {
-            draw_note_panel(&mut img, anno, &font, scale);
-        }
+        draw_rect_border(&mut img, anno, border_width);
+        draw_pill_badge(&mut img, anno, pill_w, pill_h, pill_r, &font, badge_scale);
     }
 
     let mut out = Vec::new();
@@ -58,7 +59,7 @@ pub fn render_annotated_png(
     Ok(out)
 }
 
-fn draw_rect_border(img: &mut RgbaImage, anno: &Annotation) {
+fn draw_rect_border(img: &mut RgbaImage, anno: &Annotation, border_width: i32) {
     let x = anno.coords.x.round() as i32;
     let y = anno.coords.y.round() as i32;
     let w = anno.coords.w.round() as i32;
@@ -66,80 +67,62 @@ fn draw_rect_border(img: &mut RgbaImage, anno: &Annotation) {
     if w <= 0 || h <= 0 {
         return;
     }
-    // Stack BORDER_WIDTH concentric hollow rects to thicken the line without
-    // drawing a fill over the underlying image.
-    for i in 0..BORDER_WIDTH {
+    // Stack concentric hollow rects to thicken the line without filling the rect.
+    for i in 0..border_width {
         let rx = x + i;
         let ry = y + i;
         let rw = (w - 2 * i).max(1) as u32;
         let rh = (h - 2 * i).max(1) as u32;
         let rect = IpRect::at(rx, ry).of_size(rw, rh);
-        draw_hollow_rect_mut(img, rect, BORDER_COLOR);
+        draw_hollow_rect_mut(img, rect, ACCENT);
     }
 }
 
-fn draw_note_panel(img: &mut RgbaImage, anno: &Annotation, font: &FontRef<'_>, scale: PxScale) {
-    let lines: Vec<&str> = anno.note.lines().collect();
-    if lines.is_empty() {
-        return;
-    }
-
-    let scaled = font.as_scaled(scale);
-    let line_h = (scaled.height() + scaled.line_gap()).round() as i32;
-    let max_line_w = lines
-        .iter()
-        .map(|l| text_width(font, scale, l))
-        .fold(0_i32, |acc, w| acc.max(w));
-
+fn draw_pill_badge(
+    img: &mut RgbaImage,
+    anno: &Annotation,
+    pill_w: i32,
+    pill_h: i32,
+    pill_r: i32,
+    font: &FontRef<'_>,
+    scale: PxScale,
+) {
     let rect_x = anno.coords.x.round() as i32;
     let rect_y = anno.coords.y.round() as i32;
-    let rect_w = anno.coords.w.round() as i32;
-    let rect_h = anno.coords.h.round() as i32;
+    // Pill straddles the rect's top-left corner (half-outside on both axes).
+    let pill_x = rect_x - pill_w / 2;
+    let pill_y = rect_y - pill_h / 2;
     let img_w = img.width() as i32;
     let img_h = img.height() as i32;
 
-    let max_panel_w = if rect_w >= NARROW_RECT_THRESHOLD {
-        rect_w.min(PANEL_MAX_W_HARD)
-    } else {
-        PANEL_MAX_W_NARROW_RECT
-    };
-    let natural_w = max_line_w + 2 * PANEL_PADDING;
-    let panel_w = natural_w.clamp(PANEL_MIN_W, max_panel_w);
-    let panel_h = (line_h * lines.len() as i32) + 2 * PANEL_PADDING;
-
-    let mut panel_x = rect_x;
-    let mut panel_y = rect_y + rect_h + PANEL_GAP;
-    if panel_y + panel_h > img_h {
-        panel_y = (rect_y - panel_h - PANEL_GAP).max(0);
-    }
-    if panel_x + panel_w > img_w {
-        panel_x = (img_w - panel_w).max(0);
-    }
-    if panel_x < 0 {
-        panel_x = 0;
+    // Skip if the pill would fall entirely off-canvas (imageproc handles partial
+    // overflow on its own but a fully off-canvas draw is a no-op anyway).
+    if pill_x + pill_w <= 0 || pill_y + pill_h <= 0 || pill_x >= img_w || pill_y >= img_h {
+        return;
     }
 
-    let pw = panel_w.min(img_w - panel_x).max(0) as u32;
-    let ph = panel_h.min(img_h - panel_y).max(0) as u32;
-    if pw > 0 && ph > 0 {
-        let rect = IpRect::at(panel_x, panel_y).of_size(pw, ph);
-        draw_filled_rect_mut(img, rect, PANEL_BG);
+    // Center rectangle between the two end caps (only when the pill is wider than
+    // its height; for a perfectly circular pill there is no center band).
+    let center_w = (pill_w - 2 * pill_r).max(0);
+    if center_w > 0 {
+        let center_rect =
+            IpRect::at(pill_x + pill_r, pill_y).of_size(center_w as u32, pill_h as u32);
+        draw_filled_rect_mut(img, center_rect, ACCENT);
     }
 
-    let text_x = panel_x + PANEL_PADDING;
-    let mut text_y = panel_y + PANEL_PADDING;
-    for line in lines {
-        draw_text_mut(img, TEXT_COLOR, text_x, text_y, scale, font, line);
-        text_y += line_h;
-    }
-}
+    let cap_y = pill_y + pill_h / 2;
+    draw_filled_circle_mut(img, (pill_x + pill_r, cap_y), pill_r, ACCENT);
+    draw_filled_circle_mut(img, (pill_x + pill_w - pill_r, cap_y), pill_r, ACCENT);
 
-fn text_width(font: &FontRef<'_>, scale: PxScale, s: &str) -> i32 {
+    // Center the label text in the pill.
     let scaled = font.as_scaled(scale);
-    let mut w = 0.0_f32;
-    for c in s.chars() {
-        let g = scaled.scaled_glyph(c);
-        w += scaled.h_advance(g.id);
-    }
-    w.ceil() as i32
+    let text_w: f32 = anno
+        .label
+        .chars()
+        .map(|c| scaled.h_advance(scaled.scaled_glyph(c).id))
+        .sum();
+    let text_h = scaled.ascent() - scaled.descent();
+    let text_x = (pill_x as f32 + (pill_w as f32 - text_w) / 2.0).round() as i32;
+    let text_y = (pill_y as f32 + (pill_h as f32 - text_h) / 2.0).round() as i32;
+    draw_text_mut(img, BADGE_TEXT, text_x, text_y, scale, font, &anno.label);
 }

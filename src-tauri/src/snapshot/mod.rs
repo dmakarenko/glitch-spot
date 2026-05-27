@@ -19,6 +19,7 @@ pub struct Annotation {
     pub shape: String,
     pub coords: Coords,
     pub note: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
