@@ -4,6 +4,7 @@ mod capture;
 mod hotkey;
 pub mod mcp;
 mod overlay;
+mod window_picker;
 pub mod snapshot;
 mod spike_capture;
 mod tray;
