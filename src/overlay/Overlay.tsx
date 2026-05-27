@@ -23,6 +23,8 @@ const bridge = createBridge()
 
 export function Overlay() {
   const [mode, setMode] = useState<Mode>('live')
+  const modeRef = useRef<Mode>('live')
+  useEffect(() => { modeRef.current = mode }, [mode])
   const [windowPayload, setWindowPayload] = useState<WindowModePayload | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [annotations, dispatch] = useReducer(reducer, initialState)
@@ -72,6 +74,11 @@ export function Overlay() {
     // not called (first show before useEffect installs it, or Electron path).
     bridge
       .onFrame((blobUrl) => {
+        // Don't override window mode — frames only arrive on the frozen path.
+        if (modeRef.current === 'window') {
+          URL.revokeObjectURL(blobUrl)
+          return
+        }
         setMode("frozen");
         // Decode off-screen before swapping the visible background so the new
         // image appears atomically rather than after a perceptible decode delay.
@@ -94,6 +101,10 @@ export function Overlay() {
       .getFrame()
       .then((blobUrl) => {
         if (blobUrl) {
+          if (modeRef.current === 'window') {
+            URL.revokeObjectURL(blobUrl)
+            return
+          }
           setMode("frozen");
           const img = new window.Image();
           img.onload = () => {
