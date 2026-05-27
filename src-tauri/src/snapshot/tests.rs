@@ -108,6 +108,7 @@ fn build_scales_annotation_coords_by_scale_factor() {
         "macos",
         "26.0",
         temp.path(),
+        None,
     )
     .unwrap();
     assert_eq!(built.snapshot.annotations.len(), 1);
@@ -122,7 +123,7 @@ fn build_scales_annotation_coords_by_scale_factor() {
 fn build_returns_paths_under_base_dir_and_bytes_match_frame() {
     let temp = tempfile::TempDir::new().unwrap();
     let frame = fake_frame();
-    let built = build(&frame, "live", vec![], "macos", "26.0", temp.path()).unwrap();
+    let built = build(&frame, "live", vec![], "macos", "26.0", temp.path(), None).unwrap();
 
     // Embedded paths point under `temp/{id}/...`
     let id = &built.snapshot.id;
@@ -280,6 +281,49 @@ fn annotated_png_caps_panel_width_for_long_notes() {
         inside_panel.0[3], 245,
         "expected panel-fill alpha at (50, {panel_inside_y}), got {inside_panel:?}"
     );
+}
+
+#[test]
+fn build_crop_origin_translates_annotation_coords_into_window_local() {
+    use crate::capture::CapturedFrame;
+    use crate::snapshot::build::{build, IncomingAnnotation};
+    use tempfile::TempDir;
+
+    let frame = CapturedFrame {
+        width: 800,
+        height: 600,
+        scale_factor: 2.0,
+        png: solid_white_png(1, 1),
+        display_index: 0,
+    };
+    let annotations = vec![IncomingAnnotation {
+        id: "r1".into(),
+        x: 100.0,   // CSS px on the overlay
+        y: 50.0,
+        w: 80.0,
+        h: 40.0,
+        note: "n".into(),
+    }];
+
+    let temp = TempDir::new().unwrap();
+    // crop_origin in physical pixels: (60, 30)
+    let built = build(
+        &frame,
+        "window",
+        annotations,
+        "macos",
+        "26.0",
+        temp.path(),
+        Some((60.0, 30.0)),
+    )
+    .expect("build with crop_origin should succeed");
+    let a = &built.snapshot.annotations[0];
+    // x*scale - crop_x = 100*2 - 60 = 140
+    // y*scale - crop_y = 50*2  - 30 = 70
+    assert_eq!(a.coords.x, 140.0);
+    assert_eq!(a.coords.y, 70.0);
+    assert_eq!(a.coords.w, 160.0);
+    assert_eq!(a.coords.h, 80.0);
 }
 
 #[test]

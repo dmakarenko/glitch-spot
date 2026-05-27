@@ -103,6 +103,7 @@ async fn save_snapshot(
         os_platform,
         &os_version,
         &base,
+        None,
     )
     .map_err(|e| e.to_string())?;
     snapshot::persist::write(&base, &built).map_err(|e| e.to_string())?;
