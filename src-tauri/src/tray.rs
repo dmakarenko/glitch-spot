@@ -72,6 +72,9 @@ pub(crate) struct AnimationFrames {
     pub red: Vec<Vec<u8>>,
     /// Raw source bytes kept for runtime scanline-shift rendering.
     pub source: Vec<u8>,
+    /// Cyan-tinted base frame used as input to scanline-shift during bursts,
+    /// so the displaced pixels stay cyan rather than reverting to raw black.
+    pub burst_base: Vec<u8>,
     pub width: u32,
     pub height: u32,
 }
@@ -311,10 +314,15 @@ fn build_animation_frames() -> Option<AnimationFrames> {
     };
     let (width, height) = img.dimensions();
     let source = img.into_raw();
+    let cyan_frames = build_cyan_frames(&source);
+    // Burst base sits at the mid-high end of the pulse alpha range so the
+    // shifted bands read as cyan rather than the raw black source pixels.
+    let burst_base = tint_frame(&source, CYAN_RGB, 0.80);
     Some(AnimationFrames {
-        cyan: build_cyan_frames(&source),
+        cyan: cyan_frames,
         red: build_red_frames(&source),
         source,
+        burst_base,
         width,
         height,
     })
@@ -527,7 +535,7 @@ async fn run_tray_animation(
                         }
                         AnimState::Glitching { sequence, step_idx, ticks_in_step } => {
                             let shifted = apply_scanline_shift(
-                                &frames.source, frames.width, frames.height,
+                                &frames.burst_base, frames.width, frames.height,
                                 &sequence[*step_idx].bands,
                             );
                             let img = Image::new(&shifted, frames.width, frames.height);
