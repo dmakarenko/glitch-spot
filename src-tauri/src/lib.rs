@@ -4,6 +4,7 @@ mod capture;
 mod hotkey;
 pub mod mcp;
 mod overlay;
+mod picker_session;
 mod window_picker;
 pub mod snapshot;
 mod spike_capture;
@@ -38,6 +39,7 @@ pub struct AppState {
     /// avoids the TCP-connect false positive when another process happens to
     /// own the configured port.
     pub mcp_bound: Arc<AtomicBool>,
+    pub picker_state: Arc<picker_session::PickerStateHolder>,
 }
 
 #[tauri::command]
@@ -246,6 +248,7 @@ mod tests {
             ),
             config_dir: temp.path().to_path_buf(),
             mcp_bound: Arc::new(AtomicBool::new(false)),
+            picker_state: Arc::new(picker_session::PickerStateHolder::new()),
         };
         assert!(state.latest_snapshot_at.lock().unwrap().is_none());
     }
@@ -327,6 +330,7 @@ pub fn run() {
             settings: settings.clone(),
             config_dir: config_dir.clone(),
             mcp_bound: mcp_bound.clone(),
+            picker_state: Arc::new(picker_session::PickerStateHolder::new()),
         })
         .setup(|app| {
             #[cfg(target_os = "macos")]
