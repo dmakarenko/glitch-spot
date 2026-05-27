@@ -7,6 +7,9 @@ pub mod filter;
 pub mod hit_test;
 pub mod coords;
 
+#[cfg(target_os = "macos")]
+pub mod macos;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PickableWindow {
     pub window_id: u32,
