@@ -39,30 +39,42 @@ pub struct Settings {
 
 impl Settings {
     /// Load settings from `{dir}/config.toml`. Missing or malformed files are
-    /// tolerated and yield default values.
+    /// tolerated: each setting is extracted independently from `toml::Value`,
+    /// so a bad value in one section doesn't silently reset unrelated sections.
     pub fn load_from(dir: &Path) -> io::Result<Self> {
         let path = dir.join(CONFIG_FILE);
-        let parsed: ConfigFile = match std::fs::read_to_string(&path) {
-            Ok(text) => match toml::from_str::<ConfigFile>(&text) {
-                Ok(cfg) => cfg,
+        let parsed: toml::Value = match std::fs::read_to_string(&path) {
+            Ok(text) => match text.parse::<toml::Value>() {
+                Ok(v) => v,
                 Err(e) => {
                     eprintln!(
                         "[glitch-spot settings] failed to parse {}: {e}; using defaults",
                         path.display()
                     );
-                    ConfigFile::default()
+                    toml::Value::Table(toml::map::Map::new())
                 }
             },
-            Err(e) if e.kind() == io::ErrorKind::NotFound => ConfigFile::default(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                toml::Value::Table(toml::map::Map::new())
+            }
             Err(e) => return Err(e),
         };
+
         let provider = parsed
-            .tunnel
-            .provider
-            .as_deref()
+            .get("tunnel")
+            .and_then(|t| t.get("provider"))
+            .and_then(|v| v.as_str())
             .and_then(ProviderKind::from_name)
             .unwrap_or_default();
-        let mcp_port = parsed.mcp.port.unwrap_or(DEFAULT_MCP_PORT);
+
+        let mcp_port = parsed
+            .get("mcp")
+            .and_then(|m| m.get("port"))
+            .and_then(|v| v.as_integer())
+            .and_then(|n| u16::try_from(n).ok())
+            .filter(|p| *p != 0)
+            .unwrap_or(DEFAULT_MCP_PORT);
+
         Ok(Settings { provider: RwLock::new(provider), mcp_port })
     }
 
@@ -163,6 +175,54 @@ mod tests {
             b"[mcp]\nport = \"not-a-number\"\n",
         )
         .unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.mcp_port(), 7820);
+    }
+
+    #[test]
+    fn malformed_mcp_port_preserves_unrelated_tunnel_provider() {
+        // Regression for Codex P2: a typo in [mcp].port must not silently reset
+        // [tunnel].provider to the default.
+        let temp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            b"[tunnel]\nprovider = \"ngrok\"\n\n[mcp]\nport = \"not-a-number\"\n",
+        )
+        .unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.current_provider(), ProviderKind::Ngrok);
+        assert_eq!(settings.mcp_port(), 7820);
+    }
+
+    #[test]
+    fn malformed_tunnel_provider_preserves_unrelated_mcp_port() {
+        // Same idea in the opposite direction: a wrong type on tunnel.provider
+        // must not blow away a valid mcp.port.
+        let temp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            b"[tunnel]\nprovider = 42\n\n[mcp]\nport = 9090\n",
+        )
+        .unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.current_provider(), ProviderKind::Cloudflared);
+        assert_eq!(settings.mcp_port(), 9090);
+    }
+
+    #[test]
+    fn port_zero_falls_back_to_default() {
+        // Regression for Codex P3: port=0 makes the OS pick an ephemeral port
+        // the tray and clients can't predict. Reject and use the default.
+        let temp = tempfile::TempDir::new().unwrap();
+        std::fs::write(temp.path().join("config.toml"), b"[mcp]\nport = 0\n").unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.mcp_port(), 7820);
+    }
+
+    #[test]
+    fn out_of_range_port_falls_back_to_default() {
+        let temp = tempfile::TempDir::new().unwrap();
+        std::fs::write(temp.path().join("config.toml"), b"[mcp]\nport = 70000\n").unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
         assert_eq!(settings.mcp_port(), 7820);
     }

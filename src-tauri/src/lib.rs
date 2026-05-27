@@ -13,6 +13,7 @@ pub mod share;
 pub use capture::CapturedFrame;
 
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicBool;
 use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -31,6 +32,11 @@ pub struct AppState {
     pub tunnel: Arc<share::tunnel::TunnelManager>,
     pub settings: Arc<settings::Settings>,
     pub config_dir: std::path::PathBuf,
+    /// Set to true by `mcp::server::serve` once the listener is bound, cleared
+    /// if/when serve returns. Tray reads this to decide healthy vs unhealthy —
+    /// avoids the TCP-connect false positive when another process happens to
+    /// own the configured port.
+    pub mcp_bound: Arc<AtomicBool>,
 }
 
 #[tauri::command]
@@ -237,6 +243,7 @@ mod tests {
                 settings::Settings::load_from(temp.path()).unwrap(),
             ),
             config_dir: temp.path().to_path_buf(),
+            mcp_bound: Arc::new(AtomicBool::new(false)),
         };
         assert!(state.latest_snapshot_at.lock().unwrap().is_none());
     }
@@ -271,9 +278,11 @@ pub fn run() {
     let snapshot_store = Arc::new(mcp::store::SnapshotStore::new());
     let store_for_mcp = snapshot_store.clone();
     let mcp_port = settings.mcp_port();
+    let mcp_bound = Arc::new(AtomicBool::new(false));
+    let mcp_bound_for_serve = mcp_bound.clone();
 
     tauri::async_runtime::spawn(async move {
-        mcp::server::serve(store_for_mcp, mcp_port).await;
+        mcp::server::serve(store_for_mcp, mcp_port, mcp_bound_for_serve).await;
     });
 
     let share_base = snapshot::persist::snapshots_dir().ok();
@@ -315,6 +324,7 @@ pub fn run() {
             tunnel: tunnel.clone(),
             settings: settings.clone(),
             config_dir: config_dir.clone(),
+            mcp_bound: mcp_bound.clone(),
         })
         .setup(|app| {
             #[cfg(target_os = "macos")]
