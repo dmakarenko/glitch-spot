@@ -512,11 +512,6 @@ async fn run_tray_animation(
     let mut anim_tick = interval(Duration::from_millis(ANIM_TICK_MS));
     let mut health_tick = interval(Duration::from_secs(3));
     let mut healthy = mcp_is_healthy(&mcp_bound);
-    // If MCP bound before this task started, build_menu may have rendered 🔴.
-    // Refresh now so the status is correct from the first menu open.
-    if healthy {
-        refresh_menu(&app);
-    }
     let mut counter: u64 = 0;
     // StdRng is Send, so the future is Send and can be scheduled across threads
     // by tokio. thread_rng() isn't Send because it holds thread-local state.
