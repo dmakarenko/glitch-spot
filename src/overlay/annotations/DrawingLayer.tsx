@@ -48,27 +48,33 @@ export function DrawingLayer({ state, dispatch }: Props) {
       if (!rect) return;
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      dispatch({ type: "BEGIN_DRAG", id: nextRectId(), x, y });
+      dispatch({ type: "BEGIN_CREATE", id: nextRectId(), x, y });
     },
     [dispatch]
   );
 
   const onMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!state.draggingId) return;
+      if (!state.active) return;
       const rect = ref.current?.getBoundingClientRect();
       if (!rect) return;
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      dispatch({ type: "DRAG_TO", x, y });
+      dispatch({
+        type: "POINTER_TO",
+        x,
+        y,
+        viewportW: window.innerWidth,
+        viewportH: window.innerHeight,
+      });
     },
-    [dispatch, state.draggingId]
+    [dispatch, state.active]
   );
 
   const onMouseUp = useCallback(() => {
-    if (!state.draggingId) return;
-    dispatch({ type: "END_DRAG" });
-  }, [dispatch, state.draggingId]);
+    if (!state.active) return;
+    dispatch({ type: "END_GESTURE" });
+  }, [dispatch, state.active]);
 
   return (
     <div
@@ -163,7 +169,7 @@ export function DrawingLayer({ state, dispatch }: Props) {
           key={`${r.id}-note`}
           rect={r}
           containerHeight={containerHeight}
-          autoFocus={!state.draggingId && r.id === state.lastCreatedId}
+          autoFocus={!state.active && r.id === state.lastCreatedId}
           onChange={(note) => dispatch({ type: "SET_NOTE", id: r.id, note })}
         />
       ))}

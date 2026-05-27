@@ -2,60 +2,84 @@
 import { describe, expect, it } from "vitest";
 import { reducer, initialState, MIN_RECT_DIMENSION } from "./state";
 
+const VW = 1000;
+const VH = 800;
+
+function pointerTo(x: number, y: number) {
+  return { type: "POINTER_TO" as const, x, y, viewportW: VW, viewportH: VH };
+}
+
 describe("annotations reducer", () => {
-  it("starts with no rects, no history, no drag", () => {
+  it("starts with no rects, no history, no active gesture", () => {
     expect(initialState).toEqual({
       rects: [],
       history: [],
-      draggingId: null,
+      active: null,
       lastCreatedId: null,
     });
   });
 
-  it("BEGIN_DRAG creates a zero-size rect anchored at the start point", () => {
-    const s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 100, y: 50 });
+  it("BEGIN_CREATE creates a zero-size rect anchored at the start point", () => {
+    const s = reducer(initialState, {
+      type: "BEGIN_CREATE",
+      id: "r1",
+      x: 100,
+      y: 50,
+    });
     expect(s.rects).toHaveLength(1);
-    expect(s.rects[0]).toMatchObject({ id: "r1", x: 100, y: 50, w: 0, h: 0, note: "" });
-    expect(s.draggingId).toBe("r1");
+    expect(s.rects[0]).toMatchObject({
+      id: "r1",
+      x: 100,
+      y: 50,
+      w: 0,
+      h: 0,
+      note: "",
+    });
+    expect(s.active).toEqual({
+      kind: "create",
+      id: "r1",
+      anchorX: 100,
+      anchorY: 50,
+    });
     expect(s.history).toEqual([{ kind: "create", id: "r1" }]);
   });
 
-  it("DRAG_TO updates the dragging rect's bottom-right while drag is active", () => {
-    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 100, y: 50 });
-    s = reducer(s, { type: "DRAG_TO", x: 200, y: 100 });
+  it("POINTER_TO updates the dragging rect's bottom-right while create is active", () => {
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 50 });
+    s = reducer(s, pointerTo(200, 100));
     expect(s.rects[0]).toMatchObject({ x: 100, y: 50, w: 100, h: 50 });
   });
 
-  it("DRAG_TO handles drags up and to the left by flipping origin", () => {
-    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 200, y: 100 });
-    s = reducer(s, { type: "DRAG_TO", x: 100, y: 50 });
+  it("POINTER_TO handles drags up and to the left by flipping origin", () => {
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 200, y: 100 });
+    s = reducer(s, pointerTo(100, 50));
     expect(s.rects[0]).toMatchObject({ x: 100, y: 50, w: 100, h: 50 });
   });
 
-  it("END_DRAG clears draggingId without removing the rect", () => {
-    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 100, y: 50 });
-    s = reducer(s, { type: "DRAG_TO", x: 200, y: 100 });
-    s = reducer(s, { type: "END_DRAG" });
-    expect(s.draggingId).toBeNull();
+  it("END_GESTURE clears active without removing the rect", () => {
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 50 });
+    s = reducer(s, pointerTo(200, 100));
+    s = reducer(s, { type: "END_GESTURE" });
+    expect(s.active).toBeNull();
     expect(s.rects).toHaveLength(1);
   });
 
-  it("DRAG_TO is a no-op when there is no active drag", () => {
-    const s = reducer(initialState, { type: "DRAG_TO", x: 10, y: 10 });
+  it("POINTER_TO is a no-op when there is no active gesture", () => {
+    const s = reducer(initialState, pointerTo(10, 10));
     expect(s).toEqual(initialState);
   });
 
-  it("BEGIN_DRAG sets lastCreatedId so the new rect's note can auto-focus", () => {
-    const s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 0, y: 0 });
+  it("BEGIN_CREATE sets lastCreatedId so the new rect's note can auto-focus", () => {
+    const s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0 });
     expect(s.lastCreatedId).toBe("r1");
   });
 });
 
 describe("notes and deletion", () => {
   function drawn(id: string): import("./types").AnnotationsState {
-    let s = reducer(initialState, { type: "BEGIN_DRAG", id, x: 0, y: 0 });
-    s = reducer(s, { type: "DRAG_TO", x: 100, y: 50 });
-    return reducer(s, { type: "END_DRAG" });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id, x: 0, y: 0 });
+    s = reducer(s, pointerTo(100, 50));
+    return reducer(s, { type: "END_GESTURE" });
   }
 
   it("SET_NOTE updates note text and records the previous value in history", () => {
@@ -76,9 +100,9 @@ describe("notes and deletion", () => {
 
   it("DELETE_RECT removes the rect and records it in history with its original index", () => {
     let s = drawn("r1");
-    s = reducer(s, { type: "BEGIN_DRAG", id: "r2", x: 200, y: 0 });
-    s = reducer(s, { type: "DRAG_TO", x: 300, y: 80 });
-    s = reducer(s, { type: "END_DRAG" });
+    s = reducer(s, { type: "BEGIN_CREATE", id: "r2", x: 200, y: 0 });
+    s = reducer(s, pointerTo(300, 80));
+    s = reducer(s, { type: "END_GESTURE" });
     s = reducer(s, { type: "DELETE_RECT", id: "r1" });
     expect(s.rects.map((r) => r.id)).toEqual(["r2"]);
     const last = s.history[s.history.length - 1];
@@ -99,9 +123,9 @@ describe("notes and deletion", () => {
 
 describe("undo", () => {
   function drawn(id: string, state = initialState): import("./types").AnnotationsState {
-    let s = reducer(state, { type: "BEGIN_DRAG", id, x: 0, y: 0 });
-    s = reducer(s, { type: "DRAG_TO", x: 100, y: 50 });
-    return reducer(s, { type: "END_DRAG" });
+    let s = reducer(state, { type: "BEGIN_CREATE", id, x: 0, y: 0 });
+    s = reducer(s, pointerTo(100, 50));
+    return reducer(s, { type: "END_GESTURE" });
   }
 
   it("UNDO on empty history is a no-op", () => {
@@ -133,57 +157,57 @@ describe("undo", () => {
   });
 
   it("UNDO of a create clears lastCreatedId when undoing the most recent create", () => {
-    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 0, y: 0 });
-    s = reducer(s, { type: "DRAG_TO", x: 100, y: 50 });
-    s = reducer(s, { type: "END_DRAG" });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0 });
+    s = reducer(s, pointerTo(100, 50));
+    s = reducer(s, { type: "END_GESTURE" });
     s = reducer(s, { type: "UNDO" });
     expect(s.lastCreatedId).toBeNull();
   });
 });
 
-describe("min-size guard on END_DRAG", () => {
+describe("min-size guard on END_GESTURE", () => {
   it("MIN_RECT_DIMENSION matches the X-button visibility threshold (25)", () => {
     expect(MIN_RECT_DIMENSION).toBe(25);
   });
 
-  it("END_DRAG after a pure click (no drag) discards the zero-size rect entirely", () => {
-    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 100, y: 50 });
-    s = reducer(s, { type: "END_DRAG" });
+  it("END_GESTURE after a pure click (no drag) discards the zero-size rect entirely", () => {
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 50 });
+    s = reducer(s, { type: "END_GESTURE" });
     expect(s.rects).toEqual([]);
     expect(s.history).toEqual([]);
-    expect(s.draggingId).toBeNull();
+    expect(s.active).toBeNull();
     expect(s.lastCreatedId).toBeNull();
   });
 
-  it("END_DRAG discards a sub-MIN_RECT_DIMENSION drag (10x10)", () => {
-    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 100, y: 50 });
-    s = reducer(s, { type: "DRAG_TO", x: 110, y: 60 });
-    s = reducer(s, { type: "END_DRAG" });
+  it("END_GESTURE discards a sub-MIN_RECT_DIMENSION drag (10x10)", () => {
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 50 });
+    s = reducer(s, pointerTo(110, 60));
+    s = reducer(s, { type: "END_GESTURE" });
     expect(s.rects).toEqual([]);
     expect(s.history).toEqual([]);
   });
 
-  it("END_DRAG keeps a rect that meets the threshold (25x25)", () => {
-    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 0, y: 0 });
-    s = reducer(s, { type: "DRAG_TO", x: 25, y: 25 });
-    s = reducer(s, { type: "END_DRAG" });
+  it("END_GESTURE keeps a rect that meets the threshold (25x25)", () => {
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0 });
+    s = reducer(s, pointerTo(25, 25));
+    s = reducer(s, { type: "END_GESTURE" });
     expect(s.rects).toHaveLength(1);
     expect(s.rects[0]).toMatchObject({ w: 25, h: 25 });
   });
 
-  it("END_DRAG discards a wide-but-flat rect (60x10) because height is below the threshold", () => {
-    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 0, y: 0 });
-    s = reducer(s, { type: "DRAG_TO", x: 60, y: 10 });
-    s = reducer(s, { type: "END_DRAG" });
+  it("END_GESTURE discards a wide-but-flat rect (60x10) because height is below the threshold", () => {
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0 });
+    s = reducer(s, pointerTo(60, 10));
+    s = reducer(s, { type: "END_GESTURE" });
     expect(s.rects).toEqual([]);
   });
 
   it("discarding a too-small rect leaves any previously committed rectangles untouched", () => {
-    let s = reducer(initialState, { type: "BEGIN_DRAG", id: "r1", x: 0, y: 0 });
-    s = reducer(s, { type: "DRAG_TO", x: 100, y: 80 });
-    s = reducer(s, { type: "END_DRAG" });
-    s = reducer(s, { type: "BEGIN_DRAG", id: "r2", x: 200, y: 200 });
-    s = reducer(s, { type: "END_DRAG" });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0 });
+    s = reducer(s, pointerTo(100, 80));
+    s = reducer(s, { type: "END_GESTURE" });
+    s = reducer(s, { type: "BEGIN_CREATE", id: "r2", x: 200, y: 200 });
+    s = reducer(s, { type: "END_GESTURE" });
     expect(s.rects.map((r) => r.id)).toEqual(["r1"]);
     expect(s.history).toEqual([{ kind: "create", id: "r1" }]);
   });

@@ -2,8 +2,8 @@
 // ABOUTME: Clamps to viewport bounds and enforces the MIN_RECT_DIMENSION floor.
 
 import { MIN_RECT_DIMENSION } from './state';
+import type { Corner } from './types';
 
-export type Corner = 'nw' | 'ne' | 'sw' | 'se';
 export type Viewport = { w: number; h: number };
 export type Point = { x: number; y: number };
 

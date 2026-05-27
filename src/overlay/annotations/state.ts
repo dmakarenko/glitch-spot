@@ -2,6 +2,7 @@
 // ABOUTME: keep it pure so the logic stays testable in plain Node/vitest.
 
 import type {
+  ActiveGesture,
   AnnotationsAction,
   AnnotationsState,
   HistoryEntry,
@@ -16,16 +17,16 @@ export const MIN_RECT_DIMENSION = 25;
 export const initialState: AnnotationsState = {
   rects: [],
   history: [],
-  draggingId: null,
+  active: null,
   lastCreatedId: null,
 };
 
 export function reducer(
   state: AnnotationsState,
-  action: AnnotationsAction
+  action: AnnotationsAction,
 ): AnnotationsState {
   switch (action.type) {
-    case "BEGIN_DRAG": {
+    case "BEGIN_CREATE": {
       const rect: Rect = {
         id: action.id,
         x: action.x,
@@ -33,6 +34,10 @@ export function reducer(
         w: 0,
         h: 0,
         note: "",
+      };
+      const active: ActiveGesture = {
+        kind: "create",
+        id: action.id,
         anchorX: action.x,
         anchorY: action.y,
       };
@@ -40,58 +45,69 @@ export function reducer(
         ...state.history,
         { kind: "create", id: action.id },
       ];
-      return { rects: [...state.rects, rect], history, draggingId: action.id, lastCreatedId: action.id };
+      return {
+        ...state,
+        rects: [...state.rects, rect],
+        history,
+        active,
+        lastCreatedId: action.id,
+      };
     }
 
-    case "DRAG_TO": {
-      if (!state.draggingId) return state;
-      const rects = state.rects.map((r) =>
-        r.id === state.draggingId ? extendTo(r, action.x, action.y) : r
-      );
-      return { ...state, rects };
+    case "POINTER_TO": {
+      if (!state.active) return state;
+      if (state.active.kind === "create") {
+        const { id, anchorX, anchorY } = state.active;
+        const rects = state.rects.map((r) =>
+          r.id === id ? extendTo(r, action.x, action.y, anchorX, anchorY) : r,
+        );
+        return { ...state, rects };
+      }
+      return state;
     }
 
-    case "END_DRAG": {
-      const draggingId = state.draggingId;
-      if (!draggingId) {
-        return { ...state, draggingId: null };
+    case "END_GESTURE": {
+      if (!state.active) return state;
+      if (state.active.kind === "create") {
+        const id = state.active.id;
+        const drawn = state.rects.find((r) => r.id === id);
+        if (!drawn) {
+          return { ...state, active: null };
+        }
+        const tooSmall =
+          drawn.w < MIN_RECT_DIMENSION || drawn.h < MIN_RECT_DIMENSION;
+        if (tooSmall) {
+          return {
+            ...state,
+            rects: state.rects.filter((r) => r.id !== id),
+            history: state.history.filter(
+              (h) => !(h.kind === "create" && h.id === id),
+            ),
+            active: null,
+            lastCreatedId:
+              state.lastCreatedId === id ? null : state.lastCreatedId,
+          };
+        }
+        return { ...state, active: null };
       }
-      const dragged = state.rects.find((r) => r.id === draggingId);
-      if (!dragged) {
-        return { ...state, draggingId: null };
-      }
-      const tooSmall =
-        dragged.w < MIN_RECT_DIMENSION || dragged.h < MIN_RECT_DIMENSION;
-      if (tooSmall) {
-        return {
-          ...state,
-          rects: state.rects.filter((r) => r.id !== draggingId),
-          history: state.history.filter(
-            (h) => !(h.kind === "create" && h.id === draggingId)
-          ),
-          draggingId: null,
-          lastCreatedId:
-            state.lastCreatedId === draggingId ? null : state.lastCreatedId,
-        };
-      }
-      const rects = state.rects.map((r) =>
-        r.id === draggingId ? stripAnchor(r) : r
-      );
-      return { ...state, rects, draggingId: null };
+      return { ...state, active: null };
     }
 
     case "SET_NOTE": {
       const rect = state.rects.find((r) => r.id === action.id);
       if (!rect) return state;
       const rects = state.rects.map((r) =>
-        r.id === action.id ? { ...r, note: action.note } : r
+        r.id === action.id ? { ...r, note: action.note } : r,
       );
       const alreadyEditing = state.history.some(
-        (h) => h.kind === "noteEdit" && h.id === action.id
+        (h) => h.kind === "noteEdit" && h.id === action.id,
       );
       const history: HistoryEntry[] = alreadyEditing
         ? state.history
-        : [...state.history, { kind: "noteEdit", id: action.id, previousNote: rect.note }];
+        : [
+            ...state.history,
+            { kind: "noteEdit", id: action.id, previousNote: rect.note },
+          ];
       return { ...state, rects, history };
     }
 
@@ -100,7 +116,10 @@ export function reducer(
       if (index < 0) return state;
       const rect = state.rects[index];
       const rects = state.rects.filter((r) => r.id !== action.id);
-      const history: HistoryEntry[] = [...state.history, { kind: "delete", rect, index }];
+      const history: HistoryEntry[] = [
+        ...state.history,
+        { kind: "delete", rect, index },
+      ];
       return { ...state, rects, history };
     }
 
@@ -117,7 +136,8 @@ export function reducer(
             ...state,
             rects: state.rects.filter((r) => r.id !== last.id),
             history,
-            lastCreatedId: last.id === state.lastCreatedId ? null : state.lastCreatedId,
+            lastCreatedId:
+              last.id === state.lastCreatedId ? null : state.lastCreatedId,
           };
         case "delete": {
           const rects = [...state.rects];
@@ -127,11 +147,13 @@ export function reducer(
         }
         case "noteEdit": {
           const rects = state.rects.map((r) =>
-            r.id === last.id ? { ...r, note: last.previousNote } : r
+            r.id === last.id ? { ...r, note: last.previousNote } : r,
           );
           return { ...state, rects, history };
         }
+        // The "move" and "resize" undo branches are added in later tasks.
       }
+      return state;
     }
 
     default:
@@ -139,17 +161,16 @@ export function reducer(
   }
 }
 
-function extendTo(rect: Rect, cursorX: number, cursorY: number): Rect {
-  const ax = rect.anchorX ?? rect.x;
-  const ay = rect.anchorY ?? rect.y;
-  const x = Math.min(ax, cursorX);
-  const y = Math.min(ay, cursorY);
-  const w = Math.abs(cursorX - ax);
-  const h = Math.abs(cursorY - ay);
+function extendTo(
+  rect: Rect,
+  cursorX: number,
+  cursorY: number,
+  anchorX: number,
+  anchorY: number,
+): Rect {
+  const x = Math.min(anchorX, cursorX);
+  const y = Math.min(anchorY, cursorY);
+  const w = Math.abs(cursorX - anchorX);
+  const h = Math.abs(cursorY - anchorY);
   return { ...rect, x, y, w, h };
-}
-
-function stripAnchor(rect: Rect): Rect {
-  const { anchorX: _ax, anchorY: _ay, ...rest } = rect;
-  return rest;
 }
