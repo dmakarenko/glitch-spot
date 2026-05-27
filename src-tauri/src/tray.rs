@@ -59,17 +59,22 @@ pub(crate) fn build_cyan_frames(source: &[u8]) -> Vec<Vec<u8>> {
     }).collect()
 }
 
-/// 2 frames — full opacity and 20% opacity — for a snappy on/off blink.
-pub(crate) fn build_red_frames(source: &[u8]) -> Vec<Vec<u8>> {
-    vec![
-        tint_frame(source, RED_RGB, 1.0),
-        tint_frame(source, RED_RGB, 0.20),
-    ]
+/// Steady red frame shown between bursts during the unhealthy state.
+pub(crate) fn build_red_steady(source: &[u8]) -> Vec<u8> {
+    tint_frame(source, RED_RGB, 0.65)
+}
+
+/// Brighter red base used as input to scanline shift during unhealthy bursts.
+pub(crate) fn build_red_burst_base(source: &[u8]) -> Vec<u8> {
+    tint_frame(source, RED_RGB, 0.80)
 }
 
 pub(crate) struct AnimationFrames {
     pub cyan: Vec<Vec<u8>>,
-    pub red: Vec<Vec<u8>>,
+    /// Constant-alpha red frame shown between unhealthy scanline bursts.
+    pub red_steady: Vec<u8>,
+    /// Brighter red base fed into scanline-shift during unhealthy bursts.
+    pub red_burst_base: Vec<u8>,
     /// Raw source bytes kept for runtime scanline-shift rendering.
     pub source: Vec<u8>,
     /// Cyan-tinted base frame used as input to scanline-shift during bursts,
@@ -315,12 +320,11 @@ fn build_animation_frames() -> Option<AnimationFrames> {
     let (width, height) = img.dimensions();
     let source = img.into_raw();
     let cyan_frames = build_cyan_frames(&source);
-    // Burst base sits at the mid-high end of the pulse alpha range so the
-    // shifted bands read as cyan rather than the raw black source pixels.
     let burst_base = tint_frame(&source, CYAN_RGB, 0.80);
     Some(AnimationFrames {
         cyan: cyan_frames,
-        red: build_red_frames(&source),
+        red_steady: build_red_steady(&source),
+        red_burst_base: build_red_burst_base(&source),
         source,
         burst_base,
         width,
@@ -481,6 +485,10 @@ const ANIM_TICK_MS: u64 = 35;
 /// At 35ms/tick: 90-165 ticks ≈ 3.2-5.8s, centred around 4.5s.
 const GLITCH_GAP_MIN: u64 = 90;
 const GLITCH_GAP_MAX: u64 = 165;
+/// Min/max ticks between scanline bursts during unhealthy state.
+/// At 35ms/tick: 60-120 ticks ≈ 2.1-4.2s — more agitated than healthy.
+const RED_GAP_MIN: u64 = 60;
+const RED_GAP_MAX: u64 = 120;
 
 enum AnimState {
     Pulsing,
@@ -515,15 +523,44 @@ async fn run_tray_animation(
     let mut rng = rand::rngs::StdRng::from_entropy();
     let mut state = AnimState::Pulsing;
     let mut next_glitch_at: u64 = rng.gen_range(GLITCH_GAP_MIN..=GLITCH_GAP_MAX);
+    let mut red_state = AnimState::Pulsing;
+    let mut next_red_glitch_at: u64 = rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
 
     loop {
         tokio::select! {
             _ = anim_tick.tick() => {
                 if !healthy {
-                    // Red blink: 2 frames, advance every 4 ticks → 200ms/frame, 400ms cycle.
-                    let idx = ((counter / 4) % frames.red.len() as u64) as usize;
-                    let img = Image::new(&frames.red[idx], frames.width, frames.height);
-                    let _ = tray.set_icon(Some(img));
+                    match &mut red_state {
+                        AnimState::Pulsing => {
+                            let img = Image::new(&frames.red_steady, frames.width, frames.height);
+                            let _ = tray.set_icon(Some(img));
+                            if counter >= next_red_glitch_at {
+                                red_state = AnimState::Glitching {
+                                    sequence: random_scanline_sequence(&mut rng, frames.height),
+                                    step_idx: 0,
+                                    ticks_in_step: 0,
+                                };
+                            }
+                        }
+                        AnimState::Glitching { sequence, step_idx, ticks_in_step } => {
+                            let shifted = apply_scanline_shift(
+                                &frames.red_burst_base, frames.width, frames.height,
+                                &sequence[*step_idx].bands,
+                            );
+                            let img = Image::new(&shifted, frames.width, frames.height);
+                            let _ = tray.set_icon(Some(img));
+                            *ticks_in_step += 1;
+                            if *ticks_in_step >= sequence[*step_idx].ticks {
+                                *step_idx += 1;
+                                *ticks_in_step = 0;
+                                if *step_idx >= sequence.len() {
+                                    red_state = AnimState::Pulsing;
+                                    next_red_glitch_at = counter
+                                        + rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
+                                }
+                            }
+                        }
+                    }
                 } else {
                     match &mut state {
                         AnimState::Pulsing => {
@@ -564,9 +601,11 @@ async fn run_tray_animation(
             _ = health_tick.tick() => {
                 let new_healthy = mcp_is_healthy(&mcp_bound);
                 if !new_healthy {
-                    // If health drops mid-glitch, drop back to the pulse path so
-                    // the next tick renders red blink cleanly.
+                    // Health dropped — reset both state machines so the next tick
+                    // starts from a clean steady-red state.
                     state = AnimState::Pulsing;
+                    red_state = AnimState::Pulsing;
+                    next_red_glitch_at = counter + rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
                 } else if !healthy {
                     // Transitioned to healthy after a delayed bind — refresh the
                     // tray menu so the MCP status item shows 🟢 immediately.
@@ -670,14 +709,22 @@ mod tests {
     }
 
     #[test]
-    fn red_frames_use_delete_red_for_unhealthy_signal() {
+    fn red_steady_uses_delete_red_at_constant_alpha() {
         let source = vec![0, 0, 0, 255];
-        let frames = build_red_frames(&source);
-        assert_eq!(frames.len(), 2);
-        assert_eq!(frames[0][3], 255, "on frame is fully opaque");
-        assert_eq!(frames[1][3], (255.0 * 0.20) as u8, "off frame is dim");
-        // --delete in DESIGN.md (not the chromatic-split red).
-        assert_eq!(&frames[0][0..3], &[255, 59, 48]);
+        let frame = build_red_steady(&source);
+        // --delete from DESIGN.md, clearly visible but not alarm-bright.
+        assert_eq!(&frame[0..3], &[255, 59, 48]);
+        assert_eq!(frame[3], (255.0 * 0.65) as u8);
+    }
+
+    #[test]
+    fn red_burst_base_uses_delete_red_brighter_than_steady() {
+        let source = vec![0, 0, 0, 255];
+        let steady = build_red_steady(&source);
+        let burst = build_red_burst_base(&source);
+        assert_eq!(&burst[0..3], &[255, 59, 48]);
+        assert!(burst[3] > steady[3], "burst base should be brighter than steady");
+        assert_eq!(burst[3], (255.0 * 0.80) as u8);
     }
 
     #[test]
