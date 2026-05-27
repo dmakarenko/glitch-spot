@@ -115,3 +115,82 @@ pub(super) fn capture_active_monitor(
         display_index,
     })
 }
+
+pub(super) fn capture_window(
+    app: &tauri::AppHandle,
+    window_id: u32,
+) -> Result<CapturedFrame, CaptureError> {
+    let content = SCShareableContent::get()
+        .map_err(|e| CaptureError::Platform(format!("shareable content: {e:?}")))?;
+
+    let window = content
+        .windows()
+        .iter()
+        .find(|w| w.window_id() == window_id)
+        .cloned()
+        .ok_or_else(|| CaptureError::Platform(format!("window {window_id} no longer available")))?;
+
+    let frame = window.frame();
+    let logical_w = frame.size.width as f32;
+    let logical_h = frame.size.height as f32;
+
+    // Determine the window's owning display so we know the scale factor.
+    let monitors = app
+        .available_monitors()
+        .map_err(|e| CaptureError::Platform(format!("monitors: {e}")))?;
+    let scale_factor = monitors
+        .iter()
+        .find(|m| {
+            let pos = m.position();
+            let size = m.size();
+            let mx_min = pos.x as f64;
+            let my_min = pos.y as f64;
+            let mx_max = mx_min + size.width as f64;
+            let my_max = my_min + size.height as f64;
+            frame.origin.x >= mx_min
+                && frame.origin.x < mx_max
+                && frame.origin.y >= my_min
+                && frame.origin.y < my_max
+        })
+        .map(|m| m.scale_factor() as f32)
+        .unwrap_or(1.0);
+
+    let physical_w = (logical_w * scale_factor).round() as u32;
+    let physical_h = (logical_h * scale_factor).round() as u32;
+
+    let config = SCStreamConfiguration::new()
+        .with_width(physical_w)
+        .with_height(physical_h);
+
+    let filter = SCContentFilter::create().with_window(&window).build();
+
+    let image = SCScreenshotManager::capture_image(&filter, &config)
+        .map_err(|e| CaptureError::Platform(format!("capture: {e:?}")))?;
+
+    let pixel_width = image.width() as u32;
+    let pixel_height = image.height() as u32;
+    let rgba = image
+        .rgba_data()
+        .map_err(|e| CaptureError::Encoding(format!("rgba_data: {e:?}")))?;
+
+    let img = RgbaImage::from_raw(pixel_width, pixel_height, rgba)
+        .ok_or_else(|| CaptureError::Encoding("rgba buffer size mismatch".into()))?;
+
+    let mut png_bytes: Vec<u8> = Vec::new();
+    PngEncoder::new(&mut png_bytes)
+        .write_image(
+            img.as_raw(),
+            pixel_width,
+            pixel_height,
+            image::ColorType::Rgba8.into(),
+        )
+        .map_err(|e| CaptureError::Encoding(format!("png encode: {e}")))?;
+
+    Ok(CapturedFrame {
+        width: pixel_width,
+        height: pixel_height,
+        scale_factor,
+        png: png_bytes,
+        display_index: 0, // set by the caller from picker_session
+    })
+}
