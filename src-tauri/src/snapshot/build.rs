@@ -89,6 +89,7 @@ pub fn build(
                 platform: os_platform.to_string(),
                 version: os_version.to_string(),
             },
+            window: None,
         },
         images: Images {
             clean: clean_path.to_string_lossy().into_owned(),

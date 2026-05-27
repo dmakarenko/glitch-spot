@@ -29,6 +29,7 @@ fn sample_snapshot() -> Snapshot {
                 platform: "macos".into(),
                 version: "26.0".into(),
             },
+            window: None,
         },
         images: Images {
             clean: "/tmp/glitch-spot-snap_test123.png".into(),
@@ -279,6 +280,43 @@ fn annotated_png_caps_panel_width_for_long_notes() {
         inside_panel.0[3], 245,
         "expected panel-fill alpha at (50, {panel_inside_y}), got {inside_panel:?}"
     );
+}
+
+#[test]
+fn context_window_round_trips() {
+    let s = Snapshot {
+        id: "snap_test_w".into(),
+        created_at: "2026-05-27T10:00:00Z".into(),
+        mode: "window".into(),
+        annotations: vec![],
+        context: Context {
+            screen: ScreenInfo {
+                width: 1440,
+                height: 900,
+                scale_factor: 2.0,
+                display_index: 0,
+            },
+            os: OsInfo { platform: "macos".into(), version: "26.0".into() },
+            window: Some(WindowInfo {
+                app_name: "Safari".into(),
+                title: "Reader — example.com".into(),
+                bounds: WindowBounds { x: 120, y: 88, w: 1440, h: 900 },
+                window_id: 12345,
+            }),
+        },
+        images: Images { clean: "x".into(), annotated: None },
+    };
+    let json = serde_json::to_string(&s).unwrap();
+    let back: Snapshot = serde_json::from_str(&json).unwrap();
+    assert_eq!(s, back);
+}
+
+#[test]
+fn context_window_omitted_when_none() {
+    let mut s = sample_snapshot();
+    s.context.window = None;
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(!json.contains("\"window\""), "expected `window` key omitted, got: {json}");
 }
 
 #[test]

@@ -30,9 +30,27 @@ pub struct Coords {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WindowInfo {
+    pub app_name: String,
+    pub title: String,
+    pub bounds: WindowBounds,
+    pub window_id: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WindowBounds {
+    pub x: i32,
+    pub y: i32,
+    pub w: u32,
+    pub h: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Context {
     pub screen: ScreenInfo,
     pub os: OsInfo,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub window: Option<WindowInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
