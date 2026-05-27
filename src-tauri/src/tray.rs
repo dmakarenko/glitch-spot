@@ -336,6 +336,14 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
     use tauri::image::Image;
 
     let frames = build_animation_frames();
+    // Read health state before build_menu so we know what the menu was built
+    // with; passed to the animation task to avoid a spurious refresh at the
+    // first health_tick when nothing actually changed.
+    let mcp_bound = {
+        let state = app.state::<crate::AppState>();
+        state.mcp_bound.clone()
+    };
+    let menu_built_healthy = mcp_is_healthy(&mcp_bound);
     let menu = build_menu(app)?;
 
     // Initial icon: cyan frame 0 if frames decoded, otherwise the raw black PNG
@@ -470,11 +478,7 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
     // aggressive red blink when down. Polls health every 3s.
     if let Some(frames) = frames {
         let tray_for_anim = tray.clone();
-        let mcp_bound = {
-            let state = app.state::<crate::AppState>();
-            state.mcp_bound.clone()
-        };
-        tauri::async_runtime::spawn(run_tray_animation(tray_for_anim, frames, mcp_bound, app.clone()));
+        tauri::async_runtime::spawn(run_tray_animation(tray_for_anim, frames, mcp_bound, app.clone(), menu_built_healthy));
     }
 
     Ok(tray)
@@ -504,6 +508,7 @@ async fn run_tray_animation(
     frames: AnimationFrames,
     mcp_bound: std::sync::Arc<std::sync::atomic::AtomicBool>,
     app: AppHandle,
+    menu_built_healthy: bool,
 ) {
     use rand::{Rng, SeedableRng};
     use tauri::image::Image;
@@ -607,11 +612,14 @@ async fn run_tray_animation(
             _ = health_tick.tick() => {
                 let new_healthy = mcp_is_healthy(&mcp_bound);
                 if !initial_sync_done {
-                    // First tick: sync menu to actual MCP state regardless of
-                    // whether health changed — covers the startup race where MCP
-                    // bound after build_menu but before this task read healthy.
-                    refresh_menu(&app);
                     initial_sync_done = true;
+                    // Only refresh if health changed since the menu was built.
+                    // An unconditional refresh here calls set_menu on macOS, which
+                    // closes any open menu — causing the Tunnel Provider submenu to
+                    // make the whole menu vanish on first hover after launch.
+                    if new_healthy != menu_built_healthy {
+                        refresh_menu(&app);
+                    }
                 } else if !new_healthy {
                     // Always reset the healthy state machine so the cyan pulse
                     // resumes cleanly when health recovers.
