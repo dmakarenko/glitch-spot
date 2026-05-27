@@ -2,7 +2,7 @@
 // ABOUTME: rectangles as absolutely-positioned DOM divs the parent can wire to notes.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AnnotationsAction, AnnotationsState } from "./types";
+import type { AnnotationsAction, AnnotationsState, Handle } from "./types";
 import { MIN_RECT_DIMENSION } from "./state";
 import { RectangleNote } from "./RectangleNote";
 import { formatLabel } from "./label";
@@ -23,11 +23,86 @@ type Props = {
   clipRect?: ClipRect;
 };
 
+const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+
+function handleStyle(handle: Handle): React.CSSProperties {
+  const base: React.CSSProperties = {
+    position: "absolute",
+    background: "#ee6633",
+    boxShadow: "0 0 0 1px rgba(0,0,0,0.35)",
+    pointerEvents: "auto",
+  };
+  switch (handle) {
+    case "nw":
+      return { ...base, width: 8, height: 8, top: -4, left: -4, cursor: "nwse-resize" };
+    case "ne":
+      return { ...base, width: 8, height: 8, top: -4, right: -4, cursor: "nesw-resize" };
+    case "sw":
+      return { ...base, width: 8, height: 8, bottom: -4, left: -4, cursor: "nesw-resize" };
+    case "se":
+      return { ...base, width: 8, height: 8, bottom: -4, right: -4, cursor: "nwse-resize" };
+    case "n":
+      return { ...base, width: 16, height: 4, top: -2, left: "50%", marginLeft: -8, cursor: "ns-resize" };
+    case "s":
+      return { ...base, width: 16, height: 4, bottom: -2, left: "50%", marginLeft: -8, cursor: "ns-resize" };
+    case "w":
+      return { ...base, width: 4, height: 16, left: -2, top: "50%", marginTop: -8, cursor: "ew-resize" };
+    case "e":
+      return { ...base, width: 4, height: 16, right: -2, top: "50%", marginTop: -8, cursor: "ew-resize" };
+  }
+}
+
+function ResizeHandle({
+  handle,
+  rectId,
+  dispatch,
+  eventCoords,
+}: {
+  handle: Handle;
+  rectId: string;
+  dispatch: (action: AnnotationsAction) => void;
+  eventCoords: (e: { clientX: number; clientY: number }) => { x: number; y: number };
+}) {
+  return (
+    <div
+      aria-hidden
+      style={handleStyle(handle)}
+      onMouseDown={(e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const { x: pointerX, y: pointerY } = eventCoords(e);
+        dispatch({
+          type: "BEGIN_RESIZE",
+          id: rectId,
+          handle,
+          pointerX,
+          pointerY,
+          viewportW: window.innerWidth,
+          viewportH: window.innerHeight,
+        });
+      }}
+    />
+  );
+}
+
 export function DrawingLayer({ state, dispatch, clipRect }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   const [containerHeight, setContainerHeight] = useState<number>(
     typeof window !== "undefined" ? window.innerHeight : 0
+  );
+
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  const eventCoords = useCallback(
+    (e: { clientX: number; clientY: number }) => {
+      const surface = ref.current?.getBoundingClientRect();
+      const offsetX = surface?.left ?? 0;
+      const offsetY = surface?.top ?? 0;
+      return { x: e.clientX - offsetX, y: e.clientY - offsetY };
+    },
+    [],
   );
 
   useEffect(() => {
@@ -37,64 +112,54 @@ export function DrawingLayer({ state, dispatch, clipRect }: Props) {
   }, []);
 
   // Returns the point if it is inside clipRect (or if no clipRect is set),
-  // null otherwise. Used to gate BEGIN_DRAG.
-  const clamp = (x: number, y: number): { x: number; y: number } | null => {
+  // null otherwise. Used to gate BEGIN_CREATE so the user can't start a new
+  // rectangle outside the selected window in window mode.
+  const insideClip = (x: number, y: number): { x: number; y: number } | null => {
     if (!clipRect) return { x, y };
     const inside =
       x >= clipRect.x &&
       x < clipRect.x + clipRect.w &&
       y >= clipRect.y &&
       y < clipRect.y + clipRect.h;
-    if (!inside) return null;
-    const clampedX = Math.max(clipRect.x, Math.min(x, clipRect.x + clipRect.w));
-    const clampedY = Math.max(clipRect.y, Math.min(y, clipRect.y + clipRect.h));
-    return { x: clampedX, y: clampedY };
+    return inside ? { x, y } : null;
   };
 
   const onMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      // Only respond to clicks that started on the drawing surface itself, not
-      // on a child element (e.g., a note input or a delete X). Children stop
-      // propagation via their own handlers.
       if (e.target !== e.currentTarget) return;
-      // Ignore non-primary buttons.
       if (e.button !== 0) return;
-      // Prevent the browser from starting a text selection that would flash
-      // across existing notes and rect contents as the drag passes over them.
       e.preventDefault();
-      const rect = ref.current?.getBoundingClientRect();
-      if (!rect) return;
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const startInside = clamp(x, y);
+      const { x, y } = eventCoords(e);
+      const startInside = insideClip(x, y);
       if (!startInside) return;
-      dispatch({ type: "BEGIN_DRAG", id: nextRectId(), x: startInside.x, y: startInside.y });
+      dispatch({ type: "BEGIN_CREATE", id: nextRectId(), x: startInside.x, y: startInside.y });
     },
-    [dispatch, clipRect]
+    [dispatch, eventCoords, clipRect]
   );
 
   const onMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!state.draggingId) return;
-      const rect = ref.current?.getBoundingClientRect();
-      if (!rect) return;
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      let nx = x;
-      let ny = y;
+      if (!state.active) return;
+      let { x, y } = eventCoords(e);
       if (clipRect) {
-        nx = Math.max(clipRect.x, Math.min(x, clipRect.x + clipRect.w));
-        ny = Math.max(clipRect.y, Math.min(y, clipRect.y + clipRect.h));
+        x = Math.max(clipRect.x, Math.min(x, clipRect.x + clipRect.w));
+        y = Math.max(clipRect.y, Math.min(y, clipRect.y + clipRect.h));
       }
-      dispatch({ type: "DRAG_TO", x: nx, y: ny });
+      dispatch({
+        type: "POINTER_TO",
+        x,
+        y,
+        viewportW: window.innerWidth,
+        viewportH: window.innerHeight,
+      });
     },
-    [dispatch, state.draggingId, clipRect]
+    [dispatch, eventCoords, state.active, clipRect],
   );
 
   const onMouseUp = useCallback(() => {
-    if (!state.draggingId) return;
-    dispatch({ type: "END_DRAG" });
-  }, [dispatch, state.draggingId]);
+    if (!state.active) return;
+    dispatch({ type: "END_GESTURE" });
+  }, [dispatch, state.active]);
 
   return (
     <div
@@ -115,6 +180,26 @@ export function DrawingLayer({ state, dispatch, clipRect }: Props) {
         <div
           key={r.id}
           data-rect-id={r.id}
+          onMouseEnter={() => setHoveredId(r.id)}
+          onMouseLeave={() => setHoveredId((prev) => (prev === r.id ? null : prev))}
+          onMouseDown={(e) => {
+            // Only respond if the mousedown originated on the rect body itself, not on
+            // a child (handle, delete-X, badge, note textarea). Children stopPropagation
+            // on their own mousedowns.
+            if (e.target !== e.currentTarget) return;
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const { x: pointerX, y: pointerY } = eventCoords(e);
+            dispatch({
+              type: "BEGIN_MOVE",
+              id: r.id,
+              pointerX,
+              pointerY,
+              viewportW: window.innerWidth,
+              viewportH: window.innerHeight,
+            });
+          }}
           style={{
             position: "absolute",
             left: r.x,
@@ -124,7 +209,8 @@ export function DrawingLayer({ state, dispatch, clipRect }: Props) {
             border: RECT_BORDER,
             background: RECT_FILL,
             boxSizing: "border-box",
-            pointerEvents: "none",
+            pointerEvents: "auto",
+            cursor: "move",
             boxShadow: "-2px 0 0 rgba(255, 0, 60, 0.4), 2px 0 0 rgba(0, 245, 255, 0.4)",
           }}
         >
@@ -134,19 +220,21 @@ export function DrawingLayer({ state, dispatch, clipRect }: Props) {
                 aria-hidden
                 style={{
                   position: "absolute",
-                  top: -9,
-                  left: -13,
-                  width: 26,
-                  height: 18,
-                  borderRadius: 9,
+                  width: 22,
+                  height: 14,
+                  borderRadius: 7,
                   background: "#ee6633",
                   color: "#ffffff",
-                  font: "bold 11px sans-serif",
+                  font: "bold 10px sans-serif",
+                  lineHeight: 1,
+                  fontVariantNumeric: "tabular-nums",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   pointerEvents: "none",
                   boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                  top: 4,
+                  left: 4,
                 }}
               >
                 {formatLabel(idx)}
@@ -161,25 +249,33 @@ export function DrawingLayer({ state, dispatch, clipRect }: Props) {
                 aria-label="Delete rectangle"
                 style={{
                   position: "absolute",
-                  top: -10,
-                  right: -10,
                   width: 20,
                   height: 20,
                   padding: 0,
                   border: "none",
-                  borderRadius: "50%",
-                  background: "#ff3b30",
-                  color: "white",
-                  fontSize: 14,
+                  background: "transparent",
+                  color: "#ee6633",
+                  font: "bold 20px sans-serif",
                   lineHeight: "20px",
                   textAlign: "center",
                   cursor: "pointer",
                   pointerEvents: "auto",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                  textShadow: "0 0 3px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.5)",
+                  top: 2,
+                  right: 2,
                 }}
               >
                 ×
               </button>
+              {hoveredId === r.id && HANDLES.map((handle) => (
+                <ResizeHandle
+                  key={handle}
+                  handle={handle}
+                  rectId={r.id}
+                  dispatch={dispatch}
+                  eventCoords={eventCoords}
+                />
+              ))}
             </>
           )}
         </div>
@@ -189,7 +285,7 @@ export function DrawingLayer({ state, dispatch, clipRect }: Props) {
           key={`${r.id}-note`}
           rect={r}
           containerHeight={containerHeight}
-          autoFocus={!state.draggingId && r.id === state.lastCreatedId}
+          autoFocus={!state.active && r.id === state.lastCreatedId}
           onChange={(note) => dispatch({ type: "SET_NOTE", id: r.id, note })}
         />
       ))}
