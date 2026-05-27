@@ -206,6 +206,10 @@ async fn set_tunnel_provider(
     do_set_tunnel_provider(&state, kind).await
 }
 
+pub(crate) async fn trigger_window_picker(_app: &tauri::AppHandle) -> anyhow::Result<()> {
+    Ok(())   // wired up in Task 13
+}
+
 pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Result<()> {
     overlay::show_live(app)?;
     Ok(())
