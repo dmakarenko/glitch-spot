@@ -2,8 +2,7 @@
 // ABOUTME: rectangles as absolutely-positioned DOM divs the parent can wire to notes.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AnnotationsAction, AnnotationsState } from "./types";
-import type { Corner } from "./types";
+import type { AnnotationsAction, AnnotationsState, Handle } from "./types";
 import { MIN_RECT_DIMENSION } from "./state";
 import { RectangleNote } from "./RectangleNote";
 import { formatLabel } from "./label";
@@ -21,47 +20,50 @@ type Props = {
   dispatch: (action: AnnotationsAction) => void;
 };
 
-const CORNERS: Corner[] = ["nw", "ne", "sw", "se"];
+const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+
+function handleStyle(handle: Handle): React.CSSProperties {
+  const base: React.CSSProperties = {
+    position: "absolute",
+    background: "#ee6633",
+    boxShadow: "0 0 0 1px rgba(0,0,0,0.35)",
+    pointerEvents: "auto",
+  };
+  switch (handle) {
+    case "nw":
+      return { ...base, width: 10, height: 10, top: -5, left: -5, cursor: "nwse-resize" };
+    case "ne":
+      return { ...base, width: 10, height: 10, top: -5, right: -5, cursor: "nesw-resize" };
+    case "sw":
+      return { ...base, width: 10, height: 10, bottom: -5, left: -5, cursor: "nesw-resize" };
+    case "se":
+      return { ...base, width: 10, height: 10, bottom: -5, right: -5, cursor: "nwse-resize" };
+    case "n":
+      return { ...base, width: 20, height: 6, top: -3, left: "50%", marginLeft: -10, cursor: "ns-resize" };
+    case "s":
+      return { ...base, width: 20, height: 6, bottom: -3, left: "50%", marginLeft: -10, cursor: "ns-resize" };
+    case "w":
+      return { ...base, width: 6, height: 20, left: -3, top: "50%", marginTop: -10, cursor: "ew-resize" };
+    case "e":
+      return { ...base, width: 6, height: 20, right: -3, top: "50%", marginTop: -10, cursor: "ew-resize" };
+  }
+}
 
 function ResizeHandle({
-  corner,
+  handle,
   rectId,
   dispatch,
   eventCoords,
 }: {
-  corner: Corner;
+  handle: Handle;
   rectId: string;
   dispatch: (action: AnnotationsAction) => void;
   eventCoords: (e: { clientX: number; clientY: number }) => { x: number; y: number };
 }) {
-  const isDiagNwSe = corner === "nw" || corner === "se";
-  const cursor = isDiagNwSe ? "nwse-resize" : "nesw-resize";
-  const position: React.CSSProperties = {
-    position: "absolute",
-    width: 10,
-    height: 10,
-    background: "#ee6633",
-    boxShadow: "0 0 0 1px rgba(0,0,0,0.35)",
-    pointerEvents: "auto",
-    cursor,
-  };
-  if (corner === "nw") {
-    position.top = -5;
-    position.left = -5;
-  } else if (corner === "ne") {
-    position.top = -5;
-    position.right = -5;
-  } else if (corner === "sw") {
-    position.bottom = -5;
-    position.left = -5;
-  } else {
-    position.bottom = -5;
-    position.right = -5;
-  }
   return (
     <div
       aria-hidden
-      style={position}
+      style={handleStyle(handle)}
       onMouseDown={(e) => {
         if (e.button !== 0) return;
         e.preventDefault();
@@ -70,7 +72,7 @@ function ResizeHandle({
         dispatch({
           type: "BEGIN_RESIZE",
           id: rectId,
-          corner,
+          handle,
           pointerX,
           pointerY,
           viewportW: window.innerWidth,
@@ -242,10 +244,10 @@ export function DrawingLayer({ state, dispatch }: Props) {
               >
                 ×
               </button>
-              {hoveredId === r.id && CORNERS.map((corner) => (
+              {hoveredId === r.id && HANDLES.map((handle) => (
                 <ResizeHandle
-                  key={corner}
-                  corner={corner}
+                  key={handle}
+                  handle={handle}
                   rectId={r.id}
                   dispatch={dispatch}
                   eventCoords={eventCoords}

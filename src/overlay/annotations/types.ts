@@ -1,6 +1,6 @@
 // ABOUTME: Shared annotation types for the overlay's drawing layer + Rust IPC payload.
 
-export type Corner = 'nw' | 'ne' | 'sw' | 'se';
+export type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
 export type Rect = {
   id: string;
@@ -15,7 +15,12 @@ export type Rect = {
 export type ActiveGesture =
   | { kind: 'create'; id: string; anchorX: number; anchorY: number }
   | { kind: 'move'; id: string; pointerStart: { x: number; y: number }; rectStart: { x: number; y: number } }
-  | { kind: 'resize'; id: string; corner: Corner; anchor: { x: number; y: number } };
+  | {
+      kind: 'resize';
+      id: string;
+      handle: Handle;
+      rectStart: { x: number; y: number; w: number; h: number };
+    };
 
 export type AnnotationsState = {
   rects: Rect[];
@@ -45,7 +50,7 @@ export type AnnotationsAction =
   | {
       type: 'BEGIN_RESIZE';
       id: string;
-      corner: Corner;
+      handle: Handle;
       pointerX: number;
       pointerY: number;
       viewportW: number;

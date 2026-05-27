@@ -74,12 +74,11 @@ export function reducer(
     case "BEGIN_RESIZE": {
       const rect = state.rects.find((r) => r.id === action.id);
       if (!rect) return state;
-      const anchor = anchorForCorner(rect, action.corner);
       const active: ActiveGesture = {
         kind: "resize",
         id: action.id,
-        corner: action.corner,
-        anchor,
+        handle: action.handle,
+        rectStart: { x: rect.x, y: rect.y, w: rect.w, h: rect.h },
       };
       const history: HistoryEntry[] = [
         ...state.history,
@@ -118,12 +117,12 @@ export function reducer(
         return { ...state, rects };
       }
       if (state.active.kind === "resize") {
-        const { id, corner, anchor } = state.active;
+        const { id, handle, rectStart } = state.active;
         const rect = state.rects.find((r) => r.id === id);
         if (!rect) return state;
         const geom = clampResize(
-          corner,
-          anchor,
+          handle,
+          rectStart,
           { x: action.x, y: action.y },
           { w: action.viewportW, h: action.viewportH },
         );
@@ -295,18 +294,3 @@ function extendTo(
   return { ...rect, x, y, w, h };
 }
 
-function anchorForCorner(
-  rect: { x: number; y: number; w: number; h: number },
-  corner: import("./types").Corner,
-): { x: number; y: number } {
-  switch (corner) {
-    case "nw":
-      return { x: rect.x + rect.w, y: rect.y + rect.h };
-    case "ne":
-      return { x: rect.x, y: rect.y + rect.h };
-    case "sw":
-      return { x: rect.x + rect.w, y: rect.y };
-    case "se":
-      return { x: rect.x, y: rect.y };
-  }
-}

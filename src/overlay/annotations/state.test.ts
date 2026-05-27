@@ -190,7 +190,7 @@ describe("undo", () => {
     s = reducer(s, {
       type: "BEGIN_RESIZE",
       id: "r1",
-      corner: "se",
+      handle: "se",
       pointerX: 300,
       pointerY: 250,
       viewportW: VW,
@@ -222,7 +222,7 @@ describe("undo", () => {
     s = reducer(s, {
       type: "BEGIN_RESIZE",
       id: "r1",
-      corner: "se",
+      handle: "se",
       pointerX: 250,
       pointerY: 250,
       viewportW: VW,
@@ -399,12 +399,12 @@ describe("resize gesture", () => {
     return reducer(s, { type: "END_GESTURE" });
   }
 
-  it("BEGIN_RESIZE from SE corner anchors at NW and records previous geometry in history", () => {
+  it("BEGIN_RESIZE snapshots the rect into active.rectStart and records previous geometry in history", () => {
     const start = drawn("r1", 100, 100, 200, 150);
     const s = reducer(start, {
       type: "BEGIN_RESIZE",
       id: "r1",
-      corner: "se",
+      handle: "se",
       pointerX: 300,
       pointerY: 250,
       viewportW: VW,
@@ -413,8 +413,8 @@ describe("resize gesture", () => {
     expect(s.active).toEqual({
       kind: "resize",
       id: "r1",
-      corner: "se",
-      anchor: { x: 100, y: 100 },
+      handle: "se",
+      rectStart: { x: 100, y: 100, w: 200, h: 150 },
     });
     const last = s.history[s.history.length - 1];
     expect(last).toEqual({
@@ -424,66 +424,12 @@ describe("resize gesture", () => {
     });
   });
 
-  it("BEGIN_RESIZE from NW corner anchors at SE", () => {
-    const start = drawn("r1", 100, 100, 200, 150);
-    const s = reducer(start, {
-      type: "BEGIN_RESIZE",
-      id: "r1",
-      corner: "nw",
-      pointerX: 100,
-      pointerY: 100,
-      viewportW: VW,
-      viewportH: VH,
-    });
-    if (s.active && s.active.kind === "resize") {
-      expect(s.active.anchor).toEqual({ x: 300, y: 250 });
-    } else {
-      throw new Error("expected active resize gesture");
-    }
-  });
-
-  it("BEGIN_RESIZE from NE corner anchors at SW", () => {
-    const start = drawn("r1", 100, 100, 200, 150);
-    const s = reducer(start, {
-      type: "BEGIN_RESIZE",
-      id: "r1",
-      corner: "ne",
-      pointerX: 300,
-      pointerY: 100,
-      viewportW: VW,
-      viewportH: VH,
-    });
-    if (s.active && s.active.kind === "resize") {
-      expect(s.active.anchor).toEqual({ x: 100, y: 250 });
-    } else {
-      throw new Error("expected active resize gesture");
-    }
-  });
-
-  it("BEGIN_RESIZE from SW corner anchors at NE", () => {
-    const start = drawn("r1", 100, 100, 200, 150);
-    const s = reducer(start, {
-      type: "BEGIN_RESIZE",
-      id: "r1",
-      corner: "sw",
-      pointerX: 100,
-      pointerY: 250,
-      viewportW: VW,
-      viewportH: VH,
-    });
-    if (s.active && s.active.kind === "resize") {
-      expect(s.active.anchor).toEqual({ x: 300, y: 100 });
-    } else {
-      throw new Error("expected active resize gesture");
-    }
-  });
-
   it("POINTER_TO during SE resize extends width/height with NW pinned", () => {
     let s = drawn("r1", 100, 100, 200, 150);
     s = reducer(s, {
       type: "BEGIN_RESIZE",
       id: "r1",
-      corner: "se",
+      handle: "se",
       pointerX: 300,
       pointerY: 250,
       viewportW: VW,
@@ -498,7 +444,7 @@ describe("resize gesture", () => {
     s = reducer(s, {
       type: "BEGIN_RESIZE",
       id: "r1",
-      corner: "nw",
+      handle: "nw",
       pointerX: 100,
       pointerY: 100,
       viewportW: VW,
@@ -513,7 +459,7 @@ describe("resize gesture", () => {
     s = reducer(s, {
       type: "BEGIN_RESIZE",
       id: "r1",
-      corner: "se",
+      handle: "se",
       pointerX: 300,
       pointerY: 250,
       viewportW: VW,
@@ -533,7 +479,7 @@ describe("resize gesture", () => {
     s = reducer(s, {
       type: "BEGIN_RESIZE",
       id: "r1",
-      corner: "se",
+      handle: "se",
       pointerX: 300,
       pointerY: 250,
       viewportW: VW,
@@ -551,7 +497,7 @@ describe("resize gesture", () => {
     s = reducer(s, {
       type: "BEGIN_RESIZE",
       id: "r1",
-      corner: "se",
+      handle: "se",
       pointerX: 300,
       pointerY: 250,
       viewportW: VW,
@@ -567,12 +513,96 @@ describe("resize gesture", () => {
     const s = reducer(start, {
       type: "BEGIN_RESIZE",
       id: "ghost",
-      corner: "se",
+      handle: "se",
       pointerX: 0,
       pointerY: 0,
       viewportW: VW,
       viewportH: VH,
     });
     expect(s).toEqual(start);
+  });
+
+  it("BEGIN_RESIZE on an edge handle stores the full rectStart in active", () => {
+    const start = drawn("r1", 100, 100, 200, 150);
+    const s = reducer(start, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      handle: "n",
+      pointerX: 200,
+      pointerY: 100,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    expect(s.active).toEqual({
+      kind: "resize",
+      id: "r1",
+      handle: "n",
+      rectStart: { x: 100, y: 100, w: 200, h: 150 },
+    });
+  });
+
+  it("POINTER_TO during N-edge resize moves only the top edge", () => {
+    let s = drawn("r1", 100, 100, 200, 150);
+    s = reducer(s, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      handle: "n",
+      pointerX: 200,
+      pointerY: 100,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(999, 80));
+    expect(s.rects[0]).toMatchObject({ x: 100, y: 80, w: 200, h: 170 });
+  });
+
+  it("POINTER_TO during E-edge resize moves only the right edge", () => {
+    let s = drawn("r1", 100, 100, 200, 150);
+    s = reducer(s, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      handle: "e",
+      pointerX: 300,
+      pointerY: 175,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(400, -999));
+    expect(s.rects[0]).toMatchObject({ x: 100, y: 100, w: 300, h: 150 });
+  });
+
+  it("UNDO restores the full geometry after an edge resize", () => {
+    let s = drawn("r1", 100, 100, 200, 150);
+    s = reducer(s, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      handle: "w",
+      pointerX: 100,
+      pointerY: 175,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(50, 175));
+    s = reducer(s, { type: "END_GESTURE" });
+    expect(s.rects[0]).toMatchObject({ x: 50, y: 100, w: 250, h: 150 });
+    s = reducer(s, { type: "UNDO" });
+    expect(s.rects[0]).toMatchObject({ x: 100, y: 100, w: 200, h: 150 });
+  });
+
+  it("END_GESTURE after edge BEGIN_RESIZE with no POINTER_TO pops the no-op history entry", () => {
+    let s = drawn("r1", 100, 100, 200, 150);
+    const before = s.history.length;
+    s = reducer(s, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      handle: "s",
+      pointerX: 200,
+      pointerY: 250,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    expect(s.history.length).toBe(before + 1);
+    s = reducer(s, { type: "END_GESTURE" });
+    expect(s.history.length).toBe(before);
   });
 });
