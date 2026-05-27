@@ -601,11 +601,15 @@ async fn run_tray_animation(
             _ = health_tick.tick() => {
                 let new_healthy = mcp_is_healthy(&mcp_bound);
                 if !new_healthy {
-                    // Health dropped — reset both state machines so the next tick
-                    // starts from a clean steady-red state.
+                    // Always reset the healthy state machine so the cyan pulse
+                    // resumes cleanly when health recovers.
                     state = AnimState::Pulsing;
-                    red_state = AnimState::Pulsing;
-                    next_red_glitch_at = counter + rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
+                    if healthy {
+                        // Just transitioned healthy→unhealthy: reset red burst
+                        // state so the gap timer starts fresh from now.
+                        red_state = AnimState::Pulsing;
+                        next_red_glitch_at = counter + rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
+                    }
                 } else if !healthy {
                     // Transitioned to healthy after a delayed bind — refresh the
                     // tray menu so the MCP status item shows 🟢 immediately.
