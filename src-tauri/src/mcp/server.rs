@@ -203,11 +203,17 @@ pub async fn serve(
     use std::sync::atomic::Ordering;
     let app = build_router(store);
     let addr = format!("127.0.0.1:{port}");
-    let listener = match tokio::net::TcpListener::bind(&addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("[glitch-spot mcp] failed to bind {addr}: {e}");
-            return;
+    let listener = loop {
+        match tokio::net::TcpListener::bind(&addr).await {
+            Ok(l) => break l,
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                eprintln!("[glitch-spot mcp] port {port} in use, retrying in 1s…");
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            }
+            Err(e) => {
+                eprintln!("[glitch-spot mcp] failed to bind {addr}: {e}");
+                return;
+            }
         }
     };
     bound.store(true, Ordering::SeqCst);
@@ -463,18 +469,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn serve_leaves_bound_false_when_bind_fails() {
+    async fn serve_retries_when_port_in_use_and_binds_once_free() {
         use std::sync::atomic::{AtomicBool, Ordering};
+        use tokio::time::{sleep, Duration};
 
-        // Pre-bind a port so serve's bind will fail with AddrInUse.
+        // Pre-bind a port to block serve.
         let blocker = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = blocker.local_addr().unwrap().port();
 
         let store = Arc::new(SnapshotStore::new());
         let bound = Arc::new(AtomicBool::new(false));
+        let bound_clone = bound.clone();
 
-        serve(store, port, bound.clone()).await;
+        let task = tokio::spawn(async move {
+            serve(store, port, bound_clone).await;
+        });
 
-        assert!(!bound.load(Ordering::SeqCst), "bind failure must not flip the flag");
+        // Brief pause so serve has attempted its first bind (and failed).
+        sleep(Duration::from_millis(100)).await;
+        assert!(!bound.load(Ordering::SeqCst), "should still be false while port blocked");
+
+        // Release the port so the next retry succeeds.
+        drop(blocker);
+
+        // Poll for bound to flip (retry delay ≤ 1s, so 3s total is generous).
+        for _ in 0..30 {
+            if bound.load(Ordering::SeqCst) { break; }
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        assert!(bound.load(Ordering::SeqCst), "bound should flip once port is free");
+        task.abort();
     }
 }
