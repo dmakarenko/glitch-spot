@@ -8,7 +8,7 @@ import type {
   HistoryEntry,
   Rect,
 } from "./types";
-import { clampMoveDelta } from "./transform";
+import { clampMoveDelta, clampResize } from "./transform";
 
 // Smallest committed-rectangle dimension. Aligned with DrawingLayer's delete-X
 // visibility threshold so every saved rectangle has a working delete button,
@@ -71,6 +71,27 @@ export function reducer(
       return { ...state, active, history };
     }
 
+    case "BEGIN_RESIZE": {
+      const rect = state.rects.find((r) => r.id === action.id);
+      if (!rect) return state;
+      const anchor = anchorForCorner(rect, action.corner);
+      const active: ActiveGesture = {
+        kind: "resize",
+        id: action.id,
+        corner: action.corner,
+        anchor,
+      };
+      const history: HistoryEntry[] = [
+        ...state.history,
+        {
+          kind: "resize",
+          id: action.id,
+          previous: { x: rect.x, y: rect.y, w: rect.w, h: rect.h },
+        },
+      ];
+      return { ...state, active, history };
+    }
+
     case "POINTER_TO": {
       if (!state.active) return state;
       if (state.active.kind === "create") {
@@ -94,6 +115,17 @@ export function reducer(
           { w: action.viewportW, h: action.viewportH },
         );
         const rects = state.rects.map((r) => (r.id === id ? { ...r, x, y } : r));
+        return { ...state, rects };
+      }
+      if (state.active.kind === "resize") {
+        const { id, corner, anchor } = state.active;
+        const geom = clampResize(
+          corner,
+          anchor,
+          { x: action.x, y: action.y },
+          { w: action.viewportW, h: action.viewportH },
+        );
+        const rects = state.rects.map((r) => (r.id === id ? { ...r, ...geom } : r));
         return { ...state, rects };
       }
       return state;
@@ -136,6 +168,25 @@ export function reducer(
           last.previous.y === rect.y
         ) {
           // No-op move (mousedown without movement). Pop the history entry.
+          const history = state.history.slice(0, -1);
+          return { ...state, active: null, history };
+        }
+        return { ...state, active: null };
+      }
+      if (state.active.kind === "resize") {
+        const { id } = state.active;
+        const rect = state.rects.find((r) => r.id === id);
+        const last = state.history[state.history.length - 1];
+        if (
+          rect &&
+          last &&
+          last.kind === "resize" &&
+          last.id === id &&
+          last.previous.x === rect.x &&
+          last.previous.y === rect.y &&
+          last.previous.w === rect.w &&
+          last.previous.h === rect.h
+        ) {
           const history = state.history.slice(0, -1);
           return { ...state, active: null, history };
         }
@@ -230,4 +281,20 @@ function extendTo(
   const w = Math.abs(cursorX - anchorX);
   const h = Math.abs(cursorY - anchorY);
   return { ...rect, x, y, w, h };
+}
+
+function anchorForCorner(
+  rect: { x: number; y: number; w: number; h: number },
+  corner: import("./types").Corner,
+): { x: number; y: number } {
+  switch (corner) {
+    case "nw":
+      return { x: rect.x + rect.w, y: rect.y + rect.h };
+    case "ne":
+      return { x: rect.x, y: rect.y + rect.h };
+    case "sw":
+      return { x: rect.x + rect.w, y: rect.y };
+    case "se":
+      return { x: rect.x, y: rect.y };
+  }
 }

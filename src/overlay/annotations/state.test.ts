@@ -316,3 +316,152 @@ describe("move gesture", () => {
     expect(s).toEqual(start);
   });
 });
+
+describe("resize gesture", () => {
+  function drawn(id: string, x: number, y: number, w: number, h: number): import("./types").AnnotationsState {
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id, x, y });
+    s = reducer(s, pointerTo(x + w, y + h));
+    return reducer(s, { type: "END_GESTURE" });
+  }
+
+  it("BEGIN_RESIZE from SE corner anchors at NW and records previous geometry in history", () => {
+    const start = drawn("r1", 100, 100, 200, 150);
+    const s = reducer(start, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      corner: "se",
+      pointerX: 300,
+      pointerY: 250,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    expect(s.active).toEqual({
+      kind: "resize",
+      id: "r1",
+      corner: "se",
+      anchor: { x: 100, y: 100 },
+    });
+    const last = s.history[s.history.length - 1];
+    expect(last).toEqual({
+      kind: "resize",
+      id: "r1",
+      previous: { x: 100, y: 100, w: 200, h: 150 },
+    });
+  });
+
+  it("BEGIN_RESIZE from NW corner anchors at SE", () => {
+    const start = drawn("r1", 100, 100, 200, 150);
+    const s = reducer(start, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      corner: "nw",
+      pointerX: 100,
+      pointerY: 100,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    if (s.active && s.active.kind === "resize") {
+      expect(s.active.anchor).toEqual({ x: 300, y: 250 });
+    } else {
+      throw new Error("expected active resize gesture");
+    }
+  });
+
+  it("POINTER_TO during SE resize extends width/height with NW pinned", () => {
+    let s = drawn("r1", 100, 100, 200, 150);
+    s = reducer(s, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      corner: "se",
+      pointerX: 300,
+      pointerY: 250,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(400, 300));
+    expect(s.rects[0]).toMatchObject({ x: 100, y: 100, w: 300, h: 200 });
+  });
+
+  it("POINTER_TO during NW resize moves the top-left with SE pinned", () => {
+    let s = drawn("r1", 100, 100, 200, 150);
+    s = reducer(s, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      corner: "nw",
+      pointerX: 100,
+      pointerY: 100,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(50, 50));
+    expect(s.rects[0]).toMatchObject({ x: 50, y: 50, w: 250, h: 200 });
+  });
+
+  it("POINTER_TO past the anchor stops at MIN_RECT_DIMENSION (no flip)", () => {
+    let s = drawn("r1", 100, 100, 200, 150);
+    s = reducer(s, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      corner: "se",
+      pointerX: 300,
+      pointerY: 250,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(50, 50));
+    expect(s.rects[0]).toMatchObject({
+      x: 100,
+      y: 100,
+      w: MIN_RECT_DIMENSION,
+      h: MIN_RECT_DIMENSION,
+    });
+  });
+
+  it("POINTER_TO during resize clamps the dragged corner to viewport", () => {
+    let s = drawn("r1", 100, 100, 200, 150);
+    s = reducer(s, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      corner: "se",
+      pointerX: 300,
+      pointerY: 250,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    s = reducer(s, pointerTo(VW + 500, VH + 500));
+    const r = s.rects[0];
+    expect(r.x + r.w).toBe(VW);
+    expect(r.y + r.h).toBe(VH);
+  });
+
+  it("END_GESTURE after BEGIN_RESIZE with no POINTER_TO pops the no-op history entry", () => {
+    let s = drawn("r1", 100, 100, 200, 150);
+    const before = s.history.length;
+    s = reducer(s, {
+      type: "BEGIN_RESIZE",
+      id: "r1",
+      corner: "se",
+      pointerX: 300,
+      pointerY: 250,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    expect(s.history.length).toBe(before + 1);
+    s = reducer(s, { type: "END_GESTURE" });
+    expect(s.history.length).toBe(before);
+  });
+
+  it("BEGIN_RESIZE on a non-existent id is a no-op", () => {
+    const start = drawn("r1", 100, 100, 200, 150);
+    const s = reducer(start, {
+      type: "BEGIN_RESIZE",
+      id: "ghost",
+      corner: "se",
+      pointerX: 0,
+      pointerY: 0,
+      viewportW: VW,
+      viewportH: VH,
+    });
+    expect(s).toEqual(start);
+  });
+});
