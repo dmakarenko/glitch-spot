@@ -18,8 +18,8 @@ describe("picker cursor", () => {
     expect(PICKER_CURSOR_SVG).toContain("rgba(0,245,255,");
   });
 
-  it("CSS uses a data URL with hotspot 16 16 and a crosshair fallback", () => {
+  it("CSS uses a data URL with hotspot 14 14 and a crosshair fallback", () => {
     expect(PICKER_CURSOR_CSS).toMatch(/^url\("data:image\/svg\+xml/);
-    expect(PICKER_CURSOR_CSS).toContain("16 16, crosshair");
+    expect(PICKER_CURSOR_CSS).toContain("14 14, crosshair");
   });
 });
