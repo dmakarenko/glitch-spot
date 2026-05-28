@@ -1,10 +1,12 @@
-// ABOUTME: Per-display picker UI. Renders a transparent overlay with a custom
-// ABOUTME: cursor; on mousemove hit-tests against the session's window list.
+// ABOUTME: Per-display picker overlay. Hover is driven by a Rust-side cursor
+// ABOUTME: poller broadcasting `picker://hover` events — macOS only delivers
+// ABOUTME: mouseMoved to the key window, so JS mousemove can't drive the
+// ABOUTME: non-activation display.
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { PICKER_CURSOR_CSS } from "./cursor";
-import { hitTest } from "./hitTest";
-import type { PickerStartPayload, PickableWindow, DisplayBounds } from "./types";
+import type { PickerStartPayload, PickableWindow } from "./types";
 
 export function Picker() {
   const [session, setSession] = useState<PickerStartPayload | null>(null);
@@ -34,21 +36,40 @@ export function Picker() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Cancel when the user swipes to another Space. macOS hides the picker
+  // window (we don't set canJoinAllSpaces), which transitions the document's
+  // visibilityState to "hidden". Resetting state on that lets a fresh
+  // ⌃⌥⌘J on the new Space start a fresh picker session.
+  useEffect(() => {
+    if (!session) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        invoke("picker_cancel");
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [session]);
+
+  // Subscribe to Rust-driven hover updates while a session is active. One
+  // emitter broadcasts to every picker, so each picker just mirrors the
+  // current window_id.
+  useEffect(() => {
+    if (!session) return;
+    let unlisten: UnlistenFn | undefined;
+    listen<{ window_id: number | null }>("picker://hover", (event) => {
+      setHoveredId(event.payload.window_id);
+    }).then((u) => {
+      unlisten = u;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, [session]);
+
   if (!session) return null;
 
-  const myDisplay: DisplayBounds | undefined = session.displays[session.my_display_index];
-  const scale = myDisplay?.scale_factor ?? 1;
-
-  const onMouseMove = (e: React.MouseEvent) => {
-    if (!myDisplay) return;
-    // Convert client (CSS px in *this* picker window) → global physical px.
-    const globalPhysX = myDisplay.x + e.clientX * scale;
-    const globalPhysY = myDisplay.y + e.clientY * scale;
-    const id = hitTest(session.windows, globalPhysX, globalPhysY);
-    setHoveredId(id);
-  };
-
-  const onMouseLeave = () => setHoveredId(null);
+  const { picker_origin, picker_scale } = session;
 
   const onClick = () => {
     if (hoveredId == null) {
@@ -62,8 +83,6 @@ export function Picker() {
 
   return (
     <div
-      onMouseMove={onMouseMove}
-      onMouseLeave={onMouseLeave}
       onClick={onClick}
       style={{
         position: "fixed",
@@ -73,8 +92,13 @@ export function Picker() {
       }}
       data-testid="picker-root"
     >
-      {highlight && myDisplay && (
-        <HighlightRect window={highlight} display={myDisplay} />
+      {highlight && (
+        <HighlightRect
+          window={highlight}
+          pickerOriginX={picker_origin.x}
+          pickerOriginY={picker_origin.y}
+          scale={picker_scale}
+        />
       )}
     </div>
   );
@@ -88,11 +112,20 @@ const CYAN_CHECKER =
   "<rect x='0' y='10' width='10' height='10' fill='%23ffffff' fill-opacity='0.12'/>" +
   "</svg>\")";
 
-function HighlightRect({ window: w, display }: { window: PickableWindow; display: DisplayBounds }) {
-  const scale = display.scale_factor;
-  // Convert window's global physical-px bounds → this picker's display-local CSS px.
-  const left = (w.bounds.x - display.x) / scale;
-  const top = (w.bounds.y - display.y) / scale;
+function HighlightRect({
+  window: w,
+  pickerOriginX,
+  pickerOriginY,
+  scale,
+}: {
+  window: PickableWindow;
+  pickerOriginX: number;
+  pickerOriginY: number;
+  scale: number;
+}) {
+  // Convert window's global physical-px bounds → picker-local CSS px.
+  const left = (w.bounds.x - pickerOriginX) / scale;
+  const top = (w.bounds.y - pickerOriginY) / scale;
   const width = w.bounds.w / scale;
   const height = w.bounds.h / scale;
   return (

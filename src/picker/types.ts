@@ -24,7 +24,12 @@ export type DisplayBounds = {
 export type PickerStartPayload = {
   windows: PickableWindow[];
   displays: DisplayBounds[];
-  my_display_index: number;
+  // Global physical-px origin of the single picker window. Cursor px inside
+  // the picker map back to global physical px by `picker_origin + clientX * picker_scale`.
+  picker_origin: { x: number; y: number };
+  // Scale factor used to convert CSS px (picker window) ↔ global physical px.
+  // Assumes uniform display scale across all displays.
+  picker_scale: number;
 };
 
 export type WindowModePayload = {
