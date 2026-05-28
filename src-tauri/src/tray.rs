@@ -357,6 +357,11 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .enabled(false)
         .build(app)?;
 
+    let build_built_at = MenuItemBuilder::new(format!("built at: {}", env!("BUILT_AT")))
+        .id("build_built_at")
+        .enabled(false)
+        .build(app)?;
+
     MenuBuilder::new(app)
         .item(&capture_live)
         .item(&capture_frozen)
@@ -374,6 +379,7 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&build_branch)
         .item(&build_commit)
+        .item(&build_built_at)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&quit)
         .build()
