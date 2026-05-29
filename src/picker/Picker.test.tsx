@@ -53,6 +53,7 @@ function makeSession(): PickerStartPayload {
         bounds: { x: 100, y: 100, w: 400, h: 300 },
         display_index: 0,
         layer: 0,
+        visible_regions: [{ x: 100, y: 100, w: 400, h: 300 }],
       },
     ],
   };
@@ -82,7 +83,7 @@ describe("<Picker/>", () => {
   });
 
   it("highlights the window when the Rust poller broadcasts a hit", async () => {
-    const { getByTestId, queryByTestId } = render(<Picker />);
+    const { queryAllByTestId } = render(<Picker />);
     act(() => {
       (window as unknown as { __glitchSpotPickerStart: (p: PickerStartPayload) => void })
         .__glitchSpotPickerStart(makeSession());
@@ -91,11 +92,11 @@ describe("<Picker/>", () => {
     // flush the microtask so `emitHover` finds it.
     await Promise.resolve();
     emitHover(7);
-    expect(queryByTestId("picker-highlight")).toBeTruthy();
+    expect(queryAllByTestId("picker-highlight").length).toBe(1);
   });
 
   it("clears the highlight when the poller broadcasts a miss", async () => {
-    const { getByTestId, queryByTestId } = render(<Picker />);
+    const { queryAllByTestId } = render(<Picker />);
     act(() => {
       (window as unknown as { __glitchSpotPickerStart: (p: PickerStartPayload) => void })
         .__glitchSpotPickerStart(makeSession());
@@ -103,7 +104,7 @@ describe("<Picker/>", () => {
     await Promise.resolve();
     emitHover(7);
     emitHover(null);
-    expect(queryByTestId("picker-highlight")).toBeNull();
+    expect(queryAllByTestId("picker-highlight").length).toBe(0);
   });
 
   it("calls picker_select when clicking on a hovered window", async () => {
@@ -138,5 +139,39 @@ describe("<Picker/>", () => {
     });
     fireEvent.keyDown(window, { key: "Escape" });
     expect(invokeMock).toHaveBeenCalledWith("picker_cancel", undefined);
+  });
+
+  it("renders one highlight rect per visible region", async () => {
+    const { queryAllByTestId } = render(<Picker />);
+    const session: PickerStartPayload = {
+      picker_origin: { x: 0, y: 0 },
+      picker_scale: 1,
+      displays: [
+        { display_index: 0, x: 0, y: 0, w: 1440, h: 900, scale_factor: 1 },
+      ],
+      windows: [
+        {
+          window_id: 9,
+          app_name: "Notes",
+          title: "Splits",
+          bounds: { x: 0, y: 0, w: 200, h: 200 },
+          display_index: 0,
+          layer: 0,
+          // L-shape: the top-left corner is covered, so the visible region is
+          // two strips (bottom + right).
+          visible_regions: [
+            { x: 0, y: 100, w: 200, h: 100 },
+            { x: 100, y: 0, w: 100, h: 100 },
+          ],
+        },
+      ],
+    };
+    act(() => {
+      (window as unknown as { __glitchSpotPickerStart: (p: PickerStartPayload) => void })
+        .__glitchSpotPickerStart(session);
+    });
+    await Promise.resolve();
+    emitHover(9);
+    expect(queryAllByTestId("picker-highlight").length).toBe(2);
   });
 });

@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { PICKER_CURSOR_CSS } from "./cursor";
-import type { PickerStartPayload, PickableWindow } from "./types";
+import type { PickerStartPayload, WindowBounds } from "./types";
 
 export function Picker() {
   const [session, setSession] = useState<PickerStartPayload | null>(null);
@@ -92,14 +92,15 @@ export function Picker() {
       }}
       data-testid="picker-root"
     >
-      {highlight && (
-        <HighlightRect
-          window={highlight}
+      {highlight?.visible_regions.map((region, i) => (
+        <HighlightRegion
+          key={i}
+          bounds={region}
           pickerOriginX={picker_origin.x}
           pickerOriginY={picker_origin.y}
           scale={picker_scale}
         />
-      )}
+      ))}
     </div>
   );
 }
@@ -112,22 +113,22 @@ const CYAN_CHECKER =
   "<rect x='0' y='10' width='10' height='10' fill='%23ffffff' fill-opacity='0.12'/>" +
   "</svg>\")";
 
-function HighlightRect({
-  window: w,
+function HighlightRegion({
+  bounds,
   pickerOriginX,
   pickerOriginY,
   scale,
 }: {
-  window: PickableWindow;
+  bounds: WindowBounds;
   pickerOriginX: number;
   pickerOriginY: number;
   scale: number;
 }) {
-  // Convert window's global physical-px bounds → picker-local CSS px.
-  const left = (w.bounds.x - pickerOriginX) / scale;
-  const top = (w.bounds.y - pickerOriginY) / scale;
-  const width = w.bounds.w / scale;
-  const height = w.bounds.h / scale;
+  // Convert physical-px global bounds → picker-local CSS px.
+  const left = (bounds.x - pickerOriginX) / scale;
+  const top = (bounds.y - pickerOriginY) / scale;
+  const width = bounds.w / scale;
+  const height = bounds.h / scale;
   return (
     <div
       data-testid="picker-highlight"
