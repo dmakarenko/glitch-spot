@@ -101,6 +101,7 @@ mod tests {
             window_id: 7, app_name: "Safari".into(), title: "x".into(),
             bounds: WindowBounds { x: 0, y: 0, w: 1, h: 1 },
             display_index: 0, layer: 0,
+            visible_regions: vec![],
         }
     }
 

@@ -19,6 +19,7 @@ pub struct PickableWindow {
     pub bounds: WindowBounds,
     pub display_index: usize,
     pub layer: i32,
+    pub visible_regions: Vec<WindowBounds>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -52,6 +53,10 @@ mod tests {
             bounds: WindowBounds { x: 10, y: 20, w: 800, h: 600 },
             display_index: 1,
             layer: 0,
+            visible_regions: vec![
+                WindowBounds { x: 10, y: 20, w: 200, h: 600 },
+                WindowBounds { x: 400, y: 20, w: 410, h: 600 },
+            ],
         };
         let json = serde_json::to_string(&w).unwrap();
         let back: PickableWindow = serde_json::from_str(&json).unwrap();

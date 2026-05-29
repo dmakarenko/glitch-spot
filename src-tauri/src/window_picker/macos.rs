@@ -6,6 +6,7 @@ use screencapturekit::shareable_content::SCShareableContent;
 use super::{
     coords::points_to_physical_bounds,
     filter::{filter_standard_windows, RawWindow},
+    visible_regions::compute_visible_regions,
     DisplayBounds, PickableWindow,
 };
 
@@ -113,7 +114,18 @@ pub fn enumerate(
         })
         .collect();
 
-    Ok((filter_standard_windows(&raws), displays))
+    let mut filtered = filter_standard_windows(&raws);
+
+    // Compute visible regions over the front-to-back list, then drop windows
+    // whose visible region is empty (fully occluded by windows in front).
+    let bounds: Vec<_> = filtered.iter().map(|w| w.bounds).collect();
+    let regions = compute_visible_regions(&bounds);
+    for (w, r) in filtered.iter_mut().zip(regions.into_iter()) {
+        w.visible_regions = r;
+    }
+    filtered.retain(|w| !w.visible_regions.is_empty());
+
+    Ok((filtered, displays))
 }
 
 // The macOS enumerator has no unit-testable surface beyond what's already
