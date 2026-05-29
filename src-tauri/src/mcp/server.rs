@@ -242,6 +242,7 @@ mod tests {
             context: Context {
                 screen: ScreenInfo { width: 1440, height: 900, scale_factor: 2.0, display_index: 0 },
                 os: OsInfo { platform: "macos".to_string(), version: "15.0".to_string() },
+                window: None,
             },
             images: Images { clean: "/tmp/c.png".to_string(), annotated: None },
         }

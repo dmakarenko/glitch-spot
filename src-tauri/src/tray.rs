@@ -257,6 +257,11 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .accelerator("Ctrl+Alt+Super+H")
         .build(app)?;
 
+    let capture_window = MenuItemBuilder::new("Capture Window")
+        .id("capture_window")
+        .accelerator("Ctrl+Alt+Super+J")
+        .build(app)?;
+
     let port = state.settings.mcp_port();
     let mcp_status = MenuItemBuilder::new(mcp_status_label(mcp_is_healthy(&state.mcp_bound), port))
         .id("mcp_status")
@@ -360,6 +365,7 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
     MenuBuilder::new(app)
         .item(&capture_live)
         .item(&capture_frozen)
+        .item(&capture_window)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&mcp_status)
         .item(&PredefinedMenuItem::separator(app)?)
@@ -478,6 +484,13 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                     tauri::async_runtime::spawn(async move {
                         if let Err(e) = crate::trigger_overlay_frozen(&app).await {
                             eprintln!("tray: capture frozen failed: {e}");
+                        }
+                    });
+                }
+                "capture_window" => {
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = crate::trigger_window_picker(&app).await {
+                            eprintln!("tray: capture window failed: {e}");
                         }
                     });
                 }

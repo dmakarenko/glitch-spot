@@ -4,6 +4,8 @@ mod capture;
 mod hotkey;
 pub mod mcp;
 mod overlay;
+mod picker_session;
+mod window_picker;
 pub mod snapshot;
 mod spike_capture;
 mod tray;
@@ -14,7 +16,7 @@ pub use capture::CapturedFrame;
 
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use snapshot::build::IncomingAnnotation;
@@ -37,6 +39,7 @@ pub struct AppState {
     /// avoids the TCP-connect false positive when another process happens to
     /// own the configured port.
     pub mcp_bound: Arc<AtomicBool>,
+    pub picker_state: Arc<picker_session::PickerStateHolder>,
 }
 
 #[tauri::command]
@@ -58,6 +61,8 @@ async fn open_overlay_frozen(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    state.picker_state.reset_to_idle();
     overlay::hide(&app).map_err(|e| e.to_string())
 }
 
@@ -73,13 +78,16 @@ async fn save_snapshot(
     mode: String,
     annotations: Vec<IncomingAnnotation>,
 ) -> Result<snapshot::Snapshot, String> {
-    let frame = match mode.as_str() {
-        "frozen" => state
-            .latest_frame
-            .lock()
-            .ok()
-            .and_then(|g| g.clone())
-            .ok_or_else(|| "no cached frame for frozen mode".to_string())?,
+    let (frame, crop_origin) = match mode.as_str() {
+        "frozen" => {
+            let frame = state
+                .latest_frame
+                .lock()
+                .ok()
+                .and_then(|g| g.clone())
+                .ok_or_else(|| "no cached frame for frozen mode".to_string())?;
+            (frame, None)
+        }
         "live" => {
             // Hide the overlay BEFORE capturing so the saved screenshot doesn't
             // include our own annotation rectangles + checker pattern. A brief
@@ -87,7 +95,35 @@ async fn save_snapshot(
             // screen-capture sample fires.
             overlay::hide(&app).map_err(|e| e.to_string())?;
             std::thread::sleep(std::time::Duration::from_millis(120));
-            capture::capture_active_monitor(&app).map_err(|e| e.to_string())?
+            let frame = capture::capture_active_monitor(&app).map_err(|e| e.to_string())?;
+            (frame, None)
+        }
+        "window" => {
+            let session = match state.picker_state.current() {
+                picker_session::RunMode::Annotating { session } => session,
+                other => return Err(format!("save_snapshot('window') while in {:?}", other)),
+            };
+            overlay::hide(&app).map_err(|e| e.to_string())?;
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            let frame_result = capture::capture_window(&app, session.window_id);
+            let mut frame = match frame_result {
+                Ok(f) => f,
+                Err(e) => {
+                    use tauri_plugin_notification::NotificationExt;
+                    let _ = app.notification()
+                        .builder()
+                        .title("Glitch Spot")
+                        .body("Selected window closed — annotations discarded")
+                        .show();
+                    eprintln!("[glitch-spot] window capture failed: {e}");
+                    state.picker_state.reset_to_idle();
+                    return Err(format!("window capture failed: {e}"));
+                }
+            };
+            frame.display_index = session.window.display_index;
+            let crop_x = (session.window.bounds.x - session.display.x) as f32;
+            let crop_y = (session.window.bounds.y - session.display.y) as f32;
+            (frame, Some((crop_x, crop_y)))
         }
         other => return Err(format!("unknown mode: {other}")),
     };
@@ -103,10 +139,28 @@ async fn save_snapshot(
         os_platform,
         &os_version,
         &base,
+        crop_origin,
     )
     .map_err(|e| e.to_string())?;
     snapshot::persist::write(&base, &built).map_err(|e| e.to_string())?;
-    let snap = built.snapshot;
+    let mut snap = built.snapshot;
+
+    // If we just saved a window-mode snapshot, attach the captured window metadata.
+    if mode == "window" {
+        if let picker_session::RunMode::Annotating { session } = state.picker_state.current() {
+            snap.context.window = Some(snapshot::WindowInfo {
+                app_name: session.window.app_name.clone(),
+                title: session.window.title.clone(),
+                bounds: snapshot::WindowBounds {
+                    x: session.window.bounds.x,
+                    y: session.window.bounds.y,
+                    w: session.window.bounds.w,
+                    h: session.window.bounds.h,
+                },
+                window_id: session.window_id,
+            });
+        }
+    }
 
     // Notify any waiting MCP caller.
     state.snapshot_store.publish(snap.clone());
@@ -122,6 +176,7 @@ async fn save_snapshot(
         .map_err(|e| format!("clipboard: {e}"))?;
 
     overlay::hide(&app).map_err(|e| e.to_string())?;
+    state.picker_state.reset_to_idle();
     Ok(snap)
 }
 
@@ -217,6 +272,266 @@ async fn set_tunnel_provider(
     do_set_tunnel_provider(&state, kind).await
 }
 
+/// Max picker windows pre-declared in tauri.conf.json. Each display gets one
+/// picker; the rest stay hidden. Eight covers any realistic workstation setup.
+const PICKER_POOL_SIZE: usize = 8;
+
+pub(crate) async fn trigger_window_picker(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    let state = app.state::<AppState>();
+
+    let (windows, displays) = window_picker::macos::enumerate(app)
+        .map_err(|e| anyhow::anyhow!("enumerate: {e}"))?;
+
+    if displays.is_empty() {
+        return Err(anyhow::anyhow!("no displays detected"));
+    }
+
+    // Force-reset state so the hotkey is self-recovering — if a prior picker
+    // session never reached a clean cancel/save (e.g. macOS hid the picker via
+    // Space switch without our visibilitychange listener firing), pressing
+    // ⌃⌥⌘J again starts a fresh picker rather than failing with "already in
+    // Picking".
+    state.picker_state.reset_to_idle();
+    // Hide any prior overlay/picker that might still be visible from the
+    // stale session — fresh activation should not stack windows.
+    let _ = overlay::hide(app);
+    hide_all_pickers(app);
+
+    let session = picker_session::PickerSession {
+        windows: windows.clone(),
+        displays: displays.clone(),
+    };
+    state
+        .picker_state
+        .try_enter_picking(session.clone())
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    let result = show_picker(app, &windows, &displays);
+    if result.is_err() {
+        // Roll back the state transition so a subsequent press isn't blocked
+        // by a stale Picking entry from a half-failed show.
+        state.picker_state.reset_to_idle();
+        hide_all_pickers(app);
+    } else {
+        // Drive hover from the Rust side — see `poll_hover` for the why.
+        // The task self-terminates when state leaves Picking, so cancel and
+        // select paths just need to flip the state machine.
+        let app_for_poll = app.clone();
+        tokio::spawn(async move { poll_hover(app_for_poll).await });
+    }
+    result
+}
+
+/// Show one picker window per display (capped at PICKER_POOL_SIZE). Each
+/// picker is single-display–sized so macOS's `constrainFrameRect` never
+/// triggers. After all pickers are visible, activate the *app* (not any
+/// individual window) — `set_focus` per-window would make each picker key in
+/// turn, and only the last would receive mouseMoved events.
+fn show_picker(
+    app: &tauri::AppHandle,
+    windows: &[window_picker::PickableWindow],
+    displays: &[window_picker::DisplayBounds],
+) -> anyhow::Result<()> {
+    if displays.len() > PICKER_POOL_SIZE {
+        eprintln!(
+            "[picker] {} displays detected; pool size is {} — extra displays will not show picker",
+            displays.len(),
+            PICKER_POOL_SIZE,
+        );
+    }
+
+    for (i, display) in displays.iter().enumerate().take(PICKER_POOL_SIZE) {
+        let label = format!("picker-{i}");
+        let win = app
+            .get_webview_window(&label)
+            .ok_or_else(|| anyhow::anyhow!("{label} not configured"))?;
+        // Intentionally NOT setting canJoinAllSpaces — we want macOS to hide
+        // pickers when the user swipes to a different Space, so the frontend's
+        // visibilitychange listener fires picker_cancel and resets state.
+        win.set_position(tauri::PhysicalPosition::new(display.x, display.y))?;
+        win.set_size(tauri::PhysicalSize::new(display.w, display.h))?;
+        let payload = serde_json::json!({
+            "windows": windows,
+            "displays": displays,
+            "picker_origin": { "x": display.x, "y": display.y },
+            "picker_scale": display.scale_factor,
+        });
+        let js = format!(
+            "if (window.__glitchSpotPickerStart) window.__glitchSpotPickerStart({});",
+            payload
+        );
+        let _ = win.eval(&js);
+        win.show()?;
+        let actual_pos = win
+            .outer_position()
+            .map_err(|e| anyhow::anyhow!("{label} outer_position: {e}"))?;
+        eprintln!(
+            "[picker] {label} requested=({},{}) {}x{} ; actual=({},{}) ; display_index={}",
+            display.x, display.y, display.w, display.h,
+            actual_pos.x, actual_pos.y, display.display_index,
+        );
+    }
+
+    // App-level activation, *after* all pickers are visible. This makes the
+    // pickers' NSViews receive mouseMoved events without per-window
+    // makeKeyAndOrderFront (which would unfocus the others).
+    activate_application();
+    Ok(())
+}
+
+/// Hide every picker window in the pool. Used by force-reset, cancel, and
+/// select paths so a partial show never leaves stale picker frames on screen.
+fn hide_all_pickers(app: &tauri::AppHandle) {
+    for i in 0..PICKER_POOL_SIZE {
+        if let Some(w) = app.get_webview_window(&format!("picker-{i}")) {
+            let _ = w.hide();
+        }
+    }
+}
+
+/// Drive picker hover from the Rust side by polling the global cursor
+/// position at ~60Hz, hit-testing it against the session's windows, and
+/// broadcasting the hovered window_id to every picker via a Tauri event.
+///
+/// Why polling instead of per-window JS mousemove: macOS delivers mouseMoved
+/// events only to the key window. With one key window per app, only the
+/// picker on the activation display ever fires mouseMoved, and the other
+/// pickers stay silent regardless of `acceptsMouseMovedEvents` or window
+/// level. Hit-testing from Rust dodges window-level event routing entirely.
+///
+/// Termination: the loop exits as soon as the state machine leaves Picking
+/// (cancel, select, or force-reset all transition out), so `picker_cancel`
+/// /`picker_select` don't need to touch this task explicitly.
+async fn poll_hover(app: tauri::AppHandle) {
+    let interval = std::time::Duration::from_millis(16);
+    // Track which display's picker we last made key, so we only call set_focus
+    // when the cursor crosses a display boundary (not every tick).
+    let mut last_focused_display: Option<usize> = None;
+    loop {
+        let mode = app.state::<AppState>().picker_state.current();
+        let session = match mode {
+            picker_session::RunMode::Picking { session } => session,
+            _ => break,
+        };
+        if let Ok(cursor) = app.cursor_position() {
+            let cx = cursor.x as i32;
+            let cy = cursor.y as i32;
+
+            let id = window_picker::hit_test::hit_test(&session.windows, cx, cy);
+            let _ = app.emit(
+                "picker://hover",
+                serde_json::json!({ "window_id": id }),
+            );
+
+            // The CSS picker cursor only activates on the key window. Move
+            // key-ness to whichever picker the cursor is currently over so
+            // the chromatic crosshair follows the cursor across displays.
+            // Each picker is single-display-sized, so makeKeyAndOrderFront
+            // can't trigger constrainFrameRect-driven relocation.
+            let current_display = session.displays.iter().position(|d| {
+                cx >= d.x && cx < d.x + d.w as i32 && cy >= d.y && cy < d.y + d.h as i32
+            });
+            if current_display.is_some() && current_display != last_focused_display {
+                if let Some(i) = current_display {
+                    if let Some(w) = app.get_webview_window(&format!("picker-{i}")) {
+                        let _ = w.set_focus();
+                    }
+                }
+                last_focused_display = current_display;
+            }
+        }
+        tokio::time::sleep(interval).await;
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn activate_application() {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    unsafe {
+        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        if !app.is_null() {
+            let _: () = msg_send![app, activateIgnoringOtherApps: true];
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn activate_application() {}
+
+#[tauri::command]
+async fn picker_select(app: tauri::AppHandle, window_id: u32) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let session = match state.picker_state.current() {
+        picker_session::RunMode::Picking { session } => session,
+        other => return Err(format!("picker_select called while in {:?}", other)),
+    };
+    let window = session
+        .windows
+        .iter()
+        .find(|w| w.window_id == window_id)
+        .cloned()
+        .ok_or_else(|| format!("window {window_id} not in session"))?;
+    let display = session
+        .displays
+        .iter()
+        .find(|d| d.display_index == window.display_index)
+        .copied()
+        .ok_or_else(|| format!("display {} not in session", window.display_index))?;
+
+    hide_all_pickers(&app);
+
+    let scale = display.scale_factor;
+    let payload = overlay::WindowModePayload {
+        app_name: window.app_name.clone(),
+        title: window.title.clone(),
+        window_id: window.window_id,
+        window_rect_css: overlay::CssRect {
+            x: (window.bounds.x - display.x) as f32 / scale,
+            y: (window.bounds.y - display.y) as f32 / scale,
+            w: window.bounds.w as f32 / scale,
+            h: window.bounds.h as f32 / scale,
+        },
+        window_rect_physical: overlay::WindowRectPhysical {
+            x: window.bounds.x - display.x,
+            y: window.bounds.y - display.y,
+            w: window.bounds.w,
+            h: window.bounds.h,
+        },
+        display_scale_factor: scale,
+    };
+
+    state
+        .picker_state
+        .try_select_window(picker_session::AnnotatingSession {
+            window_id,
+            window: window.clone(),
+            display,
+        })?;
+
+    overlay::show_window_mode(&app, window.display_index, &payload).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn picker_cancel(app: tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    // No-op unless we're actually in Picking. The Picker.tsx visibilitychange
+    // listener fires picker_cancel whenever its window hides — including the
+    // legitimate hide inside picker_select after a window is chosen. Without
+    // this gate, that callback would reset state from Annotating back to Idle
+    // and break the save flow ("save_snapshot('window') while in Idle").
+    if !matches!(
+        state.picker_state.current(),
+        picker_session::RunMode::Picking { .. }
+    ) {
+        return Ok(());
+    }
+    hide_all_pickers(&app);
+    state.picker_state.reset_to_idle();
+    Ok(())
+}
+
 #[tauri::command]
 fn set_tray_appearance(
     state: tauri::State<'_, AppState>,
@@ -227,11 +542,17 @@ fn set_tray_appearance(
 }
 
 pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.picker_state.try_enter_live().map_err(anyhow::Error::msg)?;
+    }
     overlay::show_live(app)?;
     Ok(())
 }
 
 pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.picker_state.try_enter_frozen().map_err(anyhow::Error::msg)?;
+    }
     // Clear any stale frame BEFORE capturing the new one. Without this, a fast
     // hotkey press right after switching monitors would let the overlay's
     // mount-time pull return the *previous* monitor's screenshot for a moment.
@@ -268,6 +589,7 @@ mod tests {
             ),
             config_dir: temp.path().to_path_buf(),
             mcp_bound: Arc::new(AtomicBool::new(false)),
+            picker_state: Arc::new(picker_session::PickerStateHolder::new()),
         };
         assert!(state.latest_snapshot_at.lock().unwrap().is_none());
     }
@@ -349,6 +671,7 @@ pub fn run() {
             settings: settings.clone(),
             config_dir: config_dir.clone(),
             mcp_bound: mcp_bound.clone(),
+            picker_state: Arc::new(picker_session::PickerStateHolder::new()),
         })
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -378,6 +701,8 @@ pub fn run() {
             share_latest,
             current_tunnel_state,
             set_tunnel_provider,
+            picker_select,
+            picker_cancel,
             set_tray_appearance,
         ])
         .build(tauri::generate_context!())

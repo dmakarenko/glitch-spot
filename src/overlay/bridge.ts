@@ -68,7 +68,7 @@ class ElectronBridge implements OverlayBridge {
     return null
   }
 
-  async saveSnapshot(mode: string, annotations: AnnotationPayload[]): Promise<void> {
+  async saveSnapshot(_mode: string, annotations: AnnotationPayload[]): Promise<void> {
     if (!this.cleanBase64 || !this.cleanBlobUrl) {
       throw new Error('[glitch-spot] saveSnapshot called before first frame')
     }

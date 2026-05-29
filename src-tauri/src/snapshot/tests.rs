@@ -30,6 +30,7 @@ fn sample_snapshot() -> Snapshot {
                 platform: "macos".into(),
                 version: "26.0".into(),
             },
+            window: None,
         },
         images: Images {
             clean: "/tmp/glitch-spot-snap_test123.png".into(),
@@ -136,6 +137,7 @@ fn build_scales_annotation_coords_by_scale_factor() {
         "macos",
         "26.0",
         temp.path(),
+        None,
     )
     .unwrap();
     assert_eq!(built.snapshot.annotations.len(), 1);
@@ -159,7 +161,7 @@ fn build_assigns_zero_padded_labels_from_array_position() {
             note: String::new(),
         })
         .collect();
-    let built = build(&fake_frame(), "frozen", incoming, "macos", "26.0", temp.path()).unwrap();
+    let built = build(&fake_frame(), "frozen", incoming, "macos", "26.0", temp.path(), None).unwrap();
     let labels: Vec<String> = built
         .snapshot
         .annotations
@@ -188,7 +190,7 @@ fn format_label_zero_pads_and_expands() {
 fn build_returns_paths_under_base_dir_and_bytes_match_frame() {
     let temp = tempfile::TempDir::new().unwrap();
     let frame = fake_frame();
-    let built = build(&frame, "live", vec![], "macos", "26.0", temp.path()).unwrap();
+    let built = build(&frame, "live", vec![], "macos", "26.0", temp.path(), None).unwrap();
 
     // Embedded paths point under `temp/{id}/...`
     let id = &built.snapshot.id;
@@ -331,4 +333,84 @@ fn annotated_png_does_not_draw_note_panel() {
         &Rgba([255, 255, 255, 255]),
         "no panel below the rect, got {below_rect:?}"
     );
+}
+
+#[test]
+fn build_crop_origin_translates_annotation_coords_into_window_local() {
+    use crate::capture::CapturedFrame;
+    use crate::snapshot::build::{build, IncomingAnnotation};
+    use tempfile::TempDir;
+
+    let frame = CapturedFrame {
+        width: 800,
+        height: 600,
+        scale_factor: 2.0,
+        png: solid_white_png(1, 1),
+        display_index: 0,
+    };
+    let annotations = vec![IncomingAnnotation {
+        id: "r1".into(),
+        x: 100.0,   // CSS px on the overlay
+        y: 50.0,
+        w: 80.0,
+        h: 40.0,
+        note: "n".into(),
+    }];
+
+    let temp = TempDir::new().unwrap();
+    // crop_origin in physical pixels: (60, 30)
+    let built = build(
+        &frame,
+        "window",
+        annotations,
+        "macos",
+        "26.0",
+        temp.path(),
+        Some((60.0, 30.0)),
+    )
+    .expect("build with crop_origin should succeed");
+    let a = &built.snapshot.annotations[0];
+    // x*scale - crop_x = 100*2 - 60 = 140
+    // y*scale - crop_y = 50*2  - 30 = 70
+    assert_eq!(a.coords.x, 140.0);
+    assert_eq!(a.coords.y, 70.0);
+    assert_eq!(a.coords.w, 160.0);
+    assert_eq!(a.coords.h, 80.0);
+}
+
+#[test]
+fn context_window_round_trips() {
+    let s = Snapshot {
+        id: "snap_test_w".into(),
+        created_at: "2026-05-27T10:00:00Z".into(),
+        mode: "window".into(),
+        annotations: vec![],
+        context: Context {
+            screen: ScreenInfo {
+                width: 1440,
+                height: 900,
+                scale_factor: 2.0,
+                display_index: 0,
+            },
+            os: OsInfo { platform: "macos".into(), version: "26.0".into() },
+            window: Some(WindowInfo {
+                app_name: "Safari".into(),
+                title: "Reader — example.com".into(),
+                bounds: WindowBounds { x: 120, y: 88, w: 1440, h: 900 },
+                window_id: 12345,
+            }),
+        },
+        images: Images { clean: "x".into(), annotated: None },
+    };
+    let json = serde_json::to_string(&s).unwrap();
+    let back: Snapshot = serde_json::from_str(&json).unwrap();
+    assert_eq!(s, back);
+}
+
+#[test]
+fn context_window_omitted_when_none() {
+    let mut s = sample_snapshot();
+    s.context.window = None;
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(!json.contains("\"window\""), "expected `window` key omitted, got: {json}");
 }

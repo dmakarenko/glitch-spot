@@ -3,7 +3,15 @@
   "identifier": "default",
   "description": "enables the default permissions",
   "windows": [
-    "overlay"
+    "overlay",
+    "picker-0",
+    "picker-1",
+    "picker-2",
+    "picker-3",
+    "picker-4",
+    "picker-5",
+    "picker-6",
+    "picker-7"
   ],
   "permissions": [
     "core:default",

@@ -15,6 +15,6 @@
     "resolveJsonModule": true,
     "noEmit": true
   },
-  "include": ["src"],
+  "include": ["src", "tests/fixtures"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -64,6 +64,7 @@ pub fn build(
     os_platform: &str,
     os_version: &str,
     base_dir: &Path,
+    crop_origin: Option<(f32, f32)>,
 ) -> Result<BuiltSnapshot, BuildError> {
     let id = new_id();
     let dir = base_dir.join(&id);
@@ -71,6 +72,7 @@ pub fn build(
     let annotated_path = dir.join(annotated_png_filename(&id));
 
     let scale = frame.scale_factor;
+    let (crop_x, crop_y) = crop_origin.unwrap_or((0.0, 0.0));
     let annotations: Vec<Annotation> = annotations
         .into_iter()
         .enumerate()
@@ -78,8 +80,8 @@ pub fn build(
             id: a.id,
             shape: "rect".into(),
             coords: Coords {
-                x: a.x * scale,
-                y: a.y * scale,
+                x: a.x * scale - crop_x,
+                y: a.y * scale - crop_y,
                 w: a.w * scale,
                 h: a.h * scale,
             },
@@ -106,6 +108,7 @@ pub fn build(
                 platform: os_platform.to_string(),
                 version: os_version.to_string(),
             },
+            window: None,
         },
         images: Images {
             clean: clean_path.to_string_lossy().into_owned(),

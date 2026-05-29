@@ -40,6 +40,16 @@ pub fn capture_active_monitor(_app: &tauri::AppHandle) -> Result<CapturedFrame, 
     ))
 }
 
+#[cfg(target_os = "macos")]
+pub fn capture_window(app: &tauri::AppHandle, window_id: u32) -> Result<CapturedFrame, CaptureError> {
+    macos::capture_window(app, window_id)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn capture_window(_app: &tauri::AppHandle, _window_id: u32) -> Result<CapturedFrame, CaptureError> {
+    Err(CaptureError::Platform("only macOS is supported".into()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

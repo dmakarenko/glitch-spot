@@ -15,9 +15,12 @@ export function nextRectId(): string {
   return `r${_nextId++}`;
 }
 
+type ClipRect = { x: number; y: number; w: number; h: number };
+
 type Props = {
   state: AnnotationsState;
   dispatch: (action: AnnotationsAction) => void;
+  clipRect?: ClipRect;
 };
 
 const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
@@ -83,7 +86,7 @@ function ResizeHandle({
   );
 }
 
-export function DrawingLayer({ state, dispatch }: Props) {
+export function DrawingLayer({ state, dispatch, clipRect }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   const [containerHeight, setContainerHeight] = useState<number>(
@@ -108,21 +111,40 @@ export function DrawingLayer({ state, dispatch }: Props) {
     return () => window.removeEventListener("resize", update);
   }, []);
 
+  // Returns the point if it is inside clipRect (or if no clipRect is set),
+  // null otherwise. Used to gate BEGIN_CREATE so the user can't start a new
+  // rectangle outside the selected window in window mode.
+  const insideClip = (x: number, y: number): { x: number; y: number } | null => {
+    if (!clipRect) return { x, y };
+    const inside =
+      x >= clipRect.x &&
+      x < clipRect.x + clipRect.w &&
+      y >= clipRect.y &&
+      y < clipRect.y + clipRect.h;
+    return inside ? { x, y } : null;
+  };
+
   const onMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (e.target !== e.currentTarget) return;
       if (e.button !== 0) return;
       e.preventDefault();
       const { x, y } = eventCoords(e);
-      dispatch({ type: "BEGIN_CREATE", id: nextRectId(), x, y });
+      const startInside = insideClip(x, y);
+      if (!startInside) return;
+      dispatch({ type: "BEGIN_CREATE", id: nextRectId(), x: startInside.x, y: startInside.y });
     },
-    [dispatch, eventCoords],
+    [dispatch, eventCoords, clipRect]
   );
 
   const onMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!state.active) return;
-      const { x, y } = eventCoords(e);
+      let { x, y } = eventCoords(e);
+      if (clipRect) {
+        x = Math.max(clipRect.x, Math.min(x, clipRect.x + clipRect.w));
+        y = Math.max(clipRect.y, Math.min(y, clipRect.y + clipRect.h));
+      }
       dispatch({
         type: "POINTER_TO",
         x,
@@ -131,7 +153,7 @@ export function DrawingLayer({ state, dispatch }: Props) {
         viewportH: window.innerHeight,
       });
     },
-    [dispatch, eventCoords, state.active],
+    [dispatch, eventCoords, state.active, clipRect],
   );
 
   const onMouseUp = useCallback(() => {

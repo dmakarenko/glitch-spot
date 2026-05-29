@@ -1,5 +1,5 @@
-// ABOUTME: Vite build configuration for Glitch Spot's single-page overlay frontend.
-// ABOUTME: Only the overlay HTML entry point is declared; the main window has been removed.
+// ABOUTME: Vite build configuration for Glitch Spot's overlay + picker frontends.
+// ABOUTME: Two HTML entrypoints — overlay.html and picker.html — each bundled separately.
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "path";
@@ -17,6 +17,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         overlay: resolve(__dirname, "overlay.html"),
+        picker: resolve(__dirname, "picker.html"),
       },
     },
   },
