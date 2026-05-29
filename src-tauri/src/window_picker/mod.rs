@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub mod filter;
 pub mod hit_test;
 pub mod coords;
+pub mod visible_regions;
 
 #[cfg(target_os = "macos")]
 pub mod macos;
