@@ -72,6 +72,29 @@ pub fn subtract_rect(base: WindowBounds, sub: WindowBounds) -> Vec<WindowBounds>
     out
 }
 
+/// For each window in the **front-to-back** ordered list, compute the
+/// rectangles representing the portion of that window not covered by any
+/// window in front of it. Output has the same length and ordering as the
+/// input. A window with an empty regions list is fully occluded.
+pub fn compute_visible_regions(front_to_back: &[WindowBounds]) -> Vec<Vec<WindowBounds>> {
+    let mut out = Vec::with_capacity(front_to_back.len());
+    for (k, w) in front_to_back.iter().enumerate() {
+        let mut regions = vec![*w];
+        for above in &front_to_back[..k] {
+            let mut next = Vec::with_capacity(regions.len());
+            for r in &regions {
+                next.extend(subtract_rect(*r, *above));
+            }
+            regions = next;
+            if regions.is_empty() {
+                break;
+            }
+        }
+        out.push(regions);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,5 +172,68 @@ mod tests {
         let base = b(0, 0, 100, 100);
         let sub = b(20, 20, 0, 50);
         assert_eq!(subtract_rect(base, sub), vec![base]);
+    }
+
+    #[test]
+    fn single_window_has_full_bounds_as_only_region() {
+        let only = b(0, 0, 100, 100);
+        let regions = compute_visible_regions(&[only]);
+        assert_eq!(regions, vec![vec![only]]);
+    }
+
+    #[test]
+    fn front_window_is_unaffected_by_windows_behind() {
+        let front = b(0, 0, 100, 100);
+        let back = b(50, 50, 100, 100);
+        let regions = compute_visible_regions(&[front, back]);
+        // Index 0 (front) is the topmost: nothing in front of it.
+        assert_eq!(regions[0], vec![front]);
+    }
+
+    #[test]
+    fn back_window_loses_overlapping_corner() {
+        // Front clips back's top-left corner; back's visible region is L-shaped
+        // — two strips.
+        let front = b(0, 0, 80, 80);
+        let back = b(50, 50, 100, 100);
+        let regions = compute_visible_regions(&[front, back]);
+        assert_eq!(regions[0], vec![front]);
+        // Back: visible = full bounds minus front's intersection.
+        // intersection of front+back = 50,50..80,80 → bottom strip + right strip
+        assert!(regions[1].contains(&b(50, 80, 100, 70)));
+        assert!(regions[1].contains(&b(80, 50, 70, 30)));
+        assert_eq!(regions[1].len(), 2);
+    }
+
+    #[test]
+    fn fully_covered_back_window_has_empty_regions() {
+        let front = b(0, 0, 200, 200);
+        let back = b(50, 50, 100, 100);
+        let regions = compute_visible_regions(&[front, back]);
+        assert_eq!(regions[0], vec![front]);
+        assert_eq!(regions[1], Vec::<WindowBounds>::new());
+    }
+
+    #[test]
+    fn three_windows_in_a_stack_progressively_lose_regions() {
+        let top = b(0, 0, 100, 100);
+        let middle = b(50, 0, 100, 100);
+        let bottom = b(25, 50, 200, 100);
+        let regions = compute_visible_regions(&[top, middle, bottom]);
+        // Top is fully visible.
+        assert_eq!(regions[0], vec![top]);
+        // Middle: lose its left edge to top. Intersection = 50,0..100,100 →
+        // right strip x=100..150 across full height.
+        assert_eq!(regions[1], vec![b(100, 0, 50, 100)]);
+        // Bottom: lose intersections with top (25..100, 50..100) and middle
+        // (50..150, 50..100). Union of the two covers x=25..150 of y=50..100,
+        // leaving the right strip and the part below y=100.
+        assert!(regions[2].iter().any(|r| r.y >= 100), "missing pieces below middle in {:?}", regions[2]);
+    }
+
+    #[test]
+    fn empty_input_yields_empty_output() {
+        let regions = compute_visible_regions(&[]);
+        assert!(regions.is_empty());
     }
 }
