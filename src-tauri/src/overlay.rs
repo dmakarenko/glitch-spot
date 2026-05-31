@@ -99,6 +99,9 @@ pub struct WindowModePayload {
     /// Same window rect in physical pixels; used by the backend at save time.
     pub window_rect_physical: WindowRectPhysical,
     pub display_scale_factor: f32,
+    /// First annotation drawn in the picker (drag-to-draw), in overlay-relative
+    /// CSS px. When present, the overlay pre-populates it as a committed rect.
+    pub initial_rect_css: Option<CssRect>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

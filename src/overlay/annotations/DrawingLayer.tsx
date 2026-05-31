@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AnnotationsAction, AnnotationsState, Handle } from "./types";
 import { MIN_RECT_DIMENSION } from "./state";
+import { PICKER_CURSOR_CSS } from "../../picker/cursor";
 import { RectangleNote } from "./RectangleNote";
 import { formatLabel } from "./label";
 
@@ -181,7 +182,7 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Prop
       style={{
         position: "absolute",
         inset: 0,
-        cursor: "crosshair",
+        cursor: PICKER_CURSOR_CSS,
         userSelect: "none",
         WebkitUserSelect: "none",
       }}

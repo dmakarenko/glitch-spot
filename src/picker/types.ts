@@ -40,4 +40,7 @@ export type WindowModePayload = {
   window_rect_css: { x: number; y: number; w: number; h: number };
   window_rect_physical: { x: number; y: number; w: number; h: number };
   display_scale_factor: number;
+  /** First annotation drawn in the picker (drag-to-draw), in overlay-relative
+   *  CSS px. When present, pre-populated as a committed rect in the overlay. */
+  initial_rect_css?: { x: number; y: number; w: number; h: number };
 };
