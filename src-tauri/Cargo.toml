@@ -52,6 +52,10 @@ futures = "0.3"
 # the Accessory-mode app frontmost without using set_focus (which on macOS
 # triggers NSWindow.constrainFrameRect and relocates oversized windows).
 objc2 = "0.6"
+# CGWindowList gives the window server's true front-to-back z-order, which
+# SCShareableContent's window list does not reliably provide.
+core-graphics = "0.25"
+core-foundation = "0.10"
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }

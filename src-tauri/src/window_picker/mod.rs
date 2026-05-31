@@ -7,6 +7,7 @@ pub mod filter;
 pub mod hit_test;
 pub mod coords;
 pub mod visible_regions;
+pub mod z_order;
 
 #[cfg(target_os = "macos")]
 pub mod macos;

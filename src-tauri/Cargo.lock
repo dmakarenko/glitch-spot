@@ -1611,6 +1611,8 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
+ "core-foundation",
+ "core-graphics",
  "filetime",
  "futures",
  "image",
