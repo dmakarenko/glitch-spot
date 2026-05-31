@@ -9,8 +9,6 @@ use std::time::Duration;
 use crate::snapshot::build::BuiltSnapshot;
 use crate::snapshot::{annotated_png_filename, clean_png_filename, snapshot_json_filename};
 
-pub const MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
-
 /// Returns `~/.glitch-spot/snapshots/`, creating it (and `.glitch-spot/`) if absent.
 ///
 /// Resolves `$HOME` directly (macOS-only product). Returns `io::Error::NotFound`
@@ -183,7 +181,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         write_and_backdate(&temp, "snap_old", 25 * 60 * 60);
 
-        let removed = cleanup(temp.path(), MAX_AGE).unwrap();
+        let removed = cleanup(temp.path(), Duration::from_secs(24 * 60 * 60)).unwrap();
 
         assert_eq!(removed, 1);
         assert!(!temp.path().join("snap_old").exists());
@@ -195,7 +193,7 @@ mod tests {
         let built = fake_built("snap_fresh", temp.path());
         write(temp.path(), &built).unwrap();
 
-        let removed = cleanup(temp.path(), MAX_AGE).unwrap();
+        let removed = cleanup(temp.path(), Duration::from_secs(24 * 60 * 60)).unwrap();
 
         assert_eq!(removed, 0);
         assert!(temp.path().join("snap_fresh").exists());
@@ -210,7 +208,7 @@ mod tests {
         let built_fresh = fake_built("snap_fresh", temp.path());
         write(temp.path(), &built_fresh).unwrap();
 
-        let removed = cleanup(temp.path(), MAX_AGE).unwrap();
+        let removed = cleanup(temp.path(), Duration::from_secs(24 * 60 * 60)).unwrap();
 
         assert_eq!(removed, 3);
         assert!(temp.path().join("snap_fresh").exists());
@@ -226,7 +224,7 @@ mod tests {
         std::fs::write(temp.path().join(".DS_Store"), b"junk").unwrap();
         write_and_backdate(&temp, "snap_old", 25 * 60 * 60);
 
-        let removed = cleanup(temp.path(), MAX_AGE).unwrap();
+        let removed = cleanup(temp.path(), Duration::from_secs(24 * 60 * 60)).unwrap();
 
         assert_eq!(removed, 1);
         assert!(

@@ -249,6 +249,63 @@ pub(crate) fn do_set_tray_appearance(
         .map_err(|e| e.to_string())
 }
 
+/// Persists the snapshot retention setting and immediately sweeps snapshots
+/// that now exceed the new threshold. Expires in-memory state for any
+/// snapshot whose directory was deleted.
+pub(crate) async fn do_set_snapshot_retention(
+    state: &AppState,
+    key: String,
+) -> Result<(), String> {
+    let retention = settings::SnapshotRetention::from_name(&key)
+        .ok_or_else(|| format!("unknown retention key: {key}"))?;
+    state
+        .settings
+        .save_retention(&state.config_dir, retention)
+        .map_err(|e| e.to_string())?;
+    if let Some(max_age) = retention.max_age() {
+        let base = snapshot::persist::snapshots_dir().map_err(|e| e.to_string())?;
+        if let Err(e) = snapshot::persist::cleanup(&base, max_age) {
+            eprintln!("[glitch-spot] retention cleanup failed: {e}");
+        }
+        state.snapshot_store.expire_if_deleted(&base);
+        if state.snapshot_store.get_latest().is_none() {
+            if let Ok(mut ts) = state.latest_snapshot_at.lock() {
+                *ts = None;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Runs one cleanup sweep and expires in-memory state for any snapshot whose
+/// directory was deleted. Returns true if the latest snapshot was expired
+/// (caller should refresh the tray); returns false if the latest is still
+/// present even if older snapshots were removed.
+pub(crate) fn run_cleanup_sweep(state: &AppState) -> bool {
+    let Some(max_age) = state.settings.current_retention().max_age() else {
+        return false;
+    };
+    let base = match snapshot::persist::snapshots_dir() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("[glitch-spot] cleanup: snapshots dir error: {e}");
+            return false;
+        }
+    };
+    if let Err(e) = snapshot::persist::cleanup(&base, max_age) {
+        eprintln!("[glitch-spot] cleanup failed: {e}");
+    }
+    state.snapshot_store.expire_if_deleted(&base);
+    let latest_expired = state.snapshot_store.get_latest().is_none()
+        && state.latest_snapshot_at.lock().map_or(false, |ts| ts.is_some());
+    if latest_expired {
+        if let Ok(mut ts) = state.latest_snapshot_at.lock() {
+            *ts = None;
+        }
+    }
+    latest_expired
+}
+
 #[tauri::command]
 async fn share_latest(
     app: tauri::AppHandle,
@@ -667,17 +724,6 @@ pub fn run() {
         eprintln!("[glitch-spot] share server NOT started — could not resolve snapshots dir");
     }
 
-    // Sweep snapshots older than 24h. Synchronous: a directory scan over a
-    // handful of small dirs is sub-millisecond. Failures never block startup.
-    match snapshot::persist::snapshots_dir() {
-        Ok(base) => {
-            if let Err(e) = snapshot::persist::cleanup(&base, snapshot::persist::MAX_AGE) {
-                eprintln!("[glitch-spot] cleanup failed: {e}");
-            }
-        }
-        Err(e) => eprintln!("[glitch-spot] could not resolve snapshots dir: {e}"),
-    }
-
     let tunnel = Arc::new(share::tunnel::TunnelManager::new());
 
     let tunnel_for_exit = tunnel.clone();
@@ -715,6 +761,35 @@ pub fn run() {
 
             hotkey::register(app.handle())?;
             let _tray = tray::setup_tray(app.handle())?;
+
+            // Startup sweep: delete snapshots that already exceed the retention
+            // threshold and expire any stale in-memory state.
+            {
+                let state = app.state::<AppState>();
+                run_cleanup_sweep(&state);
+                // No tray refresh needed here — the menu hasn't been interacted
+                // with yet and setup_tray just built it with current state.
+            }
+
+            // Periodic sweep: enforce the retention setting every hour while
+            // the app is running. Must be inside setup() to have AppHandle for
+            // tray refresh after deleting the latest snapshot.
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut interval =
+                        tokio::time::interval(tokio::time::Duration::from_secs(60 * 60));
+                    interval.tick().await; // discard the immediate first tick
+                    loop {
+                        interval.tick().await;
+                        let state = app_handle.state::<AppState>();
+                        if run_cleanup_sweep(&state) {
+                            tray::refresh_menu(&app_handle);
+                        }
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

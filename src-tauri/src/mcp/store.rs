@@ -3,6 +3,7 @@
 
 use crate::snapshot::Snapshot;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
 use tokio::time::{timeout, Duration};
@@ -64,6 +65,25 @@ impl SnapshotStore {
 
     pub fn get_snapshot(&self, id: &str) -> Option<Snapshot> {
         self.all.lock().unwrap().get(id).cloned()
+    }
+
+    /// Removes snapshots from the store whose `{base}/{id}/` directory no longer
+    /// exists on disk. Clears `latest` if it was among the removed entries.
+    /// Returns the number of entries removed.
+    pub fn expire_if_deleted(&self, base: &Path) -> usize {
+        let mut all = self.all.lock().unwrap();
+        let before = all.len();
+        all.retain(|id, _| base.join(id).is_dir());
+        let removed = before - all.len();
+        if removed > 0 {
+            let mut latest = self.latest.lock().unwrap();
+            if let Some(snap) = latest.as_ref() {
+                if !base.join(&snap.id).is_dir() {
+                    *latest = None;
+                }
+            }
+        }
+        removed
     }
 
     /// Wait for the next snapshot or cancel signal, up to `timeout_secs`.
@@ -184,6 +204,41 @@ mod tests {
         store.publish(fake_snapshot("snap_abc"));
         assert!(store.get_snapshot("snap_abc").is_some());
         assert!(store.get_snapshot("snap_xyz").is_none());
+    }
+
+    #[test]
+    fn expire_if_deleted_keeps_snapshot_with_existing_dir() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let id = "snap_keep";
+        std::fs::create_dir(temp.path().join(id)).unwrap();
+        let store = SnapshotStore::new();
+        store.publish(fake_snapshot(id));
+        let expired = store.expire_if_deleted(temp.path());
+        assert_eq!(expired, 0, "dir still exists — nothing should be expired");
+        assert!(store.get_latest().is_some());
+        assert!(store.get_snapshot(id).is_some());
+    }
+
+    #[test]
+    fn expire_if_deleted_clears_latest_when_dir_is_gone() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let id = "snap_gone";
+        // Publish but do NOT create the directory — simulates post-cleanup state.
+        let store = SnapshotStore::new();
+        store.publish(fake_snapshot(id));
+        let expired = store.expire_if_deleted(temp.path());
+        assert_eq!(expired, 1);
+        assert!(store.get_latest().is_none(), "latest should be cleared");
+        assert!(store.get_snapshot(id).is_none(), "all-map entry should be removed");
+    }
+
+    #[test]
+    fn expire_if_deleted_with_no_snapshots_is_noop() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let store = SnapshotStore::new();
+        let expired = store.expire_if_deleted(temp.path());
+        assert_eq!(expired, 0);
+        assert!(store.get_latest().is_none());
     }
 
     #[tokio::test]

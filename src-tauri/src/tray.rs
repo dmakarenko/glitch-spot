@@ -338,6 +338,30 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&tray_bs)
         .build()?;
 
+    let current_retention = state.settings.current_retention();
+    let ret_24h = CheckMenuItemBuilder::new("Keep 24 hours")
+        .id("retention:24h")
+        .checked(matches!(current_retention, crate::settings::SnapshotRetention::Hours24))
+        .build(app)?;
+    let ret_7d = CheckMenuItemBuilder::new("Keep 7 days")
+        .id("retention:7d")
+        .checked(matches!(current_retention, crate::settings::SnapshotRetention::Days7))
+        .build(app)?;
+    let ret_30d = CheckMenuItemBuilder::new("Keep 30 days")
+        .id("retention:30d")
+        .checked(matches!(current_retention, crate::settings::SnapshotRetention::Days30))
+        .build(app)?;
+    let ret_never = CheckMenuItemBuilder::new("Never auto-delete")
+        .id("retention:never")
+        .checked(matches!(current_retention, crate::settings::SnapshotRetention::Never))
+        .build(app)?;
+    let retention_submenu = SubmenuBuilder::new(app, "Auto-delete snapshots")
+        .item(&ret_24h)
+        .item(&ret_7d)
+        .item(&ret_30d)
+        .item(&ret_never)
+        .build()?;
+
     let launch_at_login = CheckMenuItemBuilder::new("Launch at Login")
         .id("launch_at_login")
         .checked(autostart_on)
@@ -375,6 +399,7 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&provider_submenu)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&tray_submenu)
+        .item(&retention_submenu)
         .item(&launch_at_login)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&build_branch)
@@ -551,6 +576,20 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                         eprintln!("tray: set tray appearance failed: {e}");
                     }
                     refresh_menu(&app);
+                }
+                "retention:24h"
+                | "retention:7d"
+                | "retention:30d"
+                | "retention:never" => {
+                    let key = event.id.as_ref().split(':').nth(1).unwrap_or("24h").to_string();
+                    let app2 = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app2.state::<crate::AppState>();
+                        if let Err(e) = crate::do_set_snapshot_retention(&state, key).await {
+                            eprintln!("tray: set retention failed: {e}");
+                        }
+                        refresh_menu(&app2);
+                    });
                 }
                 "launch_at_login" => {
                     let manager = app.autolaunch();

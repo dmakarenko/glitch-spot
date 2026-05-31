@@ -7,6 +7,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, RwLock,
 };
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -17,6 +18,48 @@ const DEFAULT_MCP_PORT: u16 = 7820;
 const DEFAULT_TRAY_ANIMATED: bool = true;
 const DEFAULT_TRAY_COLOURED: bool = true;
 
+/// How long to retain snapshots before auto-deletion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SnapshotRetention {
+    #[default]
+    Hours24,
+    Days7,
+    Days30,
+    /// Never auto-delete — cleanup is skipped entirely.
+    Never,
+}
+
+impl SnapshotRetention {
+    /// Returns the max age for cleanup, or `None` if auto-deletion is disabled.
+    pub fn max_age(self) -> Option<Duration> {
+        match self {
+            Self::Hours24 => Some(Duration::from_secs(24 * 60 * 60)),
+            Self::Days7   => Some(Duration::from_secs(7 * 24 * 60 * 60)),
+            Self::Days30  => Some(Duration::from_secs(30 * 24 * 60 * 60)),
+            Self::Never   => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Hours24 => "24h",
+            Self::Days7   => "7d",
+            Self::Days30  => "30d",
+            Self::Never   => "never",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<Self> {
+        match s {
+            "24h"   => Some(Self::Hours24),
+            "7d"    => Some(Self::Days7),
+            "30d"   => Some(Self::Days30),
+            "never" => Some(Self::Never),
+            _       => None,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct ConfigFile {
     #[serde(default)]
@@ -25,6 +68,8 @@ struct ConfigFile {
     mcp: McpSection,
     #[serde(default)]
     tray: TraySection,
+    #[serde(default)]
+    snapshot: SnapshotSection,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -47,6 +92,12 @@ struct TraySection {
     coloured: Option<bool>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct SnapshotSection {
+    #[serde(default)]
+    retention: Option<String>,
+}
+
 pub struct Settings {
     provider: RwLock<ProviderKind>,
     mcp_port: u16,
@@ -56,6 +107,7 @@ pub struct Settings {
     /// of the menu click stalling the animation thread.
     tray_animated: Arc<AtomicBool>,
     tray_coloured: Arc<AtomicBool>,
+    snapshot_retention: RwLock<SnapshotRetention>,
 }
 
 impl Settings {
@@ -108,11 +160,19 @@ impl Settings {
             .and_then(|v| v.as_bool())
             .unwrap_or(DEFAULT_TRAY_COLOURED);
 
+        let snapshot_retention = parsed
+            .get("snapshot")
+            .and_then(|s| s.get("retention"))
+            .and_then(|v| v.as_str())
+            .and_then(SnapshotRetention::from_name)
+            .unwrap_or_default();
+
         Ok(Settings {
             provider: RwLock::new(provider),
             mcp_port,
             tray_animated: Arc::new(AtomicBool::new(tray_animated)),
             tray_coloured: Arc::new(AtomicBool::new(tray_coloured)),
+            snapshot_retention: RwLock::new(snapshot_retention),
         })
     }
 
@@ -158,9 +218,22 @@ impl Settings {
         self.write_config_file(dir)
     }
 
-    /// Snapshot all in-memory settings into the on-disk config. Both
-    /// `save_provider` and `save_tray_appearance` go through here so that
-    /// saving one section never silently drops the others.
+    pub fn current_retention(&self) -> SnapshotRetention {
+        *self.snapshot_retention.read().expect("settings lock poisoned")
+    }
+
+    /// Update the in-memory retention AND persist it to disk.
+    pub fn save_retention(&self, dir: &Path, retention: SnapshotRetention) -> io::Result<()> {
+        {
+            let mut w = self.snapshot_retention.write().expect("settings lock poisoned");
+            *w = retention;
+        }
+        self.write_config_file(dir)
+    }
+
+    /// Snapshot all in-memory settings into the on-disk config. All `save_*`
+    /// methods go through here so that saving one section never silently drops
+    /// the others.
     fn write_config_file(&self, dir: &Path) -> io::Result<()> {
         let (animated, coloured) = self.current_tray();
         let cfg = ConfigFile {
@@ -171,6 +244,9 @@ impl Settings {
             tray: TraySection {
                 animated: Some(animated),
                 coloured: Some(coloured),
+            },
+            snapshot: SnapshotSection {
+                retention: Some(self.current_retention().as_str().to_string()),
             },
         };
         let text = toml::to_string_pretty(&cfg).map_err(io::Error::other)?;
@@ -183,6 +259,7 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn missing_file_yields_default_provider() {
@@ -359,5 +436,90 @@ mod tests {
         let reloaded = Settings::load_from(temp.path()).unwrap();
         assert_eq!(reloaded.current_provider(), ProviderKind::Tailscale, "provider preserved");
         assert_eq!(reloaded.current_tray(), (true, false), "tray section applied");
+    }
+
+    #[test]
+    fn missing_snapshot_section_yields_default_retention() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.current_retention(), SnapshotRetention::Hours24);
+    }
+
+    #[test]
+    fn snapshot_retention_max_age_hours24() {
+        assert_eq!(SnapshotRetention::Hours24.max_age(), Some(Duration::from_secs(24 * 60 * 60)));
+    }
+
+    #[test]
+    fn snapshot_retention_max_age_days7() {
+        assert_eq!(SnapshotRetention::Days7.max_age(), Some(Duration::from_secs(7 * 24 * 60 * 60)));
+    }
+
+    #[test]
+    fn snapshot_retention_max_age_days30() {
+        assert_eq!(SnapshotRetention::Days30.max_age(), Some(Duration::from_secs(30 * 24 * 60 * 60)));
+    }
+
+    #[test]
+    fn snapshot_retention_max_age_never() {
+        assert_eq!(SnapshotRetention::Never.max_age(), None);
+    }
+
+    #[test]
+    fn explicit_snapshot_retention_is_parsed() {
+        let temp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            b"[snapshot]\nretention = \"7d\"\n",
+        )
+        .unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.current_retention(), SnapshotRetention::Days7);
+    }
+
+    #[test]
+    fn unknown_retention_falls_back_to_default() {
+        let temp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            b"[snapshot]\nretention = \"bogus\"\n",
+        )
+        .unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.current_retention(), SnapshotRetention::Hours24);
+    }
+
+    #[test]
+    fn save_retention_roundtrip() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        settings.save_retention(temp.path(), SnapshotRetention::Days30).unwrap();
+
+        let reloaded = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(reloaded.current_retention(), SnapshotRetention::Days30);
+    }
+
+    #[test]
+    fn save_retention_never_roundtrip() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        settings.save_retention(temp.path(), SnapshotRetention::Never).unwrap();
+
+        let reloaded = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(reloaded.current_retention(), SnapshotRetention::Never);
+    }
+
+    #[test]
+    fn save_retention_preserves_other_sections() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        settings.save_provider(temp.path(), ProviderKind::Ngrok).unwrap();
+        settings.save_tray_appearance(temp.path(), false, false).unwrap();
+        settings.save_retention(temp.path(), SnapshotRetention::Days7).unwrap();
+
+        let reloaded = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(reloaded.current_provider(), ProviderKind::Ngrok, "provider preserved");
+        assert_eq!(reloaded.current_tray(), (false, false), "tray preserved");
+        assert_eq!(reloaded.current_retention(), SnapshotRetention::Days7, "retention applied");
     }
 }

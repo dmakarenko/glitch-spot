@@ -94,7 +94,7 @@ fn cleanup_removes_a_persisted_snapshot_dir_after_24h() {
     let past = SystemTime::now() - Duration::from_secs(25 * 60 * 60);
     set_file_mtime(&snap_dir, FileTime::from_system_time(past)).unwrap();
 
-    let removed = persist::cleanup(temp.path(), persist::MAX_AGE).unwrap();
+    let removed = persist::cleanup(temp.path(), Duration::from_secs(24 * 60 * 60)).unwrap();
     assert_eq!(removed, 1);
     assert!(!snap_dir.exists());
 }
