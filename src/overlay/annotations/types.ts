@@ -62,6 +62,9 @@ export type AnnotationsAction =
       y: number;
       viewportW: number;
       viewportH: number;
+      // When set (window mode), a moved rect is clamped to these bounds rather
+      // than the full viewport, keeping it inside the selected window.
+      clip?: { x: number; y: number; w: number; h: number };
     }
   | { type: 'END_GESTURE' }
   | { type: 'SET_NOTE'; id: string; note: string }
