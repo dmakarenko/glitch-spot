@@ -526,7 +526,12 @@ fn activate_application() {
 fn activate_application() {}
 
 #[tauri::command]
-async fn picker_select(app: tauri::AppHandle, window_id: u32) -> Result<(), String> {
+async fn picker_select(
+    app: tauri::AppHandle,
+    window_id: u32,
+    click_global_x: i32,
+    click_global_y: i32,
+) -> Result<(), String> {
     let state = app.state::<AppState>();
     let session = match state.picker_state.current() {
         picker_session::RunMode::Picking { session } => session,
@@ -565,6 +570,10 @@ async fn picker_select(app: tauri::AppHandle, window_id: u32) -> Result<(), Stri
             h: window.bounds.h,
         },
         display_scale_factor: scale,
+        initial_click_css: Some(overlay::CssPoint {
+            x: (click_global_x - display.x) as f32 / scale,
+            y: (click_global_y - display.y) as f32 / scale,
+        }),
     };
 
     state

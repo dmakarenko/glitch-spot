@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AnnotationsAction, AnnotationsState, Handle } from "./types";
 import { MIN_RECT_DIMENSION } from "./state";
+import { PICKER_CURSOR_CSS } from "../../picker/cursor";
 import { RectangleNote } from "./RectangleNote";
 import { formatLabel } from "./label";
 
@@ -134,6 +135,11 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Prop
       if (e.button !== 0) return;
       e.preventDefault();
       const { x, y } = eventCoords(e);
+      // If a seeded gesture is already active (started externally from the picker
+      // click), cancel it so the user's explicit click starts a clean new gesture.
+      if (state.active?.kind === "create" && state.active.seeded) {
+        dispatch({ type: "END_GESTURE" });
+      }
       const startInside = insideClip(x, y);
       if (!startInside) {
         // Click on the dimmed area outside the selected window: cancel or
@@ -143,12 +149,20 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Prop
       }
       dispatch({ type: "BEGIN_CREATE", id: nextRectId(), x: startInside.x, y: startInside.y });
     },
-    [dispatch, eventCoords, clipRect, onOutsideClick]
+    [dispatch, eventCoords, clipRect, onOutsideClick, state.active]
   );
 
   const onMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!state.active) return;
+      // A seeded gesture (started from an external source, e.g. the picker click)
+      // should only continue if the mouse button is actually being held. If the
+      // user just clicked (button released before the overlay opened), cancel it
+      // so the overlay opens clean.
+      if (state.active.kind === "create" && state.active.seeded && e.buttons === 0) {
+        dispatch({ type: "END_GESTURE" });
+        return;
+      }
       let { x, y } = eventCoords(e);
       if (clipRect) {
         x = Math.max(clipRect.x, Math.min(x, clipRect.x + clipRect.w));
@@ -181,7 +195,7 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Prop
       style={{
         position: "absolute",
         inset: 0,
-        cursor: "crosshair",
+        cursor: PICKER_CURSOR_CSS,
         userSelect: "none",
         WebkitUserSelect: "none",
       }}

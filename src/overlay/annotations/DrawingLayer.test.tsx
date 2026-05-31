@@ -8,17 +8,20 @@ import { render, fireEvent, cleanup } from "@testing-library/react";
 import { useReducer } from "react";
 import { DrawingLayer } from "./DrawingLayer";
 import { initialState, reducer } from "./state";
+import type { AnnotationsState } from "./types";
 
 afterEach(cleanup);
 
 function Harness({
   clipRect,
   onOutsideClick,
+  initialAnnotations,
 }: {
   clipRect?: { x: number; y: number; w: number; h: number };
   onOutsideClick?: () => void;
+  initialAnnotations?: AnnotationsState;
 }) {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [state, dispatch] = useReducer(reducer, initialAnnotations ?? initialState);
   return (
     <DrawingLayer
       state={state}
@@ -114,5 +117,55 @@ describe("DrawingLayer with clipRect", () => {
     expect(top).toBeGreaterThanOrEqual(100);
     expect(left + width).toBeLessThanOrEqual(300);
     expect(top + height).toBeLessThanOrEqual(300);
+  });
+});
+
+describe("DrawingLayer cursor", () => {
+  it("uses the glitch crosshair cursor rather than the plain CSS crosshair", () => {
+    const { container } = render(<Harness />);
+    const surface = container.firstChild as HTMLDivElement;
+    expect(surface.style.cursor).not.toBe("crosshair");
+    expect(surface.style.cursor).toContain("data:image/svg+xml");
+  });
+});
+
+describe("DrawingLayer seeded create gesture", () => {
+  // A seeded gesture starts from an external BEGIN_CREATE (e.g. the picker click)
+  // rather than from a mousedown in the layer itself. It has `seeded: true` on
+  // the active gesture and begins with a zero-size rect.
+  const seededState = reducer(initialState, {
+    type: "BEGIN_CREATE",
+    id: "r1",
+    x: 50,
+    y: 50,
+    seeded: true,
+  } as Parameters<typeof reducer>[1]);
+
+  it("cancels when the first mousemove arrives with no button held", () => {
+    const { container } = render(<Harness initialAnnotations={seededState} />);
+    const surface = container.firstChild as HTMLDivElement;
+    fireEvent.mouseMove(surface, { buttons: 0 });
+    expect(surface.querySelectorAll("[data-rect-id]")).toHaveLength(0);
+  });
+
+  it("tracks the cursor when the button is held and commits on mouseup", () => {
+    const { container } = render(<Harness initialAnnotations={seededState} />);
+    const surface = container.firstChild as HTMLDivElement;
+    fireEvent.mouseMove(surface, { clientX: 150, clientY: 150, buttons: 1 });
+    fireEvent.mouseMove(surface, { clientX: 200, clientY: 200, buttons: 1 });
+    fireEvent.mouseUp(surface);
+    expect(surface.querySelectorAll("[data-rect-id]")).toHaveLength(1);
+  });
+
+  it("cancels the seeded gesture on mousedown and starts a fresh one at the clicked position", () => {
+    const { container } = render(<Harness initialAnnotations={seededState} />);
+    const surface = container.firstChild as HTMLDivElement;
+    fireEvent.mouseDown(surface, { clientX: 100, clientY: 100, button: 0 });
+    fireEvent.mouseMove(surface, { clientX: 200, clientY: 200 });
+    fireEvent.mouseUp(surface);
+    expect(surface.querySelectorAll("[data-rect-id]")).toHaveLength(1);
+    const rect = surface.querySelector("[data-rect-id]") as HTMLDivElement;
+    expect(parseFloat(rect.style.left)).toBe(100);
+    expect(parseFloat(rect.style.top)).toBe(100);
   });
 });

@@ -40,4 +40,7 @@ export type WindowModePayload = {
   window_rect_css: { x: number; y: number; w: number; h: number };
   window_rect_physical: { x: number; y: number; w: number; h: number };
   display_scale_factor: number;
+  /** Picker-click position in overlay-relative CSS px. Present when the
+   *  user held the mouse button while selecting a window (drag intent). */
+  initial_click_css?: { x: number; y: number };
 };

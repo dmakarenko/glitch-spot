@@ -2,7 +2,7 @@
 // ABOUTME: Uses the OverlayBridge abstraction to work under both Tauri and Electron.
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { createBridge } from './bridge'
-import { DrawingLayer } from './annotations/DrawingLayer'
+import { DrawingLayer, nextRectId } from './annotations/DrawingLayer'
 import { DiscardModal } from './annotations/DiscardModal'
 import { initialState, reducer } from './annotations/state'
 import { Toolbar } from './Toolbar'
@@ -64,6 +64,13 @@ export function Overlay() {
       dispatch({ type: "CLEAR" });
       setShowDiscardModal(false);
       setWindowPayload(newMode === 'window' && payload ? payload : null);
+      if (newMode === 'window' && payload?.initial_click_css) {
+        const { x, y } = payload.initial_click_css;
+        const clip = payload.window_rect_css;
+        const cx = Math.max(clip.x, Math.min(x, clip.x + clip.w));
+        const cy = Math.max(clip.y, Math.min(y, clip.y + clip.h));
+        dispatch({ type: 'BEGIN_CREATE', id: nextRectId(), x: cx, y: cy, seeded: true });
+      }
     };
 
     let unlistenFrame: (() => void) | null = null;

@@ -107,7 +107,7 @@ describe("<Picker/>", () => {
     expect(queryAllByTestId("picker-highlight").length).toBe(0);
   });
 
-  it("calls picker_select when clicking on a hovered window", async () => {
+  it("calls picker_select on mousedown with window id and click coordinates", async () => {
     const { getByTestId } = render(<Picker />);
     act(() => {
       (window as unknown as { __glitchSpotPickerStart: (p: PickerStartPayload) => void })
@@ -115,11 +115,38 @@ describe("<Picker/>", () => {
     });
     await Promise.resolve();
     emitHover(7);
-    fireEvent.click(getByTestId("picker-root"));
-    expect(invokeMock).toHaveBeenCalledWith("picker_select", { windowId: 7 });
+    fireEvent.mouseDown(getByTestId("picker-root"), { clientX: 200, clientY: 150, button: 0 });
+    // picker_origin=(0,0), picker_scale=1 → globalX=200, globalY=150
+    expect(invokeMock).toHaveBeenCalledWith("picker_select", {
+      windowId: 7,
+      clickGlobalX: 200,
+      clickGlobalY: 150,
+    });
   });
 
-  it("calls picker_cancel when clicking on empty desktop", async () => {
+  it("converts click position to global physical pixels using picker_origin and picker_scale", async () => {
+    const scaledSession: PickerStartPayload = {
+      ...makeSession(),
+      picker_origin: { x: 100, y: 200 },
+      picker_scale: 2,
+    };
+    const { getByTestId } = render(<Picker />);
+    act(() => {
+      (window as unknown as { __glitchSpotPickerStart: (p: PickerStartPayload) => void })
+        .__glitchSpotPickerStart(scaledSession);
+    });
+    await Promise.resolve();
+    emitHover(7);
+    fireEvent.mouseDown(getByTestId("picker-root"), { clientX: 50, clientY: 75, button: 0 });
+    // globalX = 100 + 50*2 = 200, globalY = 200 + 75*2 = 350
+    expect(invokeMock).toHaveBeenCalledWith("picker_select", {
+      windowId: 7,
+      clickGlobalX: 200,
+      clickGlobalY: 350,
+    });
+  });
+
+  it("calls picker_cancel on mousedown on empty desktop", async () => {
     const { getByTestId } = render(<Picker />);
     act(() => {
       (window as unknown as { __glitchSpotPickerStart: (p: PickerStartPayload) => void })
@@ -127,7 +154,7 @@ describe("<Picker/>", () => {
     });
     await Promise.resolve();
     emitHover(null);
-    fireEvent.click(getByTestId("picker-root"));
+    fireEvent.mouseDown(getByTestId("picker-root"), { button: 0 });
     expect(invokeMock).toHaveBeenCalledWith("picker_cancel", undefined);
   });
 

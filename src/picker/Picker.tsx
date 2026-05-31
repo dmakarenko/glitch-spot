@@ -71,19 +71,22 @@ export function Picker() {
 
   const { picker_origin, picker_scale } = session;
 
-  const onClick = () => {
+  const onMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
     if (hoveredId == null) {
       invoke("picker_cancel");
       return;
     }
-    invoke("picker_select", { windowId: hoveredId });
+    const clickGlobalX = Math.round(picker_origin.x + e.clientX * picker_scale);
+    const clickGlobalY = Math.round(picker_origin.y + e.clientY * picker_scale);
+    invoke("picker_select", { windowId: hoveredId, clickGlobalX, clickGlobalY });
   };
 
   const highlight = session.windows.find((w) => w.window_id === hoveredId);
 
   return (
     <div
-      onClick={onClick}
+      onMouseDown={onMouseDown}
       style={{
         position: "fixed",
         inset: 0,
