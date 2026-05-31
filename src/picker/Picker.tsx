@@ -2,7 +2,7 @@
 // ABOUTME: poller broadcasting `picker://hover` events — macOS only delivers
 // ABOUTME: mouseMoved to the key window, so JS mousemove can't drive the
 // ABOUTME: non-activation display.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { PICKER_CURSOR_CSS } from "./cursor";
@@ -30,7 +30,9 @@ type DrawState = {
   curY: number;
 };
 
-function drawRect(ds: DrawState) {
+type CssRect = { x: number; y: number; w: number; h: number };
+
+function rawRect(ds: DrawState): CssRect {
   return {
     x: Math.min(ds.anchorX, ds.curX),
     y: Math.min(ds.anchorY, ds.curY),
@@ -39,10 +41,22 @@ function drawRect(ds: DrawState) {
   };
 }
 
+function clampRect(rect: CssRect, bounds: CssRect): CssRect {
+  const x = Math.max(bounds.x, rect.x);
+  const y = Math.max(bounds.y, rect.y);
+  const w = Math.min(bounds.x + bounds.w, rect.x + rect.w) - x;
+  const h = Math.min(bounds.y + bounds.h, rect.y + rect.h) - y;
+  return { x, y, w, h };
+}
+
 export function Picker() {
   const [session, setSession] = useState<PickerStartPayload | null>(null);
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const [drawState, setDrawState] = useState<DrawState | null>(null);
+
+  // Always-current ref so the global mouseup handler never reads stale state.
+  const drawStateRef = useRef<DrawState | null>(null);
+  drawStateRef.current = drawState;
 
   // Receive the session payload from Rust via window.eval-injected setter.
   useEffect(() => {
@@ -100,6 +114,51 @@ export function Picker() {
     };
   }, [session]);
 
+  // Global mouseup listener — catches releases outside the picker div (e.g.
+  // dragging across a display boundary onto another picker window). Installed
+  // only while a draw gesture is active; reads from drawStateRef so it always
+  // sees the latest cursor position even though the closure is created once.
+  const isDrawing = drawState !== null;
+  useEffect(() => {
+    if (!isDrawing || !session) return;
+
+    const { picker_origin, picker_scale } = session;
+    // Capture the window's CSS bounds at gesture start — they don't change
+    // during the draw and we need them for clamping.
+    const win = session.windows.find((w) => w.window_id === drawStateRef.current?.windowId);
+    const windowCss: CssRect | null = win
+      ? {
+          x: (win.bounds.x - picker_origin.x) / picker_scale,
+          y: (win.bounds.y - picker_origin.y) / picker_scale,
+          w: win.bounds.w / picker_scale,
+          h: win.bounds.h / picker_scale,
+        }
+      : null;
+
+    const commit = () => {
+      const ds = drawStateRef.current;
+      if (!ds) return;
+      const raw = rawRect(ds);
+      const rect = windowCss ? clampRect(raw, windowCss) : raw;
+      if (rect.w >= MIN_ANNOTATION_PX && rect.h >= MIN_ANNOTATION_PX) {
+        invoke("picker_select", {
+          windowId: ds.windowId,
+          initialRectX: Math.round(picker_origin.x + rect.x * picker_scale),
+          initialRectY: Math.round(picker_origin.y + rect.y * picker_scale),
+          initialRectW: Math.round(rect.w * picker_scale),
+          initialRectH: Math.round(rect.h * picker_scale),
+        });
+      } else {
+        invoke("picker_select", { windowId: ds.windowId });
+      }
+      setDrawState(null);
+    };
+
+    document.addEventListener("mouseup", commit);
+    return () => document.removeEventListener("mouseup", commit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDrawing]);
+
   if (!session) return null;
 
   const { picker_origin, picker_scale } = session;
@@ -118,32 +177,13 @@ export function Picker() {
     setDrawState((prev) => prev ? { ...prev, curX: e.clientX, curY: e.clientY } : null);
   };
 
-  const onMouseUp = () => {
-    if (!drawState) return;
-    const { windowId, anchorX, anchorY } = drawState;
-    const rect = drawRect(drawState);
-    if (rect.w >= MIN_ANNOTATION_PX && rect.h >= MIN_ANNOTATION_PX) {
-      invoke("picker_select", {
-        windowId,
-        initialRectX: Math.round(picker_origin.x + rect.x * picker_scale),
-        initialRectY: Math.round(picker_origin.y + rect.y * picker_scale),
-        initialRectW: Math.round(rect.w * picker_scale),
-        initialRectH: Math.round(rect.h * picker_scale),
-      });
-    } else {
-      invoke("picker_select", { windowId });
-    }
-    void anchorX; void anchorY; // consumed above
-    setDrawState(null);
-  };
-
   const highlight = !drawState && session.windows.find((w) => w.window_id === hoveredId);
 
-  // Window being drawn — needed for the checker veil.
+  // Window being drawn — for the visual veil and clamped preview rect.
   const drawingWindow = drawState
     ? session.windows.find((w) => w.window_id === drawState.windowId)
     : null;
-  const drawingWindowCss = drawingWindow
+  const drawingWindowCss: CssRect | null = drawingWindow
     ? {
         x: (drawingWindow.bounds.x - picker_origin.x) / picker_scale,
         y: (drawingWindow.bounds.y - picker_origin.y) / picker_scale,
@@ -151,13 +191,14 @@ export function Picker() {
         h: drawingWindow.bounds.h / picker_scale,
       }
     : null;
-  const activeRect = drawState ? drawRect(drawState) : null;
+  // Clamp the preview rect to the window so the visual matches what gets committed.
+  const rawActive = drawState ? rawRect(drawState) : null;
+  const activeRect = rawActive && drawingWindowCss ? clampRect(rawActive, drawingWindowCss) : rawActive;
 
   return (
     <div
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
-      onMouseUp={onMouseUp}
       style={{
         position: "fixed",
         inset: 0,
