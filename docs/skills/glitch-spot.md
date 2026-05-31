@@ -5,34 +5,78 @@ Surface a Glitch Spot annotation snapshot in the current CC session.
 - No args → arm the listener (wait for next snapshot)
 - `cancel` → cancel any in-flight wait
 
+The waiter polls the Glitch Spot MCP server directly over HTTP from a single
+background shell process. The wait costs zero model turns — the loop blocks in
+`curl`, not in an agent, and the session is only re-invoked when a snapshot
+arrives, the wait is cancelled, or it times out.
+
 ---
 
 ## Arm state (no args)
 
-1. **Health check:** call the `get_latest_snapshot` MCP tool (tool is registered under the `glitch-spot` MCP server). If the call succeeds, continue to step 2.
+1. **Health check.** Run this via Bash — it resolves the configured MCP port
+   (default 7820) and pings the server:
 
-   If the call fails (tool not registered, connection refused, timeout, or any error):
+   ```bash
+   PORT=$(sed -n '/^\[mcp\]/,/^\[/{s/^[[:space:]]*port[[:space:]]*=[[:space:]]*\([0-9]\{1,\}\).*/\1/p;}' "$HOME/.glitch-spot/config.toml" 2>/dev/null | head -1); PORT=${PORT:-7820}
+   curl -s -m 5 -X POST "http://127.0.0.1:${PORT}/mcp" -H 'content-type: application/json' \
+     -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_latest_snapshot","arguments":{}}}' \
+     | jq -e '.result' >/dev/null && echo HEALTHY || echo UNHEALTHY
+   ```
+
+   `HEALTHY` → continue to step 2.
+
+   `UNHEALTHY` (connection refused, timeout, non-JSON, or no `result` field):
    - Run `open -a "Glitch Spot"` via Bash. If the app bundle is not found, try `open /Applications/Glitch\ Spot.app` as a fallback.
    - Output: > Glitch Spot wasn't running — I've launched it. Give it a moment to start, then run `/glitch-spot` again.
    - Stop.
 
-2. **Dispatch background agent:** Dispatch a background Agent (run_in_background: true) named `glitch-spot-waiter` with this exact prompt:
+2. **Pick a per-invocation result path.** Run `mktemp -t glitch-spot-snapshot`
+   via Bash and note the path it prints — call it `RESULT_PATH`. Each
+   `/glitch-spot` run gets its own file so concurrent sessions never clobber each
+   other's result. You MUST reference this exact path both when launching the
+   waiter (as `OUT`) and when reading the result in the present state.
 
-   > Call the `wait_for_snapshot` MCP tool in a loop using `timeout_seconds: 45` each time. If the result contains `"pending": true`, call it again immediately passing `last_seen_id: <result.last_id>` in the arguments. Keep looping until the result has an `"id"` field (snapshot arrived) or `"cancelled": true`. After 14 attempts (~10 minutes) with no snapshot, output `{"cancelled": true, "reason": "timeout"}` and stop. When done, output the final result on a single line with no commentary, no markdown, and no code fences. If any call errors, output `{"error": "<error message>"}` and stop.
+3. **Launch the background waiter.** Run this via Bash with `run_in_background: true`,
+   substituting your `RESULT_PATH` into `OUT` on the first line.
+   It long-polls `wait_for_snapshot` (the server caps each call at 45s and returns
+   `pending`; the loop retries with `last_seen_id` so a snapshot that lands in the
+   gap is never missed) and writes the final result JSON to `OUT`. The `curl -m 60`
+   per-call timeout must stay above the server's 45s chunk cap — if the cap ever
+   rises past 60s, curl would abort mid-wait and the loop would write a spurious
+   error:
 
-3. **Tell the user:**
+   ```bash
+   OUT=<RESULT_PATH>   # the mktemp path from step 2
+   PORT=$(sed -n '/^\[mcp\]/,/^\[/{s/^[[:space:]]*port[[:space:]]*=[[:space:]]*\([0-9]\{1,\}\).*/\1/p;}' "$HOME/.glitch-spot/config.toml" 2>/dev/null | head -1); PORT=${PORT:-7820}
+   ENDPOINT="http://127.0.0.1:${PORT}/mcp"
+   rm -f "$OUT"; last=""
+   for i in $(seq 1 14); do
+     if [ -n "$last" ]; then args=$(printf '{"timeout_seconds":600,"last_seen_id":"%s"}' "$last"); else args='{"timeout_seconds":600}'; fi
+     resp=$(curl -s -m 60 -X POST "$ENDPOINT" -H 'content-type: application/json' \
+       -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"wait_for_snapshot\",\"arguments\":$args}}")
+     inner=$(printf '%s' "$resp" | jq -r '.result.content[0].text // empty' 2>/dev/null)
+     if [ -z "$inner" ]; then printf '{"error":"no response from Glitch Spot MCP server"}' > "$OUT"; exit 0; fi
+     if [ "$(printf '%s' "$inner" | jq -r '.cancelled // empty')" = "true" ]; then printf '%s' "$inner" > "$OUT"; exit 0; fi
+     if [ "$(printf '%s' "$inner" | jq -r '.pending // empty')" = "true" ]; then last=$(printf '%s' "$inner" | jq -r '.last_id // empty'); continue; fi
+     printf '%s' "$inner" > "$OUT"; exit 0
+   done
+   printf '{"cancelled":true,"reason":"timeout"}' > "$OUT"
+   ```
+
+4. **Tell the user:**
 
    > Ready. I'm watching for your next snapshot — go annotate. I'll still be here if you want to talk while you look at the screen.
 
-4. **Stay responsive.** Do not call any other tools. The background agent will complete when the user saves a snapshot.
+5. **Stay responsive.** Do not call any other tools. The background command completes when the user saves a snapshot.
 
 ---
 
-## Present state (background agent completes)
+## Present state (background command completes)
 
-When notified that the `glitch-spot-waiter` background agent completed:
+When the background waiter command completes (the harness re-invokes you):
 
-1. Parse the agent's output as JSON — call this `result`. This is the raw snapshot object, or a status object.
+1. Read `RESULT_PATH` — the exact `mktemp` path you generated when arming — and parse it as JSON — call this `result`. This is the raw snapshot object, or a status object.
 
 2. If `result.reason == "timeout"` or (`result.cancelled == true` and `result.reason`): output:
    > Snapshot listener timed out after 10 minutes. Run `/glitch-spot` to start again.
@@ -72,7 +116,14 @@ When notified that the `glitch-spot-waiter` background agent completed:
 
 ## Cancel state (args = "cancel")
 
-1. Call the `cancel_wait` MCP tool.
+1. Call `cancel_wait` over HTTP — this unblocks the in-flight `wait_for_snapshot`, so the background waiter writes `{cancelled:true}` and exits:
+
+   ```bash
+   PORT=$(sed -n '/^\[mcp\]/,/^\[/{s/^[[:space:]]*port[[:space:]]*=[[:space:]]*\([0-9]\{1,\}\).*/\1/p;}' "$HOME/.glitch-spot/config.toml" 2>/dev/null | head -1); PORT=${PORT:-7820}
+   curl -s -m 5 -X POST "http://127.0.0.1:${PORT}/mcp" -H 'content-type: application/json' \
+     -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cancel_wait","arguments":{}}}' >/dev/null
+   ```
+
 2. Output: > Cancelled. Run `/glitch-spot` again when you're ready.
 
 ---
@@ -81,6 +132,6 @@ When notified that the `glitch-spot-waiter` background agent completed:
 
 | Condition | Response |
 |---|---|
-| `get_latest_snapshot` fails for any reason | Try to launch the app via `open -a "Glitch Spot"`, output "wasn't running — I've launched it. Give it a moment, then run `/glitch-spot` again." |
+| Health check returns `UNHEALTHY` | Try to launch the app via `open -a "Glitch Spot"`, output "wasn't running — I've launched it. Give it a moment, then run `/glitch-spot` again." |
 | Image file path in snapshot does not exist on disk | Skip image, present text annotations only. Do not error. |
-| Background agent times out (snapshot contains `"reason":"timeout"`) | "Snapshot listener timed out after 10 minutes. Run `/glitch-spot` to start again." |
+| Waiter times out (result contains `"reason":"timeout"`) | "Snapshot listener timed out after 10 minutes. Run `/glitch-spot` to start again." |
