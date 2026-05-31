@@ -8,17 +8,20 @@ import { render, fireEvent, cleanup } from "@testing-library/react";
 import { useReducer } from "react";
 import { DrawingLayer } from "./DrawingLayer";
 import { initialState, reducer } from "./state";
+import type { AnnotationsState } from "./types";
 
 afterEach(cleanup);
 
 function Harness({
   clipRect,
   onOutsideClick,
+  initialAnnotations,
 }: {
   clipRect?: { x: number; y: number; w: number; h: number };
   onOutsideClick?: () => void;
+  initialAnnotations?: AnnotationsState;
 }) {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [state, dispatch] = useReducer(reducer, initialAnnotations ?? initialState);
   return (
     <DrawingLayer
       state={state}
@@ -116,3 +119,13 @@ describe("DrawingLayer with clipRect", () => {
     expect(top + height).toBeLessThanOrEqual(300);
   });
 });
+
+describe("DrawingLayer cursor", () => {
+  it("uses the glitch crosshair cursor rather than the plain CSS crosshair", () => {
+    const { container } = render(<Harness />);
+    const surface = container.firstChild as HTMLDivElement;
+    expect(surface.style.cursor).not.toBe("crosshair");
+    expect(surface.style.cursor).toContain("data:image/svg+xml");
+  });
+});
+
