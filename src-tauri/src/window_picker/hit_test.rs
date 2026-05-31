@@ -28,6 +28,7 @@ mod tests {
             bounds: WindowBounds { x, y, w, h },
             display_index: 0,
             layer: 0,
+            visible_regions: vec![],
         }
     }
 
@@ -98,6 +99,7 @@ mod tests {
                 bounds: w.bounds,
                 display_index: 0,
                 layer: 0,
+                visible_regions: vec![],
             }).collect();
             let got = hit_test(&ws, case.cursor.x, case.cursor.y);
             assert_eq!(got, case.expected, "case `{}` mismatch", case.name);

@@ -1,13 +1,42 @@
 // ABOUTME: macOS-specific window enumeration via SCShareableContent + filter pipeline.
 // ABOUTME: Translates SCWindow logical-point CGRects into PickableWindow physical-px bounds.
 
+use core_foundation::array::{CFArrayGetCount, CFArrayGetValueAtIndex};
+use core_foundation::base::TCFType;
+use core_graphics::window::{
+    create_window_list, kCGNullWindowID, kCGWindowListExcludeDesktopElements,
+    kCGWindowListOptionOnScreenOnly,
+};
 use screencapturekit::shareable_content::SCShareableContent;
 
 use super::{
     coords::points_to_physical_bounds,
     filter::{filter_standard_windows, RawWindow},
+    visible_regions::compute_visible_regions,
+    z_order::sort_by_z_order,
     DisplayBounds, PickableWindow,
 };
+
+/// Window ids (`CGWindowID`) of on-screen, non-desktop windows in the window
+/// server's true front-to-back order. This is the authoritative z-order;
+/// `SCShareableContent`'s window list order is not reliable. `CGWindowListCreate`
+/// stores each window id directly as the array's value pointer.
+fn on_screen_window_order() -> Vec<u32> {
+    let options = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
+    let Some(list) = create_window_list(options, kCGNullWindowID) else {
+        return Vec::new();
+    };
+    let array_ref = list.as_concrete_TypeRef();
+    let mut ids = Vec::new();
+    unsafe {
+        let count = CFArrayGetCount(array_ref);
+        for i in 0..count {
+            let value = CFArrayGetValueAtIndex(array_ref, i);
+            ids.push(value as u32);
+        }
+    }
+    ids
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum EnumerateError {
@@ -113,7 +142,21 @@ pub fn enumerate(
         })
         .collect();
 
-    Ok((filter_standard_windows(&raws), displays))
+    // SCShareableContent's window order is not reliable front-to-back z-order,
+    // so reorder by the window server's true z-order before computing regions.
+    // Both hit-testing and visible-region clipping depend on this order.
+    let mut filtered = sort_by_z_order(filter_standard_windows(&raws), &on_screen_window_order());
+
+    // Compute visible regions over the front-to-back list, then drop windows
+    // whose visible region is empty (fully occluded by windows in front).
+    let bounds: Vec<_> = filtered.iter().map(|w| w.bounds).collect();
+    let regions = compute_visible_regions(&bounds);
+    for (w, r) in filtered.iter_mut().zip(regions.into_iter()) {
+        w.visible_regions = r;
+    }
+    filtered.retain(|w| !w.visible_regions.is_empty());
+
+    Ok((filtered, displays))
 }
 
 // The macOS enumerator has no unit-testable surface beyond what's already

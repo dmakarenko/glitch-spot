@@ -157,16 +157,10 @@ export function Overlay() {
     const { window_rect_css } = windowPayload
     return (
       <div style={{ position: 'fixed', inset: 0, background: 'transparent' }}>
-        {/* dim veil over everything */}
+        {/* dim veil over everything (visual only; the full-screen DrawingLayer
+            above it forwards outside-clicks via onOutsideClick) */}
         <div
-          style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.40)' }}
-          onClick={() => {
-            if (annotations.rects.length === 0) {
-              bridge.cancel()
-            } else {
-              setShowDiscardModal(true)
-            }
-          }}
+          style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.40)', pointerEvents: 'none' }}
         />
         {/* gray-white checker over the window rect */}
         <div
@@ -183,7 +177,18 @@ export function Overlay() {
           }}
         />
         {/* drawing layer constrained to window rect */}
-        <DrawingLayer state={annotations} dispatch={dispatch} clipRect={window_rect_css} />
+        <DrawingLayer
+          state={annotations}
+          dispatch={dispatch}
+          clipRect={window_rect_css}
+          onOutsideClick={() => {
+            if (annotations.rects.length === 0) {
+              bridge.cancel()
+            } else {
+              setShowDiscardModal(true)
+            }
+          }}
+        />
         <Toolbar rectCount={annotations.rects.length} onSave={handleSave} />
         {showDiscardModal && (
           <DiscardModal

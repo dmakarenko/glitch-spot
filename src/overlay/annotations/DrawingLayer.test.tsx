@@ -3,7 +3,7 @@
 
 // @vitest-environment jsdom
 
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import { render, fireEvent, cleanup } from "@testing-library/react";
 import { useReducer } from "react";
 import { DrawingLayer } from "./DrawingLayer";
@@ -11,9 +11,22 @@ import { initialState, reducer } from "./state";
 
 afterEach(cleanup);
 
-function Harness({ clipRect }: { clipRect?: { x: number; y: number; w: number; h: number } }) {
+function Harness({
+  clipRect,
+  onOutsideClick,
+}: {
+  clipRect?: { x: number; y: number; w: number; h: number };
+  onOutsideClick?: () => void;
+}) {
   const [state, dispatch] = useReducer(reducer, initialState);
-  return <DrawingLayer state={state} dispatch={dispatch} clipRect={clipRect} />;
+  return (
+    <DrawingLayer
+      state={state}
+      dispatch={dispatch}
+      clipRect={clipRect}
+      onOutsideClick={onOutsideClick}
+    />
+  );
 }
 
 describe("DrawingLayer with clipRect", () => {
@@ -56,5 +69,50 @@ describe("DrawingLayer with clipRect", () => {
     fireEvent.mouseMove(surface, { clientX: 100, clientY: 100 });
     fireEvent.mouseUp(surface);
     expect(surface.querySelectorAll('[data-rect-id]').length).toBe(1);
+  });
+
+  it("calls onOutsideClick when mouse-down lands outside clipRect", () => {
+    const onOutsideClick = vi.fn();
+    const { container } = render(
+      <Harness clipRect={{ x: 100, y: 100, w: 200, h: 200 }} onOutsideClick={onOutsideClick} />,
+    );
+    const surface = container.firstChild as HTMLDivElement;
+    fireEvent.mouseDown(surface, { clientX: 50, clientY: 50, button: 0 });
+    expect(onOutsideClick).toHaveBeenCalledTimes(1);
+    expect(surface.querySelectorAll('[data-rect-id]')).toHaveLength(0);
+  });
+
+  it("does not call onOutsideClick when mouse-down is inside clipRect", () => {
+    const onOutsideClick = vi.fn();
+    const { container } = render(
+      <Harness clipRect={{ x: 100, y: 100, w: 200, h: 200 }} onOutsideClick={onOutsideClick} />,
+    );
+    const surface = container.firstChild as HTMLDivElement;
+    fireEvent.mouseDown(surface, { clientX: 150, clientY: 150, button: 0 });
+    expect(onOutsideClick).not.toHaveBeenCalled();
+  });
+
+  it("clamps a moved rect to clipRect bounds (not just the pointer)", () => {
+    const { container } = render(<Harness clipRect={{ x: 100, y: 100, w: 200, h: 200 }} />);
+    const surface = container.firstChild as HTMLDivElement;
+    // Create a 100x100 rect at the clip's top-left corner.
+    fireEvent.mouseDown(surface, { clientX: 100, clientY: 100, button: 0 });
+    fireEvent.mouseMove(surface, { clientX: 200, clientY: 200 });
+    fireEvent.mouseUp(surface);
+    const rect = surface.querySelector('[data-rect-id]') as HTMLDivElement;
+    expect(rect).toBeTruthy();
+    // Grab the rect at its top-left and drag far past the clip's bottom-right.
+    fireEvent.mouseDown(rect, { clientX: 100, clientY: 100, button: 0 });
+    fireEvent.mouseMove(surface, { clientX: 500, clientY: 500 });
+    fireEvent.mouseUp(surface);
+    const left = parseFloat(rect.style.left);
+    const top = parseFloat(rect.style.top);
+    const width = parseFloat(rect.style.width);
+    const height = parseFloat(rect.style.height);
+    // The moved rect must stay fully within the clip (100..300 on both axes).
+    expect(left).toBeGreaterThanOrEqual(100);
+    expect(top).toBeGreaterThanOrEqual(100);
+    expect(left + width).toBeLessThanOrEqual(300);
+    expect(top + height).toBeLessThanOrEqual(300);
   });
 });

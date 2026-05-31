@@ -132,7 +132,7 @@ async fn save_snapshot(
     let os_version: String = tauri_plugin_os::version().to_string();
 
     let base = snapshot::persist::snapshots_dir().map_err(|e| e.to_string())?;
-    let built = snapshot::build::build(
+    let mut built = snapshot::build::build(
         &frame,
         &mode,
         annotations,
@@ -142,13 +142,13 @@ async fn save_snapshot(
         crop_origin,
     )
     .map_err(|e| e.to_string())?;
-    snapshot::persist::write(&base, &built).map_err(|e| e.to_string())?;
-    let mut snap = built.snapshot;
 
-    // If we just saved a window-mode snapshot, attach the captured window metadata.
+    // For window mode, attach the captured window metadata to the snapshot
+    // *before* persisting, so the on-disk JSON (and share routes that read it)
+    // include context.window — not just the clipboard/MCP copy.
     if mode == "window" {
         if let picker_session::RunMode::Annotating { session } = state.picker_state.current() {
-            snap.context.window = Some(snapshot::WindowInfo {
+            built.snapshot.context.window = Some(snapshot::WindowInfo {
                 app_name: session.window.app_name.clone(),
                 title: session.window.title.clone(),
                 bounds: snapshot::WindowBounds {
@@ -161,6 +161,9 @@ async fn save_snapshot(
             });
         }
     }
+
+    snapshot::persist::write(&base, &built).map_err(|e| e.to_string())?;
+    let snap = built.snapshot;
 
     // Notify any waiting MCP caller.
     state.snapshot_store.publish(snap.clone());
@@ -362,6 +365,12 @@ fn show_picker(
         );
         let _ = win.eval(&js);
         win.show()?;
+        // macOS constrainFrameRect pushes a full-display-sized window below the
+        // menu bar on the initial show(s), before the borderless window is
+        // realized — so re-assert the frame after it is on-screen. Without this
+        // the first picker per launch lands a title-bar height too low.
+        win.set_position(tauri::PhysicalPosition::new(display.x, display.y))?;
+        win.set_size(tauri::PhysicalSize::new(display.w, display.h))?;
         let actual_pos = win
             .outer_position()
             .map_err(|e| anyhow::anyhow!("{label} outer_position: {e}"))?;
@@ -545,8 +554,15 @@ pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Resu
     if let Some(state) = app.try_state::<AppState>() {
         state.picker_state.try_enter_live().map_err(anyhow::Error::msg)?;
     }
-    overlay::show_live(app)?;
-    Ok(())
+    // Roll back to Idle if showing the overlay fails, so the state machine
+    // isn't left stuck in Live (later hotkeys would fail with "cannot enter").
+    let result = overlay::show_live(app).map_err(anyhow::Error::from);
+    if result.is_err() {
+        if let Some(state) = app.try_state::<AppState>() {
+            state.picker_state.reset_to_idle();
+        }
+    }
+    result
 }
 
 pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Result<()> {
@@ -561,14 +577,25 @@ pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Re
             *slot = None;
         }
     }
-    let frame = capture::capture_active_monitor(app)?;
-    if let Some(state) = app.try_state::<AppState>() {
-        if let Ok(mut slot) = state.latest_frame.lock() {
-            *slot = Some(frame.clone());
+    // Roll back to Idle on any failure after entering Frozen, so the app isn't
+    // stuck in Frozen with no overlay (later hotkeys would fail with "cannot
+    // enter ... from Frozen").
+    let result = (|| -> anyhow::Result<()> {
+        let frame = capture::capture_active_monitor(app)?;
+        if let Some(state) = app.try_state::<AppState>() {
+            if let Ok(mut slot) = state.latest_frame.lock() {
+                *slot = Some(frame.clone());
+            }
+        }
+        overlay::show_frozen(app, &frame)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        if let Some(state) = app.try_state::<AppState>() {
+            state.picker_state.reset_to_idle();
         }
     }
-    overlay::show_frozen(app, &frame)?;
-    Ok(())
+    result
 }
 
 #[cfg(test)]

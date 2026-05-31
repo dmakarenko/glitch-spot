@@ -48,6 +48,7 @@ pub fn filter_standard_windows(raws: &[RawWindow]) -> Vec<PickableWindow> {
             bounds: r.bounds,
             display_index: r.display_index,
             layer: r.layer,
+            visible_regions: Vec::new(),
         })
         .collect()
 }

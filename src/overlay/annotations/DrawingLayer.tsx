@@ -21,6 +21,10 @@ type Props = {
   state: AnnotationsState;
   dispatch: (action: AnnotationsAction) => void;
   clipRect?: ClipRect;
+  // In window mode the layer covers the whole overlay (so notes can render
+  // outside the window rect), so a click on the dimmed area outside clipRect
+  // must be forwarded here rather than silently swallowed.
+  onOutsideClick?: () => void;
 };
 
 const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
@@ -86,7 +90,7 @@ function ResizeHandle({
   );
 }
 
-export function DrawingLayer({ state, dispatch, clipRect }: Props) {
+export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   const [containerHeight, setContainerHeight] = useState<number>(
@@ -131,10 +135,15 @@ export function DrawingLayer({ state, dispatch, clipRect }: Props) {
       e.preventDefault();
       const { x, y } = eventCoords(e);
       const startInside = insideClip(x, y);
-      if (!startInside) return;
+      if (!startInside) {
+        // Click on the dimmed area outside the selected window: cancel or
+        // prompt to discard, mirroring the veil's intent.
+        onOutsideClick?.();
+        return;
+      }
       dispatch({ type: "BEGIN_CREATE", id: nextRectId(), x: startInside.x, y: startInside.y });
     },
-    [dispatch, eventCoords, clipRect]
+    [dispatch, eventCoords, clipRect, onOutsideClick]
   );
 
   const onMouseMove = useCallback(
@@ -151,6 +160,7 @@ export function DrawingLayer({ state, dispatch, clipRect }: Props) {
         y,
         viewportW: window.innerWidth,
         viewportH: window.innerHeight,
+        clip: clipRect,
       });
     },
     [dispatch, eventCoords, state.active, clipRect],

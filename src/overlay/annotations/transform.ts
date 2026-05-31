@@ -7,15 +7,16 @@ import type { Handle } from './types';
 export type Viewport = { w: number; h: number };
 export type Point = { x: number; y: number };
 export type RectGeom = { x: number; y: number; w: number; h: number };
+export type Bounds = { x: number; y: number; w: number; h: number };
 
 export function clampMoveDelta(
   rect: RectGeom,
   deltaX: number,
   deltaY: number,
-  viewport: Viewport,
+  bounds: Bounds,
 ): Point {
-  const x = clamp(rect.x + deltaX, 0, viewport.w - rect.w);
-  const y = clamp(rect.y + deltaY, 0, viewport.h - rect.h);
+  const x = clamp(rect.x + deltaX, bounds.x, bounds.x + bounds.w - rect.w);
+  const y = clamp(rect.y + deltaY, bounds.y, bounds.y + bounds.h - rect.h);
   return { x, y };
 }
 

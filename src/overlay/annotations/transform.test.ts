@@ -13,27 +13,27 @@ function rect(x: number, y: number, w: number, h: number) {
 
 describe('clampMoveDelta', () => {
   it('applies the full delta when the result stays inside the viewport', () => {
-    const out = clampMoveDelta({ x: 100, y: 100, w: 50, h: 50 }, 20, -30, { w: VW, h: VH });
+    const out = clampMoveDelta({ x: 100, y: 100, w: 50, h: 50 }, 20, -30, { x: 0, y: 0, w: VW, h: VH });
     expect(out).toEqual({ x: 120, y: 70 });
   });
 
   it('clamps x at 0 when the rect would cross the left edge', () => {
-    const out = clampMoveDelta({ x: 10, y: 100, w: 50, h: 50 }, -50, 0, { w: VW, h: VH });
+    const out = clampMoveDelta({ x: 10, y: 100, w: 50, h: 50 }, -50, 0, { x: 0, y: 0, w: VW, h: VH });
     expect(out).toEqual({ x: 0, y: 100 });
   });
 
   it('clamps y at 0 when the rect would cross the top edge', () => {
-    const out = clampMoveDelta({ x: 100, y: 10, w: 50, h: 50 }, 0, -50, { w: VW, h: VH });
+    const out = clampMoveDelta({ x: 100, y: 10, w: 50, h: 50 }, 0, -50, { x: 0, y: 0, w: VW, h: VH });
     expect(out).toEqual({ x: 100, y: 0 });
   });
 
   it('clamps x so the rect stays inside the right edge', () => {
-    const out = clampMoveDelta({ x: 900, y: 100, w: 200, h: 50 }, 500, 0, { w: VW, h: VH });
+    const out = clampMoveDelta({ x: 900, y: 100, w: 200, h: 50 }, 500, 0, { x: 0, y: 0, w: VW, h: VH });
     expect(out).toEqual({ x: VW - 200, y: 100 });
   });
 
   it('clamps y so the rect stays inside the bottom edge', () => {
-    const out = clampMoveDelta({ x: 100, y: 700, w: 50, h: 200 }, 0, 500, { w: VW, h: VH });
+    const out = clampMoveDelta({ x: 100, y: 700, w: 50, h: 200 }, 0, 500, { x: 0, y: 0, w: VW, h: VH });
     expect(out).toEqual({ x: 100, y: VH - 200 });
   });
 });

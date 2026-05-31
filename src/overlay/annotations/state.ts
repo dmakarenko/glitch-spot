@@ -107,12 +107,10 @@ export function reducer(
         const deltaX = action.x - pointerStart.x;
         const deltaY = action.y - pointerStart.y;
         const startRect = { ...rect, x: rectStart.x, y: rectStart.y };
-        const { x, y } = clampMoveDelta(
-          startRect,
-          deltaX,
-          deltaY,
-          { w: action.viewportW, h: action.viewportH },
-        );
+        // In window mode clamp the moved rect to the clip bounds so it can't
+        // slide outside the selected window; otherwise clamp to the viewport.
+        const bounds = action.clip ?? { x: 0, y: 0, w: action.viewportW, h: action.viewportH };
+        const { x, y } = clampMoveDelta(startRect, deltaX, deltaY, bounds);
         const rects = state.rects.map((r) => (r.id === id ? { ...r, x, y } : r));
         return { ...state, rects };
       }

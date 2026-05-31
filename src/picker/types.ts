@@ -10,6 +10,7 @@ export type PickableWindow = {
   bounds: WindowBounds;
   display_index: number;
   layer: number;
+  visible_regions: WindowBounds[];
 };
 
 export type DisplayBounds = {
