@@ -155,14 +155,6 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Prop
   const onMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!state.active) return;
-      // A seeded gesture (started from an external source, e.g. the picker click)
-      // should only continue if the mouse button is actually being held. If the
-      // user just clicked (button released before the overlay opened), cancel it
-      // so the overlay opens clean.
-      if (state.active.kind === "create" && state.active.seeded && e.buttons === 0) {
-        dispatch({ type: "END_GESTURE" });
-        return;
-      }
       let { x, y } = eventCoords(e);
       if (clipRect) {
         x = Math.max(clipRect.x, Math.min(x, clipRect.x + clipRect.w));

@@ -141,11 +141,14 @@ describe("DrawingLayer seeded create gesture", () => {
     seeded: true,
   } as Parameters<typeof reducer>[1]);
 
-  it("cancels when the first mousemove arrives with no button held", () => {
+  it("rubber-bands the rect to the cursor on mousemove, even without a button held", () => {
     const { container } = render(<Harness initialAnnotations={seededState} />);
     const surface = container.firstChild as HTMLDivElement;
-    fireEvent.mouseMove(surface, { buttons: 0 });
-    expect(surface.querySelectorAll("[data-rect-id]")).toHaveLength(0);
+    // Move cursor without button held — rect should track the cursor.
+    fireEvent.mouseMove(surface, { clientX: 200, clientY: 200, buttons: 0 });
+    const rect = surface.querySelector("[data-rect-id]") as HTMLDivElement;
+    expect(parseFloat(rect!.style.width)).toBeGreaterThan(0);
+    expect(parseFloat(rect!.style.height)).toBeGreaterThan(0);
   });
 
   it("tracks the cursor when the button is held and commits on mouseup", () => {
