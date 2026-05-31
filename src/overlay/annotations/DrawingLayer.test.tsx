@@ -4,7 +4,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { render, fireEvent, cleanup } from "@testing-library/react";
+import { render, fireEvent, cleanup, act } from "@testing-library/react";
 import { useReducer } from "react";
 import { DrawingLayer } from "./DrawingLayer";
 import { initialState, reducer } from "./state";
@@ -149,6 +149,25 @@ describe("DrawingLayer seeded create gesture", () => {
     const rect = surface.querySelector("[data-rect-id]") as HTMLDivElement;
     expect(parseFloat(rect!.style.width)).toBeGreaterThan(0);
     expect(parseFloat(rect!.style.height)).toBeGreaterThan(0);
+  });
+
+  it("commits via a native document mouseup (cross-webview drag release)", () => {
+    const { container } = render(<Harness initialAnnotations={seededState} />);
+    const surface = container.firstChild as HTMLDivElement;
+    // Grow the rect to a committable size
+    fireEvent.mouseMove(surface, { clientX: 200, clientY: 200 });
+    // Simulate the button release arriving as a native document event rather
+    // than through React's onMouseUp on the div (cross-webview scenario).
+    act(() => {
+      document.dispatchEvent(new MouseEvent("mouseup"));
+    });
+    // Rect spans 50→200 = 150px on both axes — large enough to commit
+    expect(surface.querySelectorAll("[data-rect-id]")).toHaveLength(1);
+    // And state.active is null, so a fresh normal mousedown works
+    fireEvent.mouseDown(surface, { clientX: 10, clientY: 10, button: 0 });
+    fireEvent.mouseMove(surface, { clientX: 60, clientY: 60 });
+    fireEvent.mouseUp(surface);
+    expect(surface.querySelectorAll("[data-rect-id]")).toHaveLength(2);
   });
 
   it("tracks the cursor when the button is held and commits on mouseup", () => {

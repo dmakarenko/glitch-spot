@@ -116,6 +116,17 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Prop
     return () => window.removeEventListener("resize", update);
   }, []);
 
+  // For seeded gestures (started from the picker's mousedown), the webview
+  // never received a mousedown, so React's onMouseUp on the div won't fire
+  // when the button is released. A native document listener catches the release
+  // regardless of which DOM element (or webview) originally got the mousedown.
+  useEffect(() => {
+    if (!state.active || state.active.kind !== "create" || !state.active.seeded) return;
+    const onRelease = () => dispatch({ type: "END_GESTURE" });
+    document.addEventListener("mouseup", onRelease);
+    return () => document.removeEventListener("mouseup", onRelease);
+  }, [state.active, dispatch]);
+
   // Returns the point if it is inside clipRect (or if no clipRect is set),
   // null otherwise. Used to gate BEGIN_CREATE so the user can't start a new
   // rectangle outside the selected window in window mode.
