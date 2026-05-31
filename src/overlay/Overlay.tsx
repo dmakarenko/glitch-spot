@@ -173,10 +173,22 @@ export function Overlay() {
     const { window_rect_css } = windowPayload
     return (
       <div style={{ position: 'fixed', inset: 0, background: 'transparent' }}>
-        {/* dim veil over everything (visual only; the full-screen DrawingLayer
-            above it forwards outside-clicks via onOutsideClick) */}
+        {/* dim everything except the selected window: a transparent rect at the
+            window bounds whose huge box-shadow spread dims the surrounding
+            screen. Visual only; the full-screen DrawingLayer above forwards
+            outside-clicks via onOutsideClick. */}
         <div
-          style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.40)', pointerEvents: 'none' }}
+          data-testid="window-spotlight"
+          style={{
+            position: 'absolute',
+            left: window_rect_css.x,
+            top: window_rect_css.y,
+            width: window_rect_css.w,
+            height: window_rect_css.h,
+            background: 'transparent',
+            boxShadow: '0 0 0 100vmax rgba(0,0,0,0.40)',
+            pointerEvents: 'none',
+          }}
         />
         {/* gray-white checker over the window rect */}
         <div
