@@ -362,6 +362,12 @@ fn show_picker(
         );
         let _ = win.eval(&js);
         win.show()?;
+        // macOS constrainFrameRect pushes a full-display-sized window below the
+        // menu bar on the initial show(s), before the borderless window is
+        // realized — so re-assert the frame after it is on-screen. Without this
+        // the first picker per launch lands a title-bar height too low.
+        win.set_position(tauri::PhysicalPosition::new(display.x, display.y))?;
+        win.set_size(tauri::PhysicalSize::new(display.w, display.h))?;
         let actual_pos = win
             .outer_position()
             .map_err(|e| anyhow::anyhow!("{label} outer_position: {e}"))?;
