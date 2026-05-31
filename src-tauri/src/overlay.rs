@@ -99,17 +99,13 @@ pub struct WindowModePayload {
     /// Same window rect in physical pixels; used by the backend at save time.
     pub window_rect_physical: WindowRectPhysical,
     pub display_scale_factor: f32,
-    /// Picker-click position in overlay-relative CSS px. Present when the user
-    /// held the mouse button while selecting the window (drag intent), so the
-    /// overlay can seed a create gesture at that position.
-    pub initial_click_css: Option<CssPoint>,
+    /// First annotation drawn in the picker (drag-to-draw), in overlay-relative
+    /// CSS px. When present, the overlay pre-populates it as a committed rect.
+    pub initial_rect_css: Option<CssRect>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CssRect { pub x: f32, pub y: f32, pub w: f32, pub h: f32 }
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct CssPoint { pub x: f32, pub y: f32 }
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct WindowRectPhysical { pub x: i32, pub y: i32, pub w: u32, pub h: u32 }

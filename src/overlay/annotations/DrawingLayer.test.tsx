@@ -4,7 +4,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { render, fireEvent, cleanup, act } from "@testing-library/react";
+import { render, fireEvent, cleanup } from "@testing-library/react";
 import { useReducer } from "react";
 import { DrawingLayer } from "./DrawingLayer";
 import { initialState, reducer } from "./state";
@@ -129,65 +129,3 @@ describe("DrawingLayer cursor", () => {
   });
 });
 
-describe("DrawingLayer seeded create gesture", () => {
-  // A seeded gesture starts from an external BEGIN_CREATE (e.g. the picker click)
-  // rather than from a mousedown in the layer itself. It has `seeded: true` on
-  // the active gesture and begins with a zero-size rect.
-  const seededState = reducer(initialState, {
-    type: "BEGIN_CREATE",
-    id: "r1",
-    x: 50,
-    y: 50,
-    seeded: true,
-  } as Parameters<typeof reducer>[1]);
-
-  it("rubber-bands the rect to the cursor on mousemove, even without a button held", () => {
-    const { container } = render(<Harness initialAnnotations={seededState} />);
-    const surface = container.firstChild as HTMLDivElement;
-    // Move cursor without button held — rect should track the cursor.
-    fireEvent.mouseMove(surface, { clientX: 200, clientY: 200, buttons: 0 });
-    const rect = surface.querySelector("[data-rect-id]") as HTMLDivElement;
-    expect(parseFloat(rect!.style.width)).toBeGreaterThan(0);
-    expect(parseFloat(rect!.style.height)).toBeGreaterThan(0);
-  });
-
-  it("commits via a native document mouseup (cross-webview drag release)", () => {
-    const { container } = render(<Harness initialAnnotations={seededState} />);
-    const surface = container.firstChild as HTMLDivElement;
-    // Grow the rect to a committable size
-    fireEvent.mouseMove(surface, { clientX: 200, clientY: 200 });
-    // Simulate the button release arriving as a native document event rather
-    // than through React's onMouseUp on the div (cross-webview scenario).
-    act(() => {
-      document.dispatchEvent(new MouseEvent("mouseup"));
-    });
-    // Rect spans 50→200 = 150px on both axes — large enough to commit
-    expect(surface.querySelectorAll("[data-rect-id]")).toHaveLength(1);
-    // And state.active is null, so a fresh normal mousedown works
-    fireEvent.mouseDown(surface, { clientX: 10, clientY: 10, button: 0 });
-    fireEvent.mouseMove(surface, { clientX: 60, clientY: 60 });
-    fireEvent.mouseUp(surface);
-    expect(surface.querySelectorAll("[data-rect-id]")).toHaveLength(2);
-  });
-
-  it("tracks the cursor when the button is held and commits on mouseup", () => {
-    const { container } = render(<Harness initialAnnotations={seededState} />);
-    const surface = container.firstChild as HTMLDivElement;
-    fireEvent.mouseMove(surface, { clientX: 150, clientY: 150, buttons: 1 });
-    fireEvent.mouseMove(surface, { clientX: 200, clientY: 200, buttons: 1 });
-    fireEvent.mouseUp(surface);
-    expect(surface.querySelectorAll("[data-rect-id]")).toHaveLength(1);
-  });
-
-  it("cancels the seeded gesture on mousedown and starts a fresh one at the clicked position", () => {
-    const { container } = render(<Harness initialAnnotations={seededState} />);
-    const surface = container.firstChild as HTMLDivElement;
-    fireEvent.mouseDown(surface, { clientX: 100, clientY: 100, button: 0 });
-    fireEvent.mouseMove(surface, { clientX: 200, clientY: 200 });
-    fireEvent.mouseUp(surface);
-    expect(surface.querySelectorAll("[data-rect-id]")).toHaveLength(1);
-    const rect = surface.querySelector("[data-rect-id]") as HTMLDivElement;
-    expect(parseFloat(rect.style.left)).toBe(100);
-    expect(parseFloat(rect.style.top)).toBe(100);
-  });
-});

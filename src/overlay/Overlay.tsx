@@ -3,6 +3,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { createBridge } from './bridge'
 import { DrawingLayer, nextRectId } from './annotations/DrawingLayer'
+import { MIN_RECT_DIMENSION } from './annotations/state'
 import { DiscardModal } from './annotations/DiscardModal'
 import { initialState, reducer } from './annotations/state'
 import { Toolbar } from './Toolbar'
@@ -64,12 +65,20 @@ export function Overlay() {
       dispatch({ type: "CLEAR" });
       setShowDiscardModal(false);
       setWindowPayload(newMode === 'window' && payload ? payload : null);
-      if (newMode === 'window' && payload?.initial_click_css) {
-        const { x, y } = payload.initial_click_css;
+      if (newMode === 'window' && payload?.initial_rect_css) {
+        const r = payload.initial_rect_css;
         const clip = payload.window_rect_css;
-        const cx = Math.max(clip.x, Math.min(x, clip.x + clip.w));
-        const cy = Math.max(clip.y, Math.min(y, clip.y + clip.h));
-        dispatch({ type: 'BEGIN_CREATE', id: nextRectId(), x: cx, y: cy, seeded: true });
+        // Clamp to the selected window's bounds.
+        const x = Math.max(clip.x, r.x);
+        const y = Math.max(clip.y, r.y);
+        const w = Math.min(clip.x + clip.w, r.x + r.w) - x;
+        const h = Math.min(clip.y + clip.h, r.y + r.h) - y;
+        if (w >= MIN_RECT_DIMENSION && h >= MIN_RECT_DIMENSION) {
+          const id = nextRectId();
+          dispatch({ type: 'BEGIN_CREATE', id, x, y });
+          dispatch({ type: 'POINTER_TO', x: x + w, y: y + h, viewportW: window.innerWidth, viewportH: window.innerHeight });
+          dispatch({ type: 'END_GESTURE' });
+        }
       }
     };
 

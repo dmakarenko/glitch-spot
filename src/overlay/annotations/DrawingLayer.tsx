@@ -116,17 +116,6 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Prop
     return () => window.removeEventListener("resize", update);
   }, []);
 
-  // For seeded gestures (started from the picker's mousedown), the webview
-  // never received a mousedown, so React's onMouseUp on the div won't fire
-  // when the button is released. A native document listener catches the release
-  // regardless of which DOM element (or webview) originally got the mousedown.
-  useEffect(() => {
-    if (!state.active || state.active.kind !== "create" || !state.active.seeded) return;
-    const onRelease = () => dispatch({ type: "END_GESTURE" });
-    document.addEventListener("mouseup", onRelease);
-    return () => document.removeEventListener("mouseup", onRelease);
-  }, [state.active, dispatch]);
-
   // Returns the point if it is inside clipRect (or if no clipRect is set),
   // null otherwise. Used to gate BEGIN_CREATE so the user can't start a new
   // rectangle outside the selected window in window mode.
@@ -146,11 +135,6 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Prop
       if (e.button !== 0) return;
       e.preventDefault();
       const { x, y } = eventCoords(e);
-      // If a seeded gesture is already active (started externally from the picker
-      // click), cancel it so the user's explicit click starts a clean new gesture.
-      if (state.active?.kind === "create" && state.active.seeded) {
-        dispatch({ type: "END_GESTURE" });
-      }
       const startInside = insideClip(x, y);
       if (!startInside) {
         // Click on the dimmed area outside the selected window: cancel or
@@ -160,7 +144,7 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Prop
       }
       dispatch({ type: "BEGIN_CREATE", id: nextRectId(), x: startInside.x, y: startInside.y });
     },
-    [dispatch, eventCoords, clipRect, onOutsideClick, state.active]
+    [dispatch, eventCoords, clipRect, onOutsideClick]
   );
 
   const onMouseMove = useCallback(

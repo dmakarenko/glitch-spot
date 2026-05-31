@@ -41,7 +41,6 @@ export function reducer(
         id: action.id,
         anchorX: action.x,
         anchorY: action.y,
-        seeded: action.seeded,
       };
       const history: HistoryEntry[] = [
         ...state.history,

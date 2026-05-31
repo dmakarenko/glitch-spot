@@ -13,7 +13,7 @@ export type Rect = {
 };
 
 export type ActiveGesture =
-  | { kind: 'create'; id: string; anchorX: number; anchorY: number; seeded?: boolean }
+  | { kind: 'create'; id: string; anchorX: number; anchorY: number }
   | { kind: 'move'; id: string; pointerStart: { x: number; y: number }; rectStart: { x: number; y: number } }
   | {
       kind: 'resize';
@@ -38,7 +38,7 @@ export type HistoryEntry =
   | { kind: 'resize'; id: string; previous: { x: number; y: number; w: number; h: number } };
 
 export type AnnotationsAction =
-  | { type: 'BEGIN_CREATE'; id: string; x: number; y: number; seeded?: boolean }
+  | { type: 'BEGIN_CREATE'; id: string; x: number; y: number }
   | {
       type: 'BEGIN_MOVE';
       id: string;

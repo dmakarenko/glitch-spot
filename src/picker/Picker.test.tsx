@@ -107,7 +107,7 @@ describe("<Picker/>", () => {
     expect(queryAllByTestId("picker-highlight").length).toBe(0);
   });
 
-  it("calls picker_select on mousedown with window id and click coordinates", async () => {
+  it("does not call picker_select on mousedown — waits for mouseup", async () => {
     const { getByTestId } = render(<Picker />);
     act(() => {
       (window as unknown as { __glitchSpotPickerStart: (p: PickerStartPayload) => void })
@@ -115,16 +115,47 @@ describe("<Picker/>", () => {
     });
     await Promise.resolve();
     emitHover(7);
-    fireEvent.mouseDown(getByTestId("picker-root"), { clientX: 200, clientY: 150, button: 0 });
-    // picker_origin=(0,0), picker_scale=1 → globalX=200, globalY=150
+    fireEvent.mouseDown(getByTestId("picker-root"), { clientX: 100, clientY: 100, button: 0 });
+    expect(invokeMock).not.toHaveBeenCalledWith("picker_select", expect.anything());
+  });
+
+  it("calls picker_select on mouseup with initial_rect when drag is large enough", async () => {
+    const { getByTestId } = render(<Picker />);
+    act(() => {
+      (window as unknown as { __glitchSpotPickerStart: (p: PickerStartPayload) => void })
+        .__glitchSpotPickerStart(makeSession());
+    });
+    await Promise.resolve();
+    emitHover(7);
+    const root = getByTestId("picker-root");
+    // picker_origin=(0,0), picker_scale=1 → physical px = CSS px
+    fireEvent.mouseDown(root, { clientX: 100, clientY: 100, button: 0 });
+    fireEvent.mouseMove(root, { clientX: 200, clientY: 200, buttons: 1 });
+    fireEvent.mouseUp(root);
     expect(invokeMock).toHaveBeenCalledWith("picker_select", {
       windowId: 7,
-      clickGlobalX: 200,
-      clickGlobalY: 150,
+      initialRectX: 100,
+      initialRectY: 100,
+      initialRectW: 100,
+      initialRectH: 100,
     });
   });
 
-  it("converts click position to global physical pixels using picker_origin and picker_scale", async () => {
+  it("calls picker_select on mouseup without initial_rect when drag is too small", async () => {
+    const { getByTestId } = render(<Picker />);
+    act(() => {
+      (window as unknown as { __glitchSpotPickerStart: (p: PickerStartPayload) => void })
+        .__glitchSpotPickerStart(makeSession());
+    });
+    await Promise.resolve();
+    emitHover(7);
+    const root = getByTestId("picker-root");
+    fireEvent.mouseDown(root, { clientX: 100, clientY: 100, button: 0 });
+    fireEvent.mouseUp(root); // no movement — zero-size rect
+    expect(invokeMock).toHaveBeenCalledWith("picker_select", { windowId: 7 });
+  });
+
+  it("converts initial_rect to global physical pixels using picker_origin and picker_scale", async () => {
     const scaledSession: PickerStartPayload = {
       ...makeSession(),
       picker_origin: { x: 100, y: 200 },
@@ -137,12 +168,17 @@ describe("<Picker/>", () => {
     });
     await Promise.resolve();
     emitHover(7);
-    fireEvent.mouseDown(getByTestId("picker-root"), { clientX: 50, clientY: 75, button: 0 });
-    // globalX = 100 + 50*2 = 200, globalY = 200 + 75*2 = 350
+    const root = getByTestId("picker-root");
+    fireEvent.mouseDown(root, { clientX: 50, clientY: 75, button: 0 });
+    fireEvent.mouseMove(root, { clientX: 150, clientY: 175, buttons: 1 });
+    fireEvent.mouseUp(root);
+    // rect CSS: x=50,y=75,w=100,h=100 → physical: x=100+50*2=200, y=200+75*2=350, w=100*2=200, h=100*2=200
     expect(invokeMock).toHaveBeenCalledWith("picker_select", {
       windowId: 7,
-      clickGlobalX: 200,
-      clickGlobalY: 350,
+      initialRectX: 200,
+      initialRectY: 350,
+      initialRectW: 200,
+      initialRectH: 200,
     });
   });
 
