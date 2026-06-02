@@ -41,11 +41,17 @@ This mirrors monitor freeze (`Ctrl+Opt+Cmd+H`), which already captures into
 
 ### Backend (`src-tauri/src/lib.rs`)
 
-- **`picker_select`**: after resolving the window + display, capture the isolated window
+- **`picker_select`**: **show first, then capture** (mirrors monitor freeze's
+  `show_frozen_pending` → capture). After resolving the window + display, call
+  `overlay::show_window_mode` (dim surround + transparent rect, no checker — live window shows
+  through during the brief gap), *then* capture the isolated window
   (`capture::capture_window(&app, window_id)`), store it in `state.latest_frame`, and
-  `overlay::push_frame` it to the overlay. Capture failure here aborts the pick with the
-  existing "Selected window closed — annotations discarded" notification and resets to idle —
-  this becomes the only place a "window gone" failure can occur.
+  `overlay::push_frame` it. The visible overlay does not pollute the grab because
+  `capture_window` filters with `.with_window(&window)` (single-window isolation). Capture
+  failure aborts the pick with the existing "Selected window closed — annotations discarded"
+  notification, hides the overlay, and resets to idle — this becomes the only place a "window
+  gone" failure can occur. `push_frame` necessarily runs after `show_window_mode`'s
+  `eval('window')`, so the frontend's `resetFrames()` cannot wipe the pushed frame.
 - **`save_snapshot` `"window"` branch**: drop the recapture, the `overlay::hide` + 120ms
   sleep, and the window-closed error path. Reuse `state.latest_frame` (as the `"frozen"`
   branch already does). Keep the existing crop-origin computation and `context.window`
@@ -71,9 +77,10 @@ Net: **one capture total** (at pick), down from two (pick-time display + save-ti
 
 ```
 pick window
+  → backend show_window_mode (dim + transparent rect, no checker)
   → backend capture_window (isolated, window-sized)
   → cache in state.latest_frame + push_frame to overlay
-  → frontend paints frozen image at window_rect_css, chromatic-resolve
+  → frontend resolves frozen image into the rect (chromatic shake)
   → user annotates (drawing clipped to rect)
   → save reuses state.latest_frame → crop → annotated PNG + snapshot JSON
 ```
@@ -87,15 +94,23 @@ notification now fires at **pick** time (window already gone when you click it),
 
 ## Testing (TDD)
 
-- **Rust**
-  - `picker_select` populates `state.latest_frame` with the captured window frame.
-  - `save_snapshot("window")` reuses the cached frame and does **not** recapture or sleep;
-    crop-origin + `context.window` still correct.
-  - Pick-time capture failure resets to idle and surfaces the notification path.
-- **Frontend (vitest)**
-  - Window mode renders the pushed frame image (no checker element present).
-  - `DrawingLayer` remains clipped to `window_rect_css`.
-  - Existing multi-display / region / save-JSON window-mode tests stay green.
+- **Rust (pure-function TDD).** The frame-resolution policy for window save is extracted into a
+  pure helper `resolve_window_save_frame(session, latest_frame) -> Result<(CapturedFrame,
+  (f32, f32)), String>` that owns `display_index` assignment + crop-origin computation. Tested
+  with real data (no `AppHandle` mock): reuses the cached frame; computes crop from window/
+  display bounds; errors when `latest_frame` is `None`. (`CapturedFrame` round-trips and
+  `AnnotatingSession` is already constructed in `picker_session` tests.)
+- **Frontend (vitest, static seam).** jsdom does **not** fire `img.onload` on `img.src=`
+  (verified), so the actual image-render + chromatic resolve is **smoke-verified**, not
+  unit-tested. TDD covers the statically-assertable behavior:
+  - Window mode renders a frozen-frame container at `window_rect_css` with `overflow: hidden`
+    (`data-testid="window-frozen-frame"`).
+  - The gray-white checker `<div>` is gone.
+  - The spotlight dim is preserved (existing test).
+- **Not unit-testable (smoke only):** `picker_select`'s capture+cache+push wiring (needs a
+  real screen capture / `AppHandle`); the frozen image actually rendering and the resolve
+  animation playing. Covered by the manual window-mode smoke checklist.
+- Existing Rust suite (188) + vitest suite (115) stay green.
 
 ## Out of scope
 
