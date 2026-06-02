@@ -30,24 +30,25 @@ const fillLayer = (url: string): CSSProperties => ({
   pointerEvents: 'none',
 })
 
-// Hidden SVG filters that isolate an image's red channel and its green+blue
-// (cyan) channel. Screen-blending a red-only copy over a cyan-only copy
-// reconstructs the full-colour image when aligned; offsetting them horizontally
-// is the chromatic-aberration split.
-function ChromaticFilters() {
-  return (
-    <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden>
-      <defs>
-        <filter id="glitch-red" colorInterpolationFilters="sRGB">
-          <feColorMatrix type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" />
-        </filter>
-        <filter id="glitch-cyan" colorInterpolationFilters="sRGB">
-          <feColorMatrix type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0" />
-        </filter>
-      </defs>
-    </svg>
-  )
-}
+// A single-channel copy of the screenshot, isolated by multiply-blending the
+// image against a pure red or cyan fill (R×red = red channel only, etc.).
+// Screen-blending the two copies over black reconstructs full colour when
+// aligned; offsetting them is the chromatic split. Uses background-blend-mode
+// rather than SVG filters — GPU-composited, so it rasterises immediately
+// (SVG filters on a multi-megapixel surface rasterise late and miss a short
+// animation).
+const channelLayer = (url: string, color: string): CSSProperties => ({
+  position: 'absolute',
+  inset: 0,
+  pointerEvents: 'none',
+  backgroundImage: `url(${url})`,
+  backgroundColor: color,
+  backgroundBlendMode: 'multiply',
+  backgroundSize: '100% 100%',
+  backgroundRepeat: 'no-repeat',
+  backgroundPosition: 'center',
+  mixBlendMode: 'screen',
+})
 
 // Shown over the grey veil while the screenshot is being captured: faint
 // scanlines plus an accent scan bar sweeping top-to-bottom, signalling activity
@@ -100,32 +101,48 @@ function GlitchImage({ url }: { url: string }) {
   const cyanRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    // Three rapid hard-step shifts (~70ms each), then snap into register.
-    const opts: KeyframeAnimationOptions = {
-      duration: 210,
-      easing: 'steps(1, end)',
-      fill: 'forwards',
+    // A snappy 3-shake: the channels swing right → left → right in quick
+    // alternation (~40ms per move) then settle into register.
+    const opts: KeyframeAnimationOptions = { duration: 240, easing: 'linear', fill: 'forwards' }
+    const startShake = () => {
+      redRef.current?.animate(
+        [
+          { transform: 'translate(0, 0)' },
+          { transform: 'translate(18px, -4px)' }, //  right
+          { transform: 'translate(0, 0)' },
+          { transform: 'translate(-18px, 4px)' }, //  left
+          { transform: 'translate(0, 0)' },
+          { transform: 'translate(18px, -3px)' }, //  right
+          { transform: 'translate(0, 0)' }, //         settle
+        ],
+        opts,
+      )
+      const cyan = cyanRef.current?.animate(
+        [
+          { transform: 'translate(0, 0)' },
+          { transform: 'translate(-18px, 4px)' },
+          { transform: 'translate(0, 0)' },
+          { transform: 'translate(18px, -4px)' },
+          { transform: 'translate(0, 0)' },
+          { transform: 'translate(-18px, 3px)' },
+          { transform: 'translate(0, 0)' },
+        ],
+        opts,
+      )
+      if (cyan) cyan.onfinish = () => setSettled(true)
+      else setSettled(true)
     }
-    redRef.current?.animate(
-      [
-        { transform: 'translate(11px, -2px)' },
-        { transform: 'translate(-7px, 2px)', offset: 0.34 },
-        { transform: 'translate(4px, -1px)', offset: 0.67 },
-        { transform: 'translate(0, 0)' },
-      ],
-      opts,
-    )
-    const cyan = cyanRef.current?.animate(
-      [
-        { transform: 'translate(-11px, 2px)' },
-        { transform: 'translate(7px, -2px)', offset: 0.34 },
-        { transform: 'translate(-4px, 1px)', offset: 0.67 },
-        { transform: 'translate(0, 0)' },
-      ],
-      opts,
-    )
-    if (cyan) cyan.onfinish = () => setSettled(true)
-    else setSettled(true)
+    // Wait two frames so the (filter-heavy, multi-megapixel) chroma layers have
+    // painted before the shake plays — otherwise a short animation finishes and
+    // settles before the layers are even visible.
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(startShake)
+    })
+    return () => {
+      cancelAnimationFrame(raf1)
+      cancelAnimationFrame(raf2)
+    }
   }, [])
 
   if (settled) return <div style={fillLayer(url)} />
@@ -134,8 +151,8 @@ function GlitchImage({ url }: { url: string }) {
     <>
       {/* opaque base so the screen-blended channels composite to full colour */}
       <div style={{ ...fillLayer(url), background: '#000' }} />
-      <div ref={redRef} style={{ ...fillLayer(url), filter: 'url(#glitch-red)', mixBlendMode: 'screen' }} />
-      <div ref={cyanRef} style={{ ...fillLayer(url), filter: 'url(#glitch-cyan)', mixBlendMode: 'screen' }} />
+      <div ref={redRef} style={channelLayer(url, 'rgb(255,0,0)')} />
+      <div ref={cyanRef} style={channelLayer(url, 'rgb(0,255,255)')} />
     </>
   )
 }
@@ -213,45 +230,46 @@ export function Overlay() {
 
     let unlistenFrame: (() => void) | null = null;
     let cancelled = false;
+    // One-shot guard so the mount-time getFrame() pull doesn't replay the glitch
+    // if the listener already delivered the same frame.
+    let anyFrameShown = false;
 
-    // Frames are only ever produced by the frozen path. Force frozen mode here
-    // so the backdrop renders the screenshot even if __glitchSpotPresent was
-    // not called (first show before useEffect installs it, or Electron path).
+    // Decode off-screen before swapping the visible background so the new image
+    // appears atomically. Frames only arrive on the frozen path — never override
+    // window mode.
+    const showBlob = (blobUrl: string) => {
+      if (modeRef.current === 'window') {
+        URL.revokeObjectURL(blobUrl)
+        return
+      }
+      anyFrameShown = true;
+      setMode("frozen");
+      const img = new window.Image();
+      img.onload = () => pushFrame(blobUrl);
+      img.onerror = () => URL.revokeObjectURL(blobUrl);
+      img.src = blobUrl;
+    };
+
+    // Register the frame listener FIRST, then pull the current frame. On a cold
+    // first show the capture's emit can land before the webview is listening
+    // (we now show the overlay before capturing); pulling after the listener is
+    // active recovers that frame instead of losing the first freeze.
     bridge
-      .onFrame((blobUrl) => {
-        // Don't override window mode — frames only arrive on the frozen path.
-        if (modeRef.current === 'window') {
-          URL.revokeObjectURL(blobUrl)
+      .onFrame(showBlob)
+      .then((unlisten) => {
+        if (cancelled) {
+          unlisten()
+          return undefined
+        }
+        unlistenFrame = unlisten
+        return bridge.getFrame()
+      })
+      .then((blobUrl) => {
+        if (!blobUrl || cancelled || anyFrameShown) {
+          if (blobUrl) URL.revokeObjectURL(blobUrl)
           return
         }
-        setMode("frozen");
-        // Decode off-screen before swapping the visible background so the new
-        // image appears atomically rather than after a perceptible decode delay.
-        const img = new window.Image();
-        img.onload = () => pushFrame(blobUrl);
-        img.onerror = () => URL.revokeObjectURL(blobUrl);
-        img.src = blobUrl;
-      })
-      .then((unlisten) => {
-        if (cancelled) unlisten();
-        else unlistenFrame = unlisten;
-      })
-      .catch(console.error);
-
-    bridge
-      .getFrame()
-      .then((blobUrl) => {
-        if (blobUrl) {
-          if (modeRef.current === 'window') {
-            URL.revokeObjectURL(blobUrl)
-            return
-          }
-          setMode("frozen");
-          const img = new window.Image();
-          img.onload = () => pushFrame(blobUrl);
-          img.onerror = () => URL.revokeObjectURL(blobUrl);
-          img.src = blobUrl;
-        }
+        showBlob(blobUrl)
       })
       .catch(console.error);
 
@@ -352,7 +370,6 @@ export function Overlay() {
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: base }}>
-      <ChromaticFilters />
       {mode === 'frozen' && !imageUrl && <GlitchShimmer />}
       {imageUrl && <GlitchImage key={imageUrl} url={imageUrl} />}
       <div
