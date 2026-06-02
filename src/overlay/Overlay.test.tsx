@@ -58,4 +58,22 @@ describe("<Overlay/> window mode", () => {
     // full-screen DrawingLayer underneath catching them.
     expect(spotlight.style.pointerEvents).toBe("none");
   });
+
+  it("renders a clipped frozen-frame box at the window rect and no checker", () => {
+    const { getByTestId, container } = render(<Overlay />);
+    const payload = makeWindowPayload();
+    presentWindowMode(payload);
+
+    const frame = getByTestId("window-frozen-frame");
+    const { window_rect_css } = payload;
+    expect(frame.style.left).toBe(`${window_rect_css.x}px`);
+    expect(frame.style.top).toBe(`${window_rect_css.y}px`);
+    expect(frame.style.width).toBe(`${window_rect_css.w}px`);
+    expect(frame.style.height).toBe(`${window_rect_css.h}px`);
+    // The chromatic shake translates the channel layers ~18px; the box must clip
+    // them so no edge gap shows mid-animation.
+    expect(frame.style.overflow).toBe("hidden");
+    // The gray-white checker placeholder is replaced by the frozen capture.
+    expect(container.innerHTML).not.toContain("%23999999");
+  });
 });

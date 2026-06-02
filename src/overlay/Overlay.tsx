@@ -235,15 +235,13 @@ export function Overlay() {
     let anyFrameShown = false;
 
     // Decode off-screen before swapping the visible background so the new image
-    // appears atomically. Frames only arrive on the frozen path — never override
-    // window mode.
+    // appears atomically.
     const showBlob = (blobUrl: string) => {
-      if (modeRef.current === 'window') {
-        URL.revokeObjectURL(blobUrl)
-        return
-      }
       anyFrameShown = true;
-      setMode("frozen");
+      // A pushed frame in window mode is the frozen window capture — keep mode
+      // 'window' and let it render into the window rect. Otherwise it's a monitor
+      // freeze and we switch to frozen full-screen.
+      if (modeRef.current !== 'window') setMode("frozen");
       const img = new window.Image();
       img.onload = () => pushFrame(blobUrl);
       img.onerror = () => URL.revokeObjectURL(blobUrl);
@@ -329,20 +327,24 @@ export function Overlay() {
             pointerEvents: 'none',
           }}
         />
-        {/* gray-white checker over the window rect */}
+        {/* frozen isolated capture of the selected window, presented above
+            everything. Empty until the frame arrives (live window shows through
+            the transparent rect); then the chromatic shake resolves it in.
+            overflow:hidden clips the ~18px shake to the window bounds. */}
         <div
+          data-testid="window-frozen-frame"
           style={{
             position: 'absolute',
             left: window_rect_css.x,
             top: window_rect_css.y,
             width: window_rect_css.w,
             height: window_rect_css.h,
-            backgroundImage: CHECKER_BG,
-            backgroundRepeat: 'repeat',
-            opacity: 0.12,
+            overflow: 'hidden',
             pointerEvents: 'none',
           }}
-        />
+        >
+          {imageUrl && <GlitchImage key={imageUrl} url={imageUrl} />}
+        </div>
         {/* drawing layer constrained to window rect */}
         <DrawingLayer
           state={annotations}
