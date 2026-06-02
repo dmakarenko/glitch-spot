@@ -328,9 +328,10 @@ export function Overlay() {
           }}
         />
         {/* frozen isolated capture of the selected window, presented above
-            everything. Empty until the frame arrives (live window shows through
-            the transparent rect); then the chromatic shake resolves it in.
-            overflow:hidden clips the ~18px shake to the window bounds. */}
+            everything. Mirrors the full-screen frozen render: a freeze veil +
+            scanline shimmer play while the capture is in flight, then the
+            chromatic shake resolves the screenshot in, with a faint checker
+            texture over it. overflow:hidden clips the ~18px shake to the bounds. */}
         <div
           data-testid="window-frozen-frame"
           style={{
@@ -340,10 +341,22 @@ export function Overlay() {
             width: window_rect_css.w,
             height: window_rect_css.h,
             overflow: 'hidden',
+            background: imageUrl ? undefined : 'rgba(0, 0, 0, 0.4)',
             pointerEvents: 'none',
           }}
         >
+          {!imageUrl && <GlitchShimmer />}
           {imageUrl && <GlitchImage key={imageUrl} url={imageUrl} />}
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              backgroundImage: CHECKER_BG,
+              backgroundRepeat: 'repeat',
+              opacity: 0.12,
+              pointerEvents: 'none',
+            }}
+          />
         </div>
         {/* drawing layer constrained to window rect */}
         <DrawingLayer
