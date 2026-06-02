@@ -126,27 +126,10 @@ async fn save_snapshot(
                 picker_session::RunMode::Annotating { session } => session,
                 other => return Err(format!("save_snapshot('window') while in {:?}", other)),
             };
+            let cached = state.latest_frame.lock().ok().and_then(|g| g.clone());
+            let (frame, crop) = resolve_window_save_frame(&session, cached)?;
             overlay::hide(&app).map_err(|e| e.to_string())?;
-            std::thread::sleep(std::time::Duration::from_millis(120));
-            let frame_result = capture::capture_window(&app, session.window_id);
-            let mut frame = match frame_result {
-                Ok(f) => f,
-                Err(e) => {
-                    use tauri_plugin_notification::NotificationExt;
-                    let _ = app.notification()
-                        .builder()
-                        .title("Glitch Spot")
-                        .body("Selected window closed — annotations discarded")
-                        .show();
-                    eprintln!("[glitch-spot] window capture failed: {e}");
-                    state.picker_state.reset_to_idle();
-                    return Err(format!("window capture failed: {e}"));
-                }
-            };
-            frame.display_index = session.window.display_index;
-            let crop_x = (session.window.bounds.x - session.display.x) as f32;
-            let crop_y = (session.window.bounds.y - session.display.y) as f32;
-            (frame, Some((crop_x, crop_y)))
+            (frame, Some(crop))
         }
         other => return Err(format!("unknown mode: {other}")),
     };
