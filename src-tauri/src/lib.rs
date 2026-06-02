@@ -598,7 +598,37 @@ async fn picker_select(
             display,
         })?;
 
+    // Show the overlay first (dim surround + transparent rect — the live window
+    // shows through the brief gap), then capture the isolated window so the user
+    // never sees a blank pause while the grab/encode runs. capture_window filters
+    // with .with_window(), so the visible overlay does not pollute the grab.
     overlay::show_window_mode(&app, window.display_index, &payload).map_err(|e| e.to_string())?;
+
+    let mut frame = match capture::capture_window(&app, window_id) {
+        Ok(f) => f,
+        Err(e) => {
+            use tauri_plugin_notification::NotificationExt;
+            let _ = app
+                .notification()
+                .builder()
+                .title("Glitch Spot")
+                .body("Selected window closed — annotations discarded")
+                .show();
+            eprintln!("[glitch-spot] window capture failed: {e}");
+            overlay::hide(&app).map_err(|err| err.to_string())?;
+            state.picker_state.reset_to_idle();
+            return Err(format!("window capture failed: {e}"));
+        }
+    };
+    frame.display_index = window.display_index;
+
+    // Cache for save reuse (get_latest_frame / save_snapshot read this) and push
+    // to the already-visible overlay. push_frame runs after show_window_mode's
+    // eval('window'), so the frontend resetFrames() cannot wipe the pushed frame.
+    if let Ok(mut guard) = state.latest_frame.lock() {
+        *guard = Some(frame.clone());
+    }
+    overlay::push_frame(&app, &frame).map_err(|e| e.to_string())?;
     Ok(())
 }
 
