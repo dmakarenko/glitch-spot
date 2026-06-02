@@ -128,7 +128,6 @@ async fn save_snapshot(
             };
             let cached = state.latest_frame.lock().ok().and_then(|g| g.clone());
             let (frame, crop) = resolve_window_save_frame(&session, cached)?;
-            overlay::hide(&app).map_err(|e| e.to_string())?;
             (frame, Some(crop))
         }
         other => return Err(format!("unknown mode: {other}")),
