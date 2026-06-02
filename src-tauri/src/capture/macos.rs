@@ -1,8 +1,7 @@
 // ABOUTME: macOS implementation of screen capture using ScreenCaptureKit.
 // ABOUTME: Picks the display under the cursor via Tauri's available_monitors() API.
 
-use image::codecs::png::PngEncoder;
-use image::{ImageEncoder, RgbaImage};
+use image::RgbaImage;
 use screencapturekit::screenshot_manager::{CGImageExt, SCScreenshotManager};
 use screencapturekit::shareable_content::SCShareableContent;
 use screencapturekit::stream::configuration::SCStreamConfiguration;
@@ -10,9 +9,7 @@ use screencapturekit::stream::content_filter::SCContentFilter;
 
 use super::{CaptureError, CapturedFrame};
 
-pub(super) fn capture_active_monitor(
-    app: &tauri::AppHandle,
-) -> Result<CapturedFrame, CaptureError> {
+pub(super) fn capture_active_monitor(app: &tauri::AppHandle) -> Result<CapturedFrame, CaptureError> {
     let cursor = app
         .cursor_position()
         .map_err(|e| CaptureError::Platform(format!("cursor position: {e}")))?;
@@ -64,9 +61,22 @@ pub(super) fn capture_active_monitor(
         .with_width(monitor_size.width)
         .with_height(monitor_size.height);
 
+    // Exclude our own windows (the overlay) from the grab. The frozen flow shows
+    // the grey overlay *before* capturing so the user gets instant feedback;
+    // without this exclusion that overlay would appear in the screenshot.
+    let me = std::process::id() as i32;
+    let windows = content.windows();
+    let own_windows: Vec<&_> = windows
+        .iter()
+        .filter(|w| {
+            w.owning_application()
+                .map(|a| a.process_id() == me)
+                .unwrap_or(false)
+        })
+        .collect();
     let filter = SCContentFilter::create()
         .with_display(display)
-        .with_excluding_windows(&[])
+        .with_excluding_windows(&own_windows)
         .build();
 
     let image = SCScreenshotManager::capture_image(&filter, &config)
@@ -97,21 +107,11 @@ pub(super) fn capture_active_monitor(
     let crop_h = work_size.height.min(pixel_height.saturating_sub(crop_y));
     let cropped = image::imageops::crop_imm(&img, crop_x, crop_y, crop_w, crop_h).to_image();
 
-    let mut png_bytes: Vec<u8> = Vec::new();
-    PngEncoder::new(&mut png_bytes)
-        .write_image(
-            cropped.as_raw(),
-            crop_w,
-            crop_h,
-            image::ColorType::Rgba8.into(),
-        )
-        .map_err(|e| CaptureError::Encoding(format!("png encode: {e}")))?;
-
     Ok(CapturedFrame {
         width: crop_w,
         height: crop_h,
         scale_factor,
-        png: png_bytes,
+        png: super::encode_png(&cropped)?,
         display_index,
     })
 }
@@ -182,21 +182,11 @@ pub(super) fn capture_window(
     let img = RgbaImage::from_raw(pixel_width, pixel_height, rgba)
         .ok_or_else(|| CaptureError::Encoding("rgba buffer size mismatch".into()))?;
 
-    let mut png_bytes: Vec<u8> = Vec::new();
-    PngEncoder::new(&mut png_bytes)
-        .write_image(
-            img.as_raw(),
-            pixel_width,
-            pixel_height,
-            image::ColorType::Rgba8.into(),
-        )
-        .map_err(|e| CaptureError::Encoding(format!("png encode: {e}")))?;
-
     Ok(CapturedFrame {
         width: pixel_width,
         height: pixel_height,
         scale_factor,
-        png: png_bytes,
+        png: super::encode_png(&img)?,
         display_index: 0, // set by the caller from picker_session
     })
 }

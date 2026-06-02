@@ -1,6 +1,8 @@
 // ABOUTME: Public screen-capture API for Glitch Spot. OS-agnostic surface; impls behind cfg.
 // ABOUTME: Currently macOS-only (v0.1); Windows lands in v1.
 
+use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+use image::{ImageEncoder, RgbaImage};
 use serde::{Deserialize, Serialize};
 
 #[cfg(target_os = "macos")]
@@ -26,6 +28,23 @@ pub enum CaptureError {
     Platform(String),
     #[error("encoding error: {0}")]
     Encoding(String),
+}
+
+/// Encode an RGBA image to PNG. A single fixed `Up` filter avoids the default
+/// Adaptive filter's per-row 5-filter search (~1.6s on a 23MP Retina frame)
+/// while still compressing screen content well enough to keep the IPC payload
+/// small.
+pub(crate) fn encode_png(img: &RgbaImage) -> Result<Vec<u8>, CaptureError> {
+    let mut png_bytes: Vec<u8> = Vec::new();
+    PngEncoder::new_with_quality(&mut png_bytes, CompressionType::Fast, FilterType::Up)
+        .write_image(
+            img.as_raw(),
+            img.width(),
+            img.height(),
+            image::ColorType::Rgba8.into(),
+        )
+        .map_err(|e| CaptureError::Encoding(format!("png encode: {e}")))?;
+    Ok(png_bytes)
 }
 
 #[cfg(target_os = "macos")]
@@ -66,5 +85,15 @@ mod tests {
         let json = serde_json::to_string(&frame).unwrap();
         let back: CapturedFrame = serde_json::from_str(&json).unwrap();
         assert_eq!(frame, back);
+    }
+
+    #[test]
+    fn encode_png_produces_a_decodable_png_of_the_same_dimensions() {
+        let img = RgbaImage::from_fn(640, 400, |x, y| {
+            image::Rgba([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8, 255])
+        });
+        let png = encode_png(&img).unwrap();
+        let decoded = image::load_from_memory(&png).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (640, 400));
     }
 }

@@ -654,13 +654,18 @@ pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Re
     // stuck in Frozen with no overlay (later hotkeys would fail with "cannot
     // enter ... from Frozen").
     let result = (|| -> anyhow::Result<()> {
+        // Paint the grey overlay immediately — before the (slower) capture — so
+        // pressing the shortcut feels instant. The capture excludes our own
+        // overlay window, so showing it first doesn't pollute the screenshot.
+        overlay::show_frozen_pending(app)?;
+
         let frame = capture::capture_active_monitor(app)?;
         if let Some(state) = app.try_state::<AppState>() {
             if let Ok(mut slot) = state.latest_frame.lock() {
                 *slot = Some(frame.clone());
             }
         }
-        overlay::show_frozen(app, &frame)?;
+        overlay::push_frame(app, &frame)?;
         Ok(())
     })();
     if result.is_err() {

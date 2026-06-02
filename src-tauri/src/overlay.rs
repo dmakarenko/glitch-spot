@@ -66,14 +66,26 @@ pub fn show_live(app: &tauri::AppHandle) -> Result<(), OverlayError> {
     Ok(())
 }
 
-/// Show the overlay with a frozen screenshot as backdrop.
-pub fn show_frozen(app: &tauri::AppHandle, frame: &CapturedFrame) -> Result<(), OverlayError> {
+/// Show the overlay in frozen mode with no frame yet — the grey "freeze
+/// engaged" backdrop. Shown immediately on trigger so the overlay paints before
+/// the (slower) screen capture runs; frames arrive afterwards via [`push_frame`].
+pub fn show_frozen_pending(app: &tauri::AppHandle) -> Result<(), OverlayError> {
     let window = position_over_active_monitor(app)?;
 
     let _ = window.eval("if (window.__glitchSpotPresent) window.__glitchSpotPresent('frozen');");
 
     window.show()?;
     window.set_focus()?;
+    Ok(())
+}
+
+/// Push a replacement frame to an already-visible frozen overlay. The frontend
+/// decodes off-screen and swaps atomically, so the crisp full-resolution frame
+/// supersedes the preview without a flash.
+pub fn push_frame(app: &tauri::AppHandle, frame: &CapturedFrame) -> Result<(), OverlayError> {
+    let window = app
+        .get_webview_window(OVERLAY_LABEL)
+        .ok_or(OverlayError::WindowMissing)?;
     window.emit("glitch-spot://frame", frame)?;
     Ok(())
 }
@@ -140,7 +152,7 @@ pub fn show_window_mode(
     // full physical display (top edge at the menu bar), so macOS
     // constrainFrameRect pushes it a title-bar height down on the initial show,
     // before the borderless window is realized. The work-area overlays
-    // (show_live/show_frozen) start below the menu bar and aren't constrained.
+    // (show_live/show_frozen_pending) start below the menu bar and aren't constrained.
     window.set_position(PhysicalPosition::new(pos.x, pos.y))?;
     window.set_size(PhysicalSize::new(size.width, size.height))?;
     Ok(())
