@@ -78,6 +78,22 @@ fn get_latest_frame(state: tauri::State<'_, AppState>) -> Option<capture::Captur
     state.latest_frame.lock().ok().and_then(|g| g.clone())
 }
 
+/// Resolve the frame to save for window mode. Window mode is frozen: the frame
+/// captured at pick time (cached in `latest_frame`) is what the user annotated
+/// on, so reuse it rather than recapturing — correct (no window drift) and fast.
+/// Returns the frame (with `display_index` set to the window's display) and the
+/// crop origin (window offset within its display, in physical pixels).
+fn resolve_window_save_frame(
+    session: &picker_session::AnnotatingSession,
+    latest_frame: Option<capture::CapturedFrame>,
+) -> Result<(capture::CapturedFrame, (f32, f32)), String> {
+    let mut frame = latest_frame.ok_or_else(|| "no cached frame for window mode".to_string())?;
+    frame.display_index = session.window.display_index;
+    let crop_x = (session.window.bounds.x - session.display.x) as f32;
+    let crop_y = (session.window.bounds.y - session.display.y) as f32;
+    Ok((frame, (crop_x, crop_y)))
+}
+
 #[tauri::command]
 async fn save_snapshot(
     app: tauri::AppHandle,
@@ -736,6 +752,52 @@ pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Re
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+    use crate::window_picker::{DisplayBounds, PickableWindow, WindowBounds};
+
+    fn annotating_session() -> picker_session::AnnotatingSession {
+        picker_session::AnnotatingSession {
+            window_id: 7,
+            window: PickableWindow {
+                window_id: 7,
+                app_name: "Safari".into(),
+                title: "Reader".into(),
+                bounds: WindowBounds { x: 240, y: 160, w: 800, h: 600 },
+                display_index: 1,
+                layer: 0,
+                visible_regions: vec![],
+            },
+            display: DisplayBounds {
+                display_index: 1, x: 200, y: 100, w: 2560, h: 1414, scale_factor: 2.0,
+            },
+        }
+    }
+
+    fn sample_frame() -> capture::CapturedFrame {
+        capture::CapturedFrame {
+            width: 800, height: 600, scale_factor: 2.0, png: vec![1, 2, 3], display_index: 0,
+        }
+    }
+
+    #[test]
+    fn window_save_reuses_cached_frame_and_computes_crop() {
+        let session = annotating_session();
+        let cached = sample_frame();
+        let (frame, crop) =
+            resolve_window_save_frame(&session, Some(cached.clone())).unwrap();
+        // Same pixels — no recapture.
+        assert_eq!(frame.png, cached.png);
+        // display_index tracks the window's display.
+        assert_eq!(frame.display_index, 1);
+        // Crop origin is the window's offset within its display, in physical px.
+        assert_eq!(crop, (40.0, 60.0));
+    }
+
+    #[test]
+    fn window_save_errors_when_no_cached_frame() {
+        let session = annotating_session();
+        let err = resolve_window_save_frame(&session, None).unwrap_err();
+        assert!(err.contains("no cached frame"), "got: {err}");
+    }
 
     #[test]
     fn app_state_latest_snapshot_at_starts_none() {
