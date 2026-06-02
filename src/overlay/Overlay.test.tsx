@@ -3,10 +3,21 @@
 
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { describe, expect, it, vi, afterEach, beforeAll } from "vitest";
 import { render, act, cleanup } from "@testing-library/react";
 import { Overlay } from "./Overlay";
 import type { WindowModePayload } from "../picker/types";
+
+beforeAll(() => {
+  // jsdom does not implement the Web Animations API. The frozen-frame shimmer
+  // (GlitchShimmer) and chromatic resolve (GlitchImage) call Element.animate on
+  // mount; stub it so the components render without throwing. The animation
+  // itself is verified by the manual smoke test, not here.
+  if (!Element.prototype.animate) {
+    Element.prototype.animate = () =>
+      ({ cancel() {}, finish() {}, onfinish: null }) as unknown as Animation;
+  }
+});
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: () => Promise.resolve(null),
@@ -57,5 +68,27 @@ describe("<Overlay/> window mode", () => {
     // Must not capture clicks — outside-click-to-cancel relies on the
     // full-screen DrawingLayer underneath catching them.
     expect(spotlight.style.pointerEvents).toBe("none");
+  });
+
+  it("renders a clipped frozen-frame box mirroring the full-screen frozen render", () => {
+    const { getByTestId, container } = render(<Overlay />);
+    const payload = makeWindowPayload();
+    presentWindowMode(payload);
+
+    const frame = getByTestId("window-frozen-frame");
+    const { window_rect_css } = payload;
+    expect(frame.style.left).toBe(`${window_rect_css.x}px`);
+    expect(frame.style.top).toBe(`${window_rect_css.y}px`);
+    expect(frame.style.width).toBe(`${window_rect_css.w}px`);
+    expect(frame.style.height).toBe(`${window_rect_css.h}px`);
+    // The chromatic shake translates the channel layers ~18px; the box must clip
+    // them so no edge gap shows mid-animation.
+    expect(frame.style.overflow).toBe("hidden");
+    // Before the frame arrives, the scanline shimmer plays (the cathode-tube
+    // stripe), matching the full-screen frozen render.
+    expect(container.innerHTML).toContain("repeating-linear-gradient");
+    // A faint gray-white checker texture overlays the frozen capture, also
+    // mirroring the full-screen frozen render.
+    expect(container.innerHTML).toContain("%23999999");
   });
 });

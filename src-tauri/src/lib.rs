@@ -79,6 +79,22 @@ fn get_latest_frame(state: tauri::State<'_, AppState>) -> Option<capture::Captur
     state.latest_frame.lock().ok().and_then(|g| g.clone())
 }
 
+/// Resolve the frame to save for window mode. Window mode is frozen: the frame
+/// captured at pick time (cached in `latest_frame`) is what the user annotated
+/// on, so reuse it rather than recapturing — correct (no window drift) and fast.
+/// Returns the frame (with `display_index` set to the window's display) and the
+/// crop origin (window offset within its display, in physical pixels).
+fn resolve_window_save_frame(
+    session: &picker_session::AnnotatingSession,
+    latest_frame: Option<capture::CapturedFrame>,
+) -> Result<(capture::CapturedFrame, (f32, f32)), String> {
+    let mut frame = latest_frame.ok_or_else(|| "no cached frame for window mode".to_string())?;
+    frame.display_index = session.window.display_index;
+    let crop_x = (session.window.bounds.x - session.display.x) as f32;
+    let crop_y = (session.window.bounds.y - session.display.y) as f32;
+    Ok((frame, (crop_x, crop_y)))
+}
+
 #[tauri::command]
 async fn save_snapshot(
     app: tauri::AppHandle,
@@ -111,27 +127,9 @@ async fn save_snapshot(
                 picker_session::RunMode::Annotating { session } => session,
                 other => return Err(format!("save_snapshot('window') while in {:?}", other)),
             };
-            overlay::hide(&app).map_err(|e| e.to_string())?;
-            std::thread::sleep(std::time::Duration::from_millis(120));
-            let frame_result = capture::capture_window(&app, session.window_id);
-            let mut frame = match frame_result {
-                Ok(f) => f,
-                Err(e) => {
-                    use tauri_plugin_notification::NotificationExt;
-                    let _ = app.notification()
-                        .builder()
-                        .title("Glitch Spot")
-                        .body("Selected window closed — annotations discarded")
-                        .show();
-                    eprintln!("[glitch-spot] window capture failed: {e}");
-                    state.picker_state.reset_to_idle();
-                    return Err(format!("window capture failed: {e}"));
-                }
-            };
-            frame.display_index = session.window.display_index;
-            let crop_x = (session.window.bounds.x - session.display.x) as f32;
-            let crop_y = (session.window.bounds.y - session.display.y) as f32;
-            (frame, Some((crop_x, crop_y)))
+            let cached = state.latest_frame.lock().ok().and_then(|g| g.clone());
+            let (frame, crop) = resolve_window_save_frame(&session, cached)?;
+            (frame, Some(crop))
         }
         other => return Err(format!("unknown mode: {other}")),
     };
@@ -599,7 +597,37 @@ async fn picker_select(
             display,
         })?;
 
+    // Show the overlay first (dim surround + transparent rect — the live window
+    // shows through the brief gap), then capture the isolated window so the user
+    // never sees a blank pause while the grab/encode runs. capture_window filters
+    // with .with_window(), so the visible overlay does not pollute the grab.
     overlay::show_window_mode(&app, window.display_index, &payload).map_err(|e| e.to_string())?;
+
+    let mut frame = match capture::capture_window(&app, window_id) {
+        Ok(f) => f,
+        Err(e) => {
+            use tauri_plugin_notification::NotificationExt;
+            let _ = app
+                .notification()
+                .builder()
+                .title("Glitch Spot")
+                .body("Selected window closed — annotations discarded")
+                .show();
+            eprintln!("[glitch-spot] window capture failed: {e}");
+            overlay::hide(&app).map_err(|err| err.to_string())?;
+            state.picker_state.reset_to_idle();
+            return Err(format!("window capture failed: {e}"));
+        }
+    };
+    frame.display_index = window.display_index;
+
+    // Cache for save reuse (get_latest_frame / save_snapshot read this) and push
+    // to the already-visible overlay. push_frame runs after show_window_mode's
+    // eval('window'), so the frontend resetFrames() cannot wipe the pushed frame.
+    if let Ok(mut guard) = state.latest_frame.lock() {
+        *guard = Some(frame.clone());
+    }
+    overlay::push_frame(&app, &frame).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -707,6 +735,52 @@ pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Re
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+    use crate::window_picker::{DisplayBounds, PickableWindow, WindowBounds};
+
+    fn annotating_session() -> picker_session::AnnotatingSession {
+        picker_session::AnnotatingSession {
+            window_id: 7,
+            window: PickableWindow {
+                window_id: 7,
+                app_name: "Safari".into(),
+                title: "Reader".into(),
+                bounds: WindowBounds { x: 240, y: 160, w: 800, h: 600 },
+                display_index: 1,
+                layer: 0,
+                visible_regions: vec![],
+            },
+            display: DisplayBounds {
+                display_index: 1, x: 200, y: 100, w: 2560, h: 1414, scale_factor: 2.0,
+            },
+        }
+    }
+
+    fn sample_frame() -> capture::CapturedFrame {
+        capture::CapturedFrame {
+            width: 800, height: 600, scale_factor: 2.0, png: vec![1, 2, 3], display_index: 0,
+        }
+    }
+
+    #[test]
+    fn window_save_reuses_cached_frame_and_computes_crop() {
+        let session = annotating_session();
+        let cached = sample_frame();
+        let (frame, crop) =
+            resolve_window_save_frame(&session, Some(cached.clone())).unwrap();
+        // Same pixels — no recapture.
+        assert_eq!(frame.png, cached.png);
+        // display_index tracks the window's display.
+        assert_eq!(frame.display_index, 1);
+        // Crop origin is the window's offset within its display, in physical px.
+        assert_eq!(crop, (40.0, 60.0));
+    }
+
+    #[test]
+    fn window_save_errors_when_no_cached_frame() {
+        let session = annotating_session();
+        let err = resolve_window_save_frame(&session, None).unwrap_err();
+        assert!(err.contains("no cached frame"), "got: {err}");
+    }
 
     #[test]
     fn app_state_latest_snapshot_at_starts_none() {
