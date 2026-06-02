@@ -1,7 +1,7 @@
 // ABOUTME: Menu bar tray icon setup and dynamic menu builder for Glitch Spot.
 // ABOUTME: Rebuilds the menu on every tray click to reflect current snapshot age and autostart state.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use tauri::{
     menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -381,7 +381,8 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .enabled(false)
         .build(app)?;
 
-    let build_built_at = MenuItemBuilder::new(format!("built at: {}", env!("BUILT_AT")))
+    let started_at = state.started_at.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S %Z");
+    let build_built_at = MenuItemBuilder::new(format!("started: {started_at}"))
         .id("build_built_at")
         .enabled(false)
         .build(app)?;

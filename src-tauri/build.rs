@@ -44,23 +44,11 @@ fn main() {
     println!("cargo:rustc-env=GIT_BRANCH={branch}");
     println!("cargo:rustc-env=GIT_SHA={sha}");
 
-    // System `date` honours the developer's TZ + locale, which is what we want
-    // in the debug menu row — no extra crate, no UTC translation in the head.
-    let built_at = Command::new("date")
-        .args(["+%Y-%m-%d %H:%M:%S %Z"])
-        .output()
-        .ok()
-        .and_then(|o| if o.status.success() { Some(o.stdout) } else { None })
-        .and_then(|b| String::from_utf8(b).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-    println!("cargo:rustc-env=BUILT_AT={built_at}");
-
-    // No `rerun-if-changed` lines on purpose: we want BUILT_AT (and the git
-    // values) to refresh on *every* rebuild, including pure src-edit cycles
-    // that don't touch git. With no explicit triggers, cargo falls back to
-    // scanning the package source tree — which already changes whenever a
-    // rebuild is meaningful, so build.rs reruns exactly when we want it to.
+    // No `rerun-if-changed` lines on purpose: we want the git values to
+    // refresh on *every* rebuild, including pure src-edit cycles that don't
+    // touch git. With no explicit triggers, cargo falls back to scanning the
+    // package source tree — which already changes whenever a rebuild is
+    // meaningful, so build.rs reruns exactly when we want it to.
 
     tauri_build::build()
 }
