@@ -100,17 +100,13 @@ pub fn enumerate(
                 .map(|a| a.bundle_identifier())
                 .filter(|s| !s.is_empty());
 
-            // Find the display this window primarily lives on by checking its
-            // logical-point origin against each SCDisplay's logical frame.
-            let display_index = display_logical_frames
-                .iter()
-                .position(|(lx, ly, lw, lh)| {
-                    frame.origin.x >= *lx
-                        && frame.origin.x < lx + lw
-                        && frame.origin.y >= *ly
-                        && frame.origin.y < ly + lh
-                })
-                .unwrap_or(0);
+            // Find the display this window primarily lives on by largest
+            // intersection area — matching macOS NSWindow.screen convention.
+            let display_index = primary_display_index(
+                frame.origin.x, frame.origin.y,
+                frame.size.width, frame.size.height,
+                &display_logical_frames,
+            );
 
             let display = displays.get(display_index)?;
             let (lx, ly, _, _) = display_logical_frames
@@ -159,6 +155,67 @@ pub fn enumerate(
     Ok((filtered, displays))
 }
 
-// The macOS enumerator has no unit-testable surface beyond what's already
-// covered by window_picker::filter and window_picker::coords. End-to-end
-// verification is the manual smoke checklist (Task 25).
+/// Returns the index of the display the window primarily lives on, measured by
+/// the largest intersection area. Falls back to `0` for off-screen windows.
+fn primary_display_index(
+    win_x: f64, win_y: f64, win_w: f64, win_h: f64,
+    display_frames: &[(f64, f64, f64, f64)],
+) -> usize {
+    display_frames
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (lx, ly, lw, lh))| {
+            let ix = win_x.max(*lx);
+            let iy = win_y.max(*ly);
+            let iw = (win_x + win_w).min(lx + lw) - ix;
+            let ih = (win_y + win_h).min(ly + lh) - iy;
+            if iw > 0.0 && ih > 0.0 { Some((i, iw * ih)) } else { None }
+        })
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, _)| i)
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type Frame = (f64, f64, f64, f64);
+
+    #[test]
+    fn window_mostly_on_right_display_picks_right() {
+        // Two side-by-side 2560×1414 displays.
+        let displays: Vec<Frame> = vec![
+            (0.0, 0.0, 2560.0, 1414.0),
+            (2560.0, 0.0, 2560.0, 1414.0),
+        ];
+        // Origin on left (x=2400), but 960×600 window → 160px on left, 800px on right.
+        assert_eq!(primary_display_index(2400.0, 200.0, 960.0, 600.0, &displays), 1);
+    }
+
+    #[test]
+    fn window_fully_on_left_display_picks_left() {
+        let displays: Vec<Frame> = vec![
+            (0.0, 0.0, 2560.0, 1414.0),
+            (2560.0, 0.0, 2560.0, 1414.0),
+        ];
+        assert_eq!(primary_display_index(100.0, 100.0, 800.0, 600.0, &displays), 0);
+    }
+
+    #[test]
+    fn off_screen_window_falls_back_to_zero() {
+        let displays: Vec<Frame> = vec![(0.0, 0.0, 2560.0, 1414.0)];
+        assert_eq!(primary_display_index(-200.0, -200.0, 100.0, 100.0, &displays), 0);
+    }
+
+    #[test]
+    fn window_with_origin_on_minor_side_picks_major_side() {
+        // Window origin on left display but 90% on right.
+        let displays: Vec<Frame> = vec![
+            (0.0, 0.0, 1920.0, 1080.0),
+            (1920.0, 0.0, 1920.0, 1080.0),
+        ];
+        // Origin at x=1870 → 50px on left, 750px on right.
+        assert_eq!(primary_display_index(1870.0, 100.0, 800.0, 600.0, &displays), 1);
+    }
+}
