@@ -1,6 +1,7 @@
 // ABOUTME: Overlay window component. Supports live (transparent), frozen (screenshot backdrop), and window modes.
 // ABOUTME: Uses the OverlayBridge abstraction to work under both Tauri and Electron.
 import { useEffect, useReducer, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { createBridge } from './bridge'
 import { DrawingLayer, nextRectId } from './annotations/DrawingLayer'
 import { MIN_RECT_DIMENSION } from './annotations/state'
@@ -22,15 +23,149 @@ const CHECKER_BG =
 
 const bridge = createBridge()
 
+const fillLayer = (url: string): CSSProperties => ({
+  position: 'absolute',
+  inset: 0,
+  background: `center / 100% 100% no-repeat url(${url})`,
+  pointerEvents: 'none',
+})
+
+// A single-channel copy of the screenshot, isolated by multiply-blending the
+// image against a pure red or cyan fill (R×red = red channel only, etc.).
+// Screen-blending the two copies over black reconstructs full colour when
+// aligned; offsetting them is the chromatic split. Uses background-blend-mode
+// rather than SVG filters — GPU-composited, so it rasterises immediately
+// (SVG filters on a multi-megapixel surface rasterise late and miss a short
+// animation).
+const channelLayer = (url: string, color: string): CSSProperties => ({
+  position: 'absolute',
+  inset: 0,
+  pointerEvents: 'none',
+  backgroundImage: `url(${url})`,
+  backgroundColor: color,
+  backgroundBlendMode: 'multiply',
+  backgroundSize: '100% 100%',
+  backgroundRepeat: 'no-repeat',
+  backgroundPosition: 'center',
+  mixBlendMode: 'screen',
+})
+
+// Shown over the grey veil while the screenshot is being captured: faint
+// scanlines plus an accent scan bar sweeping top-to-bottom, signalling activity
+// for however long the capture takes.
+function GlitchShimmer() {
+  const barRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const anim = barRef.current?.animate(
+      [
+        { transform: 'translateY(-120%)' },
+        { transform: 'translateY(820%)' },
+      ],
+      { duration: 1100, iterations: Infinity, easing: 'ease-in-out' },
+    )
+    return () => anim?.cancel()
+  }, [])
+  return (
+    <>
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          pointerEvents: 'none',
+          background:
+            'repeating-linear-gradient(0deg, rgba(255,255,255,0.05) 0 1px, transparent 1px 3px)',
+        }}
+      />
+      <div
+        ref={barRef}
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          height: '12%',
+          pointerEvents: 'none',
+          background: 'linear-gradient(180deg, transparent, rgba(238,102,51,0.20), transparent)',
+        }}
+      />
+    </>
+  )
+}
+
+// The captured screenshot, resolved with a chromatic glitch: the red and cyan
+// channels do three rapid hard-step shifts then snap into register. The two
+// channel copies screen-blend over black to reconstruct full colour once
+// aligned. Settles to a single clean layer so no filter/blend cost lingers.
+function GlitchImage({ url }: { url: string }) {
+  const [settled, setSettled] = useState(false)
+  const redRef = useRef<HTMLDivElement>(null)
+  const cyanRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    // A snappy 3-shake: the channels swing right → left → right in quick
+    // alternation (~40ms per move) then settle into register.
+    const opts: KeyframeAnimationOptions = { duration: 240, easing: 'linear', fill: 'forwards' }
+    const startShake = () => {
+      redRef.current?.animate(
+        [
+          { transform: 'translate(0, 0)' },
+          { transform: 'translate(18px, -4px)' }, //  right
+          { transform: 'translate(0, 0)' },
+          { transform: 'translate(-18px, 4px)' }, //  left
+          { transform: 'translate(0, 0)' },
+          { transform: 'translate(18px, -3px)' }, //  right
+          { transform: 'translate(0, 0)' }, //         settle
+        ],
+        opts,
+      )
+      const cyan = cyanRef.current?.animate(
+        [
+          { transform: 'translate(0, 0)' },
+          { transform: 'translate(-18px, 4px)' },
+          { transform: 'translate(0, 0)' },
+          { transform: 'translate(18px, -4px)' },
+          { transform: 'translate(0, 0)' },
+          { transform: 'translate(-18px, 3px)' },
+          { transform: 'translate(0, 0)' },
+        ],
+        opts,
+      )
+      if (cyan) cyan.onfinish = () => setSettled(true)
+      else setSettled(true)
+    }
+    // Wait two frames so the (filter-heavy, multi-megapixel) chroma layers have
+    // painted before the shake plays — otherwise a short animation finishes and
+    // settles before the layers are even visible.
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(startShake)
+    })
+    return () => {
+      cancelAnimationFrame(raf1)
+      cancelAnimationFrame(raf2)
+    }
+  }, [])
+
+  if (settled) return <div style={fillLayer(url)} />
+
+  return (
+    <>
+      {/* opaque base so the screen-blended channels composite to full colour */}
+      <div style={{ ...fillLayer(url), background: '#000' }} />
+      <div ref={redRef} style={channelLayer(url, 'rgb(255,0,0)')} />
+      <div ref={cyanRef} style={channelLayer(url, 'rgb(0,255,255)')} />
+    </>
+  )
+}
+
 export function Overlay() {
   const [mode, setMode] = useState<Mode>('live')
   const modeRef = useRef<Mode>('live')
   useEffect(() => { modeRef.current = mode }, [mode])
   const [windowPayload, setWindowPayload] = useState<WindowModePayload | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const imageUrlRef = useRef<string | null>(null)
   const [annotations, dispatch] = useReducer(reducer, initialState)
   const [showDiscardModal, setShowDiscardModal] = useState(false)
-  const currentUrlRef = useRef<string | null>(null)
 
   const handleSave = async () => {
     const payload: AnnotationPayload[] = annotations.rects.map((r) => ({
@@ -51,6 +186,19 @@ export function Overlay() {
   }
 
   useEffect(() => {
+    // Clear the screenshot back to the bare veil (e.g. on a new present).
+    const resetFrames = () => {
+      if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
+      imageUrlRef.current = null;
+      setImageUrl(null);
+    };
+    // Show a freshly-decoded frame; it resolves via the chromatic glitch-settle.
+    const pushFrame = (url: string) => {
+      if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
+      imageUrlRef.current = url;
+      setImageUrl(url);
+    };
+
     // The Rust side calls __glitchSpotPresent via WebviewWindow::eval before
     // showing the window so the mode/state is reset synchronously before first
     // paint. In the Electron path this is not called — the bridge handles reset.
@@ -58,9 +206,7 @@ export function Overlay() {
       newMode,
       payload,
     ) => {
-      if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);
-      currentUrlRef.current = null;
-      setImageUrl(null);
+      resetFrames();
       setMode(newMode);
       dispatch({ type: "CLEAR" });
       setShowDiscardModal(false);
@@ -84,60 +230,53 @@ export function Overlay() {
 
     let unlistenFrame: (() => void) | null = null;
     let cancelled = false;
+    // One-shot guard so the mount-time getFrame() pull doesn't replay the glitch
+    // if the listener already delivered the same frame.
+    let anyFrameShown = false;
 
-    // Frames are only ever produced by the frozen path. Force frozen mode here
-    // so the backdrop renders the screenshot even if __glitchSpotPresent was
-    // not called (first show before useEffect installs it, or Electron path).
+    // Decode off-screen before swapping the visible background so the new image
+    // appears atomically. Frames only arrive on the frozen path — never override
+    // window mode.
+    const showBlob = (blobUrl: string) => {
+      if (modeRef.current === 'window') {
+        URL.revokeObjectURL(blobUrl)
+        return
+      }
+      anyFrameShown = true;
+      setMode("frozen");
+      const img = new window.Image();
+      img.onload = () => pushFrame(blobUrl);
+      img.onerror = () => URL.revokeObjectURL(blobUrl);
+      img.src = blobUrl;
+    };
+
+    // Register the frame listener FIRST, then pull the current frame. On a cold
+    // first show the capture's emit can land before the webview is listening
+    // (we now show the overlay before capturing); pulling after the listener is
+    // active recovers that frame instead of losing the first freeze.
     bridge
-      .onFrame((blobUrl) => {
-        // Don't override window mode — frames only arrive on the frozen path.
-        if (modeRef.current === 'window') {
-          URL.revokeObjectURL(blobUrl)
+      .onFrame(showBlob)
+      .then((unlisten) => {
+        if (cancelled) {
+          unlisten()
+          return undefined
+        }
+        unlistenFrame = unlisten
+        return bridge.getFrame()
+      })
+      .then((blobUrl) => {
+        if (!blobUrl || cancelled || anyFrameShown) {
+          if (blobUrl) URL.revokeObjectURL(blobUrl)
           return
         }
-        setMode("frozen");
-        // Decode off-screen before swapping the visible background so the new
-        // image appears atomically rather than after a perceptible decode delay.
-        const img = new window.Image();
-        img.onload = () => {
-          if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);
-          currentUrlRef.current = blobUrl;
-          setImageUrl(blobUrl);
-        };
-        img.onerror = () => URL.revokeObjectURL(blobUrl);
-        img.src = blobUrl;
-      })
-      .then((unlisten) => {
-        if (cancelled) unlisten();
-        else unlistenFrame = unlisten;
-      })
-      .catch(console.error);
-
-    bridge
-      .getFrame()
-      .then((blobUrl) => {
-        if (blobUrl) {
-          if (modeRef.current === 'window') {
-            URL.revokeObjectURL(blobUrl)
-            return
-          }
-          setMode("frozen");
-          const img = new window.Image();
-          img.onload = () => {
-            if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);
-            currentUrlRef.current = blobUrl;
-            setImageUrl(blobUrl);
-          };
-          img.onerror = () => URL.revokeObjectURL(blobUrl);
-          img.src = blobUrl;
-        }
+        showBlob(blobUrl)
       })
       .catch(console.error);
 
     return () => {
       cancelled = true;
       unlistenFrame?.();
-      if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);
+      resetFrames();
       delete (window as unknown as { __glitchSpotPresent?: (mode: Mode, payload?: WindowModePayload) => void })
         .__glitchSpotPresent;
     };
@@ -236,11 +375,15 @@ export function Overlay() {
     )
   }
 
-  const backdrop =
-    mode === 'frozen' && imageUrl ? `center / 100% 100% no-repeat url(${imageUrl})` : 'transparent'
+  // In frozen mode the overlay paints before the screenshot is ready: the base
+  // is a dim "freeze engaged" veil shown immediately, a scanline shimmer plays
+  // while capturing, then the screenshot resolves with a chromatic glitch.
+  const base = mode === 'frozen' ? 'rgba(0, 0, 0, 0.4)' : 'transparent'
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: backdrop }}>
+    <div style={{ position: 'fixed', inset: 0, background: base }}>
+      {mode === 'frozen' && !imageUrl && <GlitchShimmer />}
+      {imageUrl && <GlitchImage key={imageUrl} url={imageUrl} />}
       <div
         style={{
           position: 'absolute',

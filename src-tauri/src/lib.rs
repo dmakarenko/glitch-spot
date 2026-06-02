@@ -15,7 +15,7 @@ pub mod share;
 pub use capture::CapturedFrame;
 
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::{Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -40,6 +40,11 @@ pub struct AppState {
     /// own the configured port.
     pub mcp_bound: Arc<AtomicBool>,
     pub picker_state: Arc<picker_session::PickerStateHolder>,
+    /// Bumped whenever an overlay session starts or is dismissed. A frozen
+    /// capture records the value at trigger time and only publishes its frame if
+    /// it's still current — so a capture left in flight by a cancel (Escape) or a
+    /// superseding session can't replace a newer overlay with a stale screenshot.
+    pub freeze_generation: Arc<AtomicU64>,
 }
 
 #[tauri::command]
@@ -63,6 +68,8 @@ async fn open_overlay_frozen(app: tauri::AppHandle) -> Result<(), String> {
 async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     state.picker_state.reset_to_idle();
+    // Invalidate any frozen capture still in flight so its late frame is dropped.
+    state.freeze_generation.fetch_add(1, Ordering::SeqCst);
     overlay::hide(&app).map_err(|e| e.to_string())
 }
 
@@ -642,6 +649,12 @@ pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Re
     if let Some(state) = app.try_state::<AppState>() {
         state.picker_state.try_enter_frozen().map_err(anyhow::Error::msg)?;
     }
+    // Tag this frozen session. A cancel (hide_overlay) or a superseding session
+    // bumps the generation; a capture that finishes afterwards is dropped rather
+    // than overwriting a newer overlay with its now-stale screenshot.
+    let my_gen = app
+        .try_state::<AppState>()
+        .map(|s| s.freeze_generation.fetch_add(1, Ordering::SeqCst) + 1);
     // Clear any stale frame BEFORE capturing the new one. Without this, a fast
     // hotkey press right after switching monitors would let the overlay's
     // mount-time pull return the *previous* monitor's screenshot for a moment.
@@ -650,23 +663,41 @@ pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Re
             *slot = None;
         }
     }
-    // Roll back to Idle on any failure after entering Frozen, so the app isn't
-    // stuck in Frozen with no overlay (later hotkeys would fail with "cannot
-    // enter ... from Frozen").
+    // Roll back to Idle and hide the overlay on any failure: because we show the
+    // overlay before capturing, a capture/encode error would otherwise leave the
+    // grey overlay stuck on screen.
     let result = (|| -> anyhow::Result<()> {
+        // Paint the grey overlay immediately — before the (slower) capture — so
+        // pressing the shortcut feels instant. The capture excludes our own
+        // overlay window, so showing it first doesn't pollute the screenshot.
+        overlay::show_frozen_pending(app)?;
+
         let frame = capture::capture_active_monitor(app)?;
+
+        // Drop the frame if this session was canceled or superseded while the
+        // capture was running.
+        let still_current = app
+            .try_state::<AppState>()
+            .zip(my_gen)
+            .map(|(s, g)| s.freeze_generation.load(Ordering::SeqCst) == g)
+            .unwrap_or(true);
+        if !still_current {
+            return Ok(());
+        }
+
         if let Some(state) = app.try_state::<AppState>() {
             if let Ok(mut slot) = state.latest_frame.lock() {
                 *slot = Some(frame.clone());
             }
         }
-        overlay::show_frozen(app, &frame)?;
+        overlay::push_frame(app, &frame)?;
         Ok(())
     })();
     if result.is_err() {
         if let Some(state) = app.try_state::<AppState>() {
             state.picker_state.reset_to_idle();
         }
+        let _ = overlay::hide(app);
     }
     result
 }
@@ -690,6 +721,7 @@ mod tests {
             config_dir: temp.path().to_path_buf(),
             mcp_bound: Arc::new(AtomicBool::new(false)),
             picker_state: Arc::new(picker_session::PickerStateHolder::new()),
+            freeze_generation: Arc::new(AtomicU64::new(0)),
         };
         assert!(state.latest_snapshot_at.lock().unwrap().is_none());
     }
@@ -761,6 +793,7 @@ pub fn run() {
             config_dir: config_dir.clone(),
             mcp_bound: mcp_bound.clone(),
             picker_state: Arc::new(picker_session::PickerStateHolder::new()),
+            freeze_generation: Arc::new(AtomicU64::new(0)),
         })
         .setup(|app| {
             #[cfg(target_os = "macos")]
