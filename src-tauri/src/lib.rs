@@ -31,6 +31,7 @@ pub struct AppState {
     pub latest_frame: Mutex<Option<capture::CapturedFrame>>,
     pub snapshot_store: Arc<mcp::store::SnapshotStore>,
     pub latest_snapshot_at: Mutex<Option<chrono::DateTime<chrono::Utc>>>,
+    pub started_at: chrono::DateTime<chrono::Utc>,
     pub tunnel: Arc<share::tunnel::TunnelManager>,
     pub settings: Arc<settings::Settings>,
     pub config_dir: std::path::PathBuf,
@@ -788,6 +789,7 @@ mod tests {
             latest_frame: Mutex::new(None),
             snapshot_store: Arc::new(mcp::store::SnapshotStore::new()),
             latest_snapshot_at: Mutex::new(None),
+            started_at: chrono::Utc::now(),
             tunnel: Arc::new(share::tunnel::TunnelManager::new()),
             settings: Arc::new(
                 settings::Settings::load_from(temp.path()).unwrap(),
@@ -862,6 +864,7 @@ pub fn run() {
             latest_frame: Mutex::new(None),
             snapshot_store,
             latest_snapshot_at: Mutex::new(None),
+            started_at: chrono::Utc::now(),
             tunnel: tunnel.clone(),
             settings: settings.clone(),
             config_dir: config_dir.clone(),
