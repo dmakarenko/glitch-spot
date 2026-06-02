@@ -83,6 +83,13 @@ pub fn hide(app: &tauri::AppHandle) -> Result<(), OverlayError> {
         .get_webview_window(OVERLAY_LABEL)
         .ok_or(OverlayError::WindowMissing)?;
     window.hide()?;
+    // Reset the overlay to a blank transparent state *after* hiding. The frozen
+    // backdrop is a React `imageUrl` that only clears on an async state update;
+    // if we leave the previous capture's image in the DOM, the next show()
+    // paints it for a frame before the new frame decodes (most jarring across
+    // displays, where the stale image is entirely different content). Resetting
+    // while hidden gives React the full idle interval to flush before next show.
+    let _ = window.eval("if (window.__glitchSpotPresent) window.__glitchSpotPresent('live');");
     Ok(())
 }
 
