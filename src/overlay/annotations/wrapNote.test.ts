@@ -31,4 +31,9 @@ describe('wrapNote', () => {
   it('returns a single empty line for empty input', () => {
     expect(wrapNote('', 100, measure)).toEqual(['']);
   });
+
+  it('preserves blank lines between paragraphs', () => {
+    expect(wrapNote('a\n\nb', 1000, measure)).toEqual(['a', '', 'b']);
+    expect(wrapNote('a\n', 1000, measure)).toEqual(['a', '']);
+  });
 });
