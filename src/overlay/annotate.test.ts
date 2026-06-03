@@ -102,11 +102,36 @@ describe('renderAnnotated', () => {
     const annotations = [{ id: 'a1', x: 10, y: 20, w: 100, h: 50, note: 'fix this' }]
     await renderAnnotated('blob:fake', annotations, 1)
 
-    // Caption text is drawn (a short note stays one line: "fix this").
-    const texts = mockCtx.fillText.mock.calls.map((c) => c[0])
-    expect(texts).toContain('fix this')
+    // Caption text is drawn at its top-left text origin. For x=10,y=20,h=50 at
+    // scale 1: belowY=76, boxH=30 (no flip/clamp), boxX=10, boxY=76, so the line
+    // is drawn at (boxX+PAD_X, boxY+PAD_Y) = (18, 82).
+    expect(mockCtx.fillText).toHaveBeenCalledWith('fix this', 18, 82)
     // Pill badge (1 roundRect) + caption border + caption fill (2 roundRect) = 3.
     expect(mockCtx.roundRect).toHaveBeenCalledTimes(3)
+  })
+
+  it('draws each wrapped line of a long note at an increasing y', async () => {
+    mockCtx.fillText.mockClear()
+    const { renderAnnotated } = await import('./annotate')
+
+    installImageMock()
+
+    // measureText mock is s.length * 8; textMaxW = 240 - 2*8 = 224 (~28 chars/line),
+    // so this note wraps across multiple lines.
+    const note = 'aaaaa bbbbb ccccc ddddd eeeee fffff'
+    const annotations = [{ id: 'a1', x: 10, y: 20, w: 100, h: 50, note }]
+    await renderAnnotated('blob:fake', annotations, 1)
+
+    // Drop the badge label ('01'); the remaining fillText calls are caption lines.
+    const captionCalls = mockCtx.fillText.mock.calls.filter((c) => c[0] !== '01')
+    expect(captionCalls.length).toBeGreaterThan(1) // wrapped to multiple lines
+    // Each wrapped line is drawn lower than the previous (y strictly increases).
+    const ys = captionCalls.map((c) => c[2])
+    for (let i = 1; i < ys.length; i++) {
+      expect(ys[i]).toBeGreaterThan(ys[i - 1])
+    }
+    // The wrapped lines reconstruct the original note (word order preserved).
+    expect(captionCalls.map((c) => c[0]).join(' ')).toBe(note)
   })
 
   it('draws no caption when the note is blank', async () => {
