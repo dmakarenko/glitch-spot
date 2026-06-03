@@ -50,7 +50,7 @@ class TauriBridge implements OverlayBridge {
     invoke('refresh_cursor')
   }
   revealOverlay(): void {
-    invoke('reveal_overlay')
+    invoke('reveal_window')
   }
 }
 

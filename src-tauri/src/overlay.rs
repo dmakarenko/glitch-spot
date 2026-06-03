@@ -52,13 +52,13 @@ fn position_over_active_monitor(app: &tauri::AppHandle) -> Result<WebviewWindow,
     Ok(window)
 }
 
-/// Set the overlay window's alpha. Window mode shows the overlay at alpha 0
-/// (ordered-in but invisible) so it repaints the target display's layout before
-/// it's revealed at alpha 1 — otherwise `show()` composites the previous
-/// display's retained backing buffer for a beat. A hidden (occluded) WKWebView
-/// won't repaint, but an ordered-in alpha-0 window renders normally.
+/// Set a webview window's alpha. The overlay and the picker pool are shown at
+/// alpha 0 (ordered-in but invisible) so each repaints the target display's
+/// layout before it's revealed at alpha 1 — otherwise `show()` composites the
+/// previous display's retained backing buffer for a beat. A hidden (occluded)
+/// WKWebView won't repaint, but an ordered-in alpha-0 window renders normally.
 #[cfg(target_os = "macos")]
-fn set_overlay_alpha(window: &WebviewWindow, alpha: f64) {
+pub fn set_window_alpha(window: &WebviewWindow, alpha: f64) {
     let Ok(ns_window) = window.ns_window() else {
         return;
     };
@@ -81,7 +81,7 @@ fn set_overlay_alpha(window: &WebviewWindow, alpha: f64) {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn set_overlay_alpha(_window: &WebviewWindow, _alpha: f64) {}
+pub fn set_window_alpha(_window: &WebviewWindow, _alpha: f64) {}
 
 /// Show the overlay as a transparent annotation layer over the live desktop.
 pub fn show_live(app: &tauri::AppHandle) -> Result<(), OverlayError> {
@@ -89,7 +89,7 @@ pub fn show_live(app: &tauri::AppHandle) -> Result<(), OverlayError> {
 
     // Reset alpha in case a window-mode present was aborted before its reveal
     // left the window at alpha 0; live/frozen overlays are always fully opaque.
-    set_overlay_alpha(&window, 1.0);
+    set_window_alpha(&window, 1.0);
 
     // Synchronously reset any prior frozen frame the overlay might still be
     // painting from a previous show. The eval is processed by the webview's
@@ -107,7 +107,7 @@ pub fn show_live(app: &tauri::AppHandle) -> Result<(), OverlayError> {
 pub fn show_frozen_pending(app: &tauri::AppHandle) -> Result<(), OverlayError> {
     let window = position_over_active_monitor(app)?;
 
-    set_overlay_alpha(&window, 1.0);
+    set_window_alpha(&window, 1.0);
 
     let _ = window.eval("if (window.__glitchSpotPresent) window.__glitchSpotPresent('frozen');");
 
@@ -190,7 +190,7 @@ pub fn show_window_mode(
     // this display's window-mode layout while unseen; `reveal` (or the fallback
     // timer in picker_select) fades it to alpha 1 once the frontend signals its
     // frame has painted, so show() can't flash the prior display's stale frame.
-    set_overlay_alpha(&window, 0.0);
+    set_window_alpha(&window, 0.0);
 
     let json = serde_json::to_string(payload)?;
     let js = format!(
@@ -218,6 +218,6 @@ pub fn reveal(app: &tauri::AppHandle) -> Result<(), OverlayError> {
     let window = app
         .get_webview_window(OVERLAY_LABEL)
         .ok_or(OverlayError::WindowMissing)?;
-    set_overlay_alpha(&window, 1.0);
+    set_window_alpha(&window, 1.0);
     Ok(())
 }

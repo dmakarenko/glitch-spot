@@ -120,7 +120,7 @@ describe("<Overlay/> post-paint signals", () => {
     render(<Overlay />);
     invokeMock.mockClear(); // ignore the mount-time get_latest_frame probe
     presentWindowMode(makeWindowPayload());
-    expect(invokeMock).toHaveBeenCalledWith("reveal_overlay");
+    expect(invokeMock).toHaveBeenCalledWith("reveal_window");
   });
 
   it("renders a clipped frozen-frame box mirroring the full-screen frozen render", () => {

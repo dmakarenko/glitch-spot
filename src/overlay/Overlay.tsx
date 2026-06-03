@@ -351,11 +351,22 @@ export function Overlay() {
   // under a stationary pointer.
   useEffect(() => {
     if (presentationId === 0) return
-    const raf = requestAnimationFrame(() => {
-      bridge.revealOverlay()
-      bridge.refreshCursor()
+    // Double rAF: a single rAF fires *before* the upcoming paint, so revealing
+    // then can flip alpha to 1 before the new frame has composited — across a
+    // display/DPR change (Retina ↔ non-Retina) that first composite lags and the
+    // window briefly shows its stale backing buffer. The second rAF runs after
+    // the first paint completes, so the new layout is on screen before reveal.
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        bridge.revealOverlay()
+        bridge.refreshCursor()
+      })
     })
-    return () => cancelAnimationFrame(raf)
+    return () => {
+      cancelAnimationFrame(raf1)
+      cancelAnimationFrame(raf2)
+    }
   }, [presentationId])
 
   if (mode === 'window' && windowPayload) {
