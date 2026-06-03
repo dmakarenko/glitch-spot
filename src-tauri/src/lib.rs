@@ -73,8 +73,10 @@ async fn open_overlay_frozen(app: tauri::AppHandle) -> Result<(), String> {
 async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     state.picker_state.reset_to_idle();
-    // Invalidate any frozen capture still in flight so its late frame is dropped.
+    // Invalidate any in-flight frozen capture or live fallback reveal so stale
+    // tasks from the dismissed session don't affect the next presentation.
     state.freeze_generation.fetch_add(1, Ordering::SeqCst);
+    state.live_generation.fetch_add(1, Ordering::SeqCst);
     overlay::hide(&app).map_err(|e| e.to_string())
 }
 
