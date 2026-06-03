@@ -41,11 +41,15 @@ pub struct AppState {
     /// own the configured port.
     pub mcp_bound: Arc<AtomicBool>,
     pub picker_state: Arc<picker_session::PickerStateHolder>,
-    /// Bumped whenever an overlay session starts or is dismissed. A frozen
+    /// Bumped whenever a frozen overlay session starts or is dismissed. A frozen
     /// capture records the value at trigger time and only publishes its frame if
     /// it's still current — so a capture left in flight by a cancel (Escape) or a
     /// superseding session can't replace a newer overlay with a stale screenshot.
     pub freeze_generation: Arc<AtomicU64>,
+    /// Bumped whenever a live overlay session starts. The fallback reveal task
+    /// captures this value and skips the reveal if it has since changed, so a
+    /// cancel-and-reopen within 300ms doesn't reveal the new alpha-0 session early.
+    pub live_generation: Arc<AtomicU64>,
 }
 
 #[tauri::command]
@@ -744,6 +748,9 @@ pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Resu
     if let Some(state) = app.try_state::<AppState>() {
         state.picker_state.try_enter_live().map_err(anyhow::Error::msg)?;
     }
+    let my_gen = app
+        .try_state::<AppState>()
+        .map(|s| s.live_generation.fetch_add(1, Ordering::SeqCst) + 1);
     // Roll back to Idle if showing the overlay fails, so the state machine
     // isn't left stuck in Live (later hotkeys would fail with "cannot enter").
     let result = overlay::show_live(app).map_err(anyhow::Error::from);
@@ -755,15 +762,16 @@ pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Resu
         // Fallback reveal: show_live presents at alpha 0; the frontend normally
         // reveals via revealOverlay() one double-rAF after presentationId bumps.
         // If that signal is ever lost, reveal after a short delay so the overlay
-        // can't stay invisible. Gate on RunMode::Live so a cancel-and-reopen
-        // within the 300ms window doesn't reveal the new alpha-0 session early.
+        // can't stay invisible. Gate on live_generation so a cancel-and-reopen
+        // within 300ms doesn't reveal the new alpha-0 session before its paint gate.
         let app_fallback = app.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            let still_live = app_fallback.try_state::<AppState>().map_or(true, |s| {
-                matches!(s.picker_state.current(), picker_session::RunMode::Live)
-            });
-            if still_live {
+            let still_current = app_fallback
+                .try_state::<AppState>()
+                .zip(my_gen)
+                .map_or(true, |(s, g)| s.live_generation.load(Ordering::SeqCst) == g);
+            if still_current {
                 let _ = overlay::reveal(&app_fallback);
             }
         });
@@ -914,6 +922,7 @@ mod tests {
             mcp_bound: Arc::new(AtomicBool::new(false)),
             picker_state: Arc::new(picker_session::PickerStateHolder::new()),
             freeze_generation: Arc::new(AtomicU64::new(0)),
+            live_generation: Arc::new(AtomicU64::new(0)),
         };
         assert!(state.latest_snapshot_at.lock().unwrap().is_none());
     }
@@ -987,6 +996,7 @@ pub fn run() {
             mcp_bound: mcp_bound.clone(),
             picker_state: Arc::new(picker_session::PickerStateHolder::new()),
             freeze_generation: Arc::new(AtomicU64::new(0)),
+            live_generation: Arc::new(AtomicU64::new(0)),
         })
         .setup(|app| {
             #[cfg(target_os = "macos")]
