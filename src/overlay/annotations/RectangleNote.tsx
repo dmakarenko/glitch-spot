@@ -7,7 +7,9 @@ import { noteVariant } from "./noteVariant";
 
 const NOTE_WIDTH = 240;
 const NOTE_OFFSET = 6;
-const NOTE_MIN_HEIGHT = 56;
+// Fixed (border-box) height so the flip-above math positions the field by its real
+// height — otherwise the field overshoots downward and overlaps the rect it flips over.
+const NOTE_HEIGHT = 68;
 
 // Translucent backgrounds alternated per annotation: neutral and cool cyan.
 // Paired with a blur so the captured backdrop reads softly behind the text.
@@ -31,10 +33,11 @@ export function RectangleNote({ rect, containerHeight, onChange, autoFocus }: Pr
     if (autoFocus) ref.current?.focus();
   }, [autoFocus]);
 
-  // Auto-flip vertically if placing below would overflow.
+  // Auto-flip vertically if placing below would overflow. The flip positions the
+  // field by its full height so its bottom rests NOTE_OFFSET above the rect top.
   const belowY = rect.y + rect.h + NOTE_OFFSET;
-  const wouldOverflowBelow = belowY + NOTE_MIN_HEIGHT > containerHeight;
-  const top = wouldOverflowBelow ? rect.y - NOTE_MIN_HEIGHT - NOTE_OFFSET : belowY;
+  const wouldOverflowBelow = belowY + NOTE_HEIGHT > containerHeight;
+  const top = wouldOverflowBelow ? rect.y - NOTE_OFFSET - NOTE_HEIGHT : belowY;
 
   // Keep within left/right bounds.
   const left = Math.max(0, Math.min(rect.x, window.innerWidth - NOTE_WIDTH));
@@ -50,13 +53,13 @@ export function RectangleNote({ rect, containerHeight, onChange, autoFocus }: Pr
       onClick={(e) => e.stopPropagation()}
       placeholder="Note (optional)"
       maxLength={500}
-      rows={3}
       style={{
         position: "absolute",
         top,
         left,
         width: NOTE_WIDTH,
-        minHeight: NOTE_MIN_HEIGHT,
+        height: NOTE_HEIGHT,
+        boxSizing: "border-box",
         padding: "6px 8px",
         font: "13px/1.4 system-ui",
         background,
