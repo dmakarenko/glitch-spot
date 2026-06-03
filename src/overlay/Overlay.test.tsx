@@ -113,6 +113,16 @@ describe("<Overlay/> post-paint signals", () => {
     expect(invokeMock).toHaveBeenCalledWith("refresh_cursor");
   });
 
+  it("reveals the overlay after the window-mode frame paints so show() never flashes the previous display's stale buffer", () => {
+    // The overlay is shown at alpha 0 (rendering but invisible), so the window
+    // repaints the new display's layout before becoming visible. The frontend
+    // signals once that frame has painted; the backend then sets alpha 1.
+    render(<Overlay />);
+    invokeMock.mockClear(); // ignore the mount-time get_latest_frame probe
+    presentWindowMode(makeWindowPayload());
+    expect(invokeMock).toHaveBeenCalledWith("reveal_overlay");
+  });
+
   it("renders a clipped frozen-frame box mirroring the full-screen frozen render", () => {
     const { getByTestId, container } = render(<Overlay />);
     const payload = makeWindowPayload();

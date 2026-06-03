@@ -107,6 +107,16 @@ fn refresh_cursor() {
 #[tauri::command]
 fn refresh_cursor() {}
 
+/// Fade the window-mode overlay in to full opacity. It's shown at alpha 0 so it
+/// repaints the target display's layout before becoming visible (see
+/// `overlay::show_window_mode`); the frontend invokes this one rAF after its
+/// window-mode frame paints. Idempotent and safe for live/frozen presents, which
+/// are already opaque.
+#[tauri::command]
+fn reveal_overlay(app: tauri::AppHandle) -> Result<(), String> {
+    overlay::reveal(&app).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn get_latest_frame(state: tauri::State<'_, AppState>) -> Option<capture::CapturedFrame> {
     state.latest_frame.lock().ok().and_then(|g| g.clone())
@@ -636,6 +646,18 @@ async fn picker_select(
     // does not pollute the grab.
     overlay::show_window_mode(&app, window.display_index, &payload).map_err(|e| e.to_string())?;
 
+    // The overlay is shown at alpha 0 and revealed by the frontend one rAF after
+    // its window-mode frame paints (invoke reveal_overlay). If that signal is
+    // ever lost, reveal anyway after a short delay so the alpha-0 overlay can't
+    // stay invisible. Idempotent with the frontend signal.
+    {
+        let app_fallback = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            let _ = overlay::reveal(&app_fallback);
+        });
+    }
+
     let mut frame = match capture::capture_window(&app, window_id) {
         Ok(f) => f,
         Err(e) => {
@@ -957,6 +979,7 @@ pub fn run() {
             open_overlay_frozen,
             hide_overlay,
             refresh_cursor,
+            reveal_overlay,
             get_latest_frame,
             save_snapshot,
             spike_capture::spike_capture,
