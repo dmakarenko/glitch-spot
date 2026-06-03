@@ -137,6 +137,7 @@ mod tests {
                 clean: dir.join(clean_png_filename(id)).to_string_lossy().into_owned(),
                 annotated: Some(dir.join(annotated_png_filename(id)).to_string_lossy().into_owned()),
             },
+            agent_prompt: crate::snapshot::default_agent_prompt(),
         };
         BuiltSnapshot {
             snapshot,

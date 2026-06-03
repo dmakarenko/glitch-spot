@@ -75,6 +75,7 @@ mod tests {
                 window: None,
             },
             images: Images { clean: "/tmp/c.png".into(), annotated: Some("/tmp/a.png".into()) },
+            agent_prompt: crate::snapshot::default_agent_prompt(),
         }
     }
 

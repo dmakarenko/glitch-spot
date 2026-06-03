@@ -82,6 +82,29 @@ describe("<Picker/>", () => {
     expect(getByTestId("picker-root")).toBeTruthy();
   });
 
+  it("reveals its window after the session paints so re-show never flashes the previous display's stale checker", () => {
+    // The picker pool windows are reused across displays and shown at alpha 0
+    // (rendering but invisible) so each repaints the new session's blank/hover
+    // layout before becoming visible. The picker signals once that frame has
+    // painted; the backend then fades the calling window in to alpha 1.
+    const raf = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((cb: FrameRequestCallback) => {
+        cb(0);
+        return 0;
+      });
+    try {
+      render(<Picker />);
+      act(() => {
+        (window as unknown as { __glitchSpotPickerStart: (p: PickerStartPayload) => void })
+          .__glitchSpotPickerStart(makeSession());
+      });
+      expect(invokeMock).toHaveBeenCalledWith("reveal_window", undefined);
+    } finally {
+      raf.mockRestore();
+    }
+  });
+
   it("highlights the window when the Rust poller broadcasts a hit", async () => {
     const { queryAllByTestId } = render(<Picker />);
     act(() => {

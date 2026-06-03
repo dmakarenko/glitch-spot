@@ -74,6 +74,50 @@ async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
     overlay::hide(&app).map_err(|e| e.to_string())
 }
 
+/// Post a synthetic mouse-moved event at the current cursor location so macOS
+/// re-evaluates the displayed cursor. The overlay's chromatic crosshair is a
+/// CSS cursor, and macOS only redraws the cursor on a mouse event — so after
+/// the overlay is shown under a stationary pointer the cursor stays an arrow
+/// until the user moves the mouse. The event carries the cursor's existing
+/// location, producing no visible movement.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn refresh_cursor() {
+    use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else {
+        return;
+    };
+    // Read the current location in CoreGraphics' global display space by
+    // creating a null event — this avoids the physical-vs-logical pixel
+    // mismatch that would otherwise make the cursor jump on Retina displays.
+    let Ok(here) = CGEvent::new(source.clone()) else {
+        return;
+    };
+    let location = here.location();
+    if let Ok(moved) =
+        CGEvent::new_mouse_event(source, CGEventType::MouseMoved, location, CGMouseButton::Left)
+    {
+        moved.post(CGEventTapLocation::HID);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn refresh_cursor() {}
+
+/// Fade the calling window in to full opacity. The overlay and the picker pool
+/// are shown at alpha 0 so each repaints the target display's layout before
+/// becoming visible (see `overlay::show_window_mode` and `show_picker`); the
+/// frontend invokes this one rAF after its frame paints. The `window` parameter
+/// is the calling webview, so a picker reveals itself and the overlay reveals
+/// itself through the same command. Idempotent.
+#[tauri::command]
+fn reveal_window(window: tauri::WebviewWindow) {
+    overlay::set_window_alpha(&window, 1.0);
+}
+
 #[tauri::command]
 fn get_latest_frame(state: tauri::State<'_, AppState>) -> Option<capture::CapturedFrame> {
     state.latest_frame.lock().ok().and_then(|g| g.clone())
@@ -416,6 +460,13 @@ fn show_picker(
         // visibilitychange listener fires picker_cancel and resets state.
         win.set_position(tauri::PhysicalPosition::new(display.x, display.y))?;
         win.set_size(tauri::PhysicalSize::new(display.w, display.h))?;
+        // Show invisible: the pool windows are reused across displays and macOS
+        // retains each one's last-painted buffer (a prior session's hover
+        // checker). Showing at alpha 0 lets the window repaint this session's
+        // blank layout while unseen; the picker reveals itself (invoke
+        // reveal_window) one rAF after it paints, so show() can't flash the
+        // stale checker. The fallback below reveals anyway if that signal is lost.
+        overlay::set_window_alpha(&win, 0.0);
         let payload = serde_json::json!({
             "windows": windows,
             "displays": displays,
@@ -448,6 +499,24 @@ fn show_picker(
     // pickers' NSViews receive mouseMoved events without per-window
     // makeKeyAndOrderFront (which would unfocus the others).
     activate_application();
+
+    // Fallback reveal: each picker normally reveals itself one rAF after it
+    // paints (invoke reveal_window). If that signal is ever lost, reveal every
+    // shown picker after a short delay so an alpha-0 picker can't stay invisible.
+    // Idempotent with the per-picker self-reveal.
+    {
+        let app_fallback = app.clone();
+        let shown = displays.len().min(PICKER_POOL_SIZE);
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            for i in 0..shown {
+                if let Some(w) = app_fallback.get_webview_window(&format!("picker-{i}")) {
+                    overlay::set_window_alpha(&w, 1.0);
+                }
+            }
+        });
+    }
+
     Ok(())
 }
 
@@ -597,11 +666,23 @@ async fn picker_select(
             display,
         })?;
 
-    // Show the overlay first (dim surround + transparent rect — the live window
-    // shows through the brief gap), then capture the isolated window so the user
-    // never sees a blank pause while the grab/encode runs. capture_window filters
-    // with .with_window(), so the visible overlay does not pollute the grab.
+    // Show the overlay first (dim surround + frozen-frame veil), then capture the
+    // isolated window so the user never sees a blank pause while the grab/encode
+    // runs. capture_window filters with .with_window(), so the visible overlay
+    // does not pollute the grab.
     overlay::show_window_mode(&app, window.display_index, &payload).map_err(|e| e.to_string())?;
+
+    // The overlay is shown at alpha 0 and revealed by the frontend one rAF after
+    // its window-mode frame paints (invoke reveal_window). If that signal is
+    // ever lost, reveal anyway after a short delay so the alpha-0 overlay can't
+    // stay invisible. Idempotent with the frontend signal.
+    {
+        let app_fallback = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            let _ = overlay::reveal(&app_fallback);
+        });
+    }
 
     let mut frame = match capture::capture_window(&app, window_id) {
         Ok(f) => f,
@@ -923,6 +1004,8 @@ pub fn run() {
             open_overlay_live,
             open_overlay_frozen,
             hide_overlay,
+            refresh_cursor,
+            reveal_window,
             get_latest_frame,
             save_snapshot,
             spike_capture::spike_capture,

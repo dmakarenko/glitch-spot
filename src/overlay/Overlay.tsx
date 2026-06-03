@@ -157,6 +157,34 @@ function GlitchImage({ url }: { url: string }) {
   )
 }
 
+// Dims everything except the selected window with four solid panels framing the
+// clear window rect, faded in together over ~250ms so the surround darkens
+// smoothly when a window is selected rather than snapping to dim. Solid fills
+// rasterise immediately; a single 100vmax box-shadow spread rasterised late and
+// flashed the screen undimmed for a frame. Visual only — the full-screen
+// DrawingLayer above forwards outside-clicks via onOutsideClick.
+function WindowDim({ rect }: { rect: { x: number; y: number; w: number; h: number } }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const anim = ref.current?.animate?.(
+      [{ opacity: 0 }, { opacity: 1 }],
+      { duration: 250, easing: 'ease-out', fill: 'forwards' },
+    )
+    return () => anim?.cancel()
+  }, [])
+  const panel: CSSProperties = { position: 'absolute', background: 'rgba(0,0,0,0.40)', pointerEvents: 'none' }
+  // Base opacity 0 so the wrapper never paints at full dim for the frame before
+  // the fade-in animation takes over (that flash read as a blink on select).
+  return (
+    <div ref={ref} style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none' }}>
+      <div data-testid="window-dim-top" style={{ ...panel, top: 0, left: 0, right: 0, height: rect.y }} />
+      <div data-testid="window-dim-bottom" style={{ ...panel, top: rect.y + rect.h, left: 0, right: 0, bottom: 0 }} />
+      <div data-testid="window-dim-left" style={{ ...panel, top: rect.y, left: 0, width: rect.x, height: rect.h }} />
+      <div data-testid="window-dim-right" style={{ ...panel, top: rect.y, left: rect.x + rect.w, right: 0, height: rect.h }} />
+    </div>
+  )
+}
+
 export function Overlay() {
   const [mode, setMode] = useState<Mode>('live')
   const modeRef = useRef<Mode>('live')
@@ -166,6 +194,9 @@ export function Overlay() {
   const imageUrlRef = useRef<string | null>(null)
   const [annotations, dispatch] = useReducer(reducer, initialState)
   const [showDiscardModal, setShowDiscardModal] = useState(false)
+  // Bumped each time Rust presents the overlay; drives the post-paint cursor
+  // refresh below.
+  const [presentationId, setPresentationId] = useState(0)
 
   const handleSave = async () => {
     const payload: AnnotationPayload[] = annotations.rects.map((r) => ({
@@ -211,6 +242,7 @@ export function Overlay() {
       dispatch({ type: "CLEAR" });
       setShowDiscardModal(false);
       setWindowPayload(newMode === 'window' && payload ? payload : null);
+      setPresentationId((n) => n + 1);
       if (newMode === 'window' && payload?.initial_rect_css) {
         const r = payload.initial_rect_css;
         const clip = payload.window_rect_css;
@@ -306,32 +338,47 @@ export function Overlay() {
     return () => window.removeEventListener('keydown', onKey)
   }, [annotations.rects, mode])
 
+  // After each present, once the overlay's frame has painted (one rAF past the
+  // React commit), do two things. First, reveal the overlay: in window mode the
+  // native layer shows the window at alpha 0 (rendering but invisible) so it
+  // repaints the new display's layout before becoming visible — this signal
+  // tells it the frame has landed and it can fade in to alpha 1, so show() can't
+  // composite the previous display's stale buffer for a beat. (No-op natively
+  // for live/frozen presents, which are shown opaque directly.) Second, nudge
+  // the OS cursor: the crosshair is a CSS cursor and macOS only redraws the
+  // cursor on a mouse event, so a synthetic OS mouse-move makes WebKit
+  // re-evaluate it against the painted DOM rather than leaving a stale arrow
+  // under a stationary pointer.
+  useEffect(() => {
+    if (presentationId === 0) return
+    // Double rAF: a single rAF fires *before* the upcoming paint, so revealing
+    // then can flip alpha to 1 before the new frame has composited — across a
+    // display/DPR change (Retina ↔ non-Retina) that first composite lags and the
+    // window briefly shows its stale backing buffer. The second rAF runs after
+    // the first paint completes, so the new layout is on screen before reveal.
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        bridge.revealOverlay()
+        bridge.refreshCursor()
+      })
+    })
+    return () => {
+      cancelAnimationFrame(raf1)
+      cancelAnimationFrame(raf2)
+    }
+  }, [presentationId])
+
   if (mode === 'window' && windowPayload) {
     const { window_rect_css } = windowPayload
     return (
       <div style={{ position: 'fixed', inset: 0, background: 'transparent' }}>
-        {/* dim everything except the selected window: a transparent rect at the
-            window bounds whose huge box-shadow spread dims the surrounding
-            screen. Visual only; the full-screen DrawingLayer above forwards
-            outside-clicks via onOutsideClick. */}
-        <div
-          data-testid="window-spotlight"
-          style={{
-            position: 'absolute',
-            left: window_rect_css.x,
-            top: window_rect_css.y,
-            width: window_rect_css.w,
-            height: window_rect_css.h,
-            background: 'transparent',
-            boxShadow: '0 0 0 100vmax rgba(0,0,0,0.40)',
-            pointerEvents: 'none',
-          }}
-        />
-        {/* frozen isolated capture of the selected window, presented above
-            everything. Mirrors the full-screen frozen render: a freeze veil +
-            scanline shimmer play while the capture is in flight, then the
-            chromatic shake resolves the screenshot in, with a faint checker
-            texture over it. overflow:hidden clips the ~18px shake to the bounds. */}
+        <WindowDim rect={window_rect_css} />
+        {/* frozen isolated capture of the selected window. While the capture is
+            in flight the box stays transparent so the live window shows through
+            (selecting a window must not dim it) — a scanline shimmer plays over
+            it as a capture cue; when the frame arrives the chromatic shake
+            resolves the screenshot in. overflow:hidden clips the ~18px shake. */}
         <div
           data-testid="window-frozen-frame"
           style={{
@@ -341,7 +388,6 @@ export function Overlay() {
             width: window_rect_css.w,
             height: window_rect_css.h,
             overflow: 'hidden',
-            background: imageUrl ? undefined : 'rgba(0, 0, 0, 0.4)',
             pointerEvents: 'none',
           }}
         >

@@ -2,7 +2,7 @@
 # ABOUTME: Declares the glitch_spot crate with lib and binary targets.
 [package]
 name = "glitch_spot"
-version = "0.2.0"
+version = "0.3.0"
 description = "Glitch Spot – Tauri 2 backend"
 authors = []
 edition = "2021"
