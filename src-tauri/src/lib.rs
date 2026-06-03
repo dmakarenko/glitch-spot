@@ -755,11 +755,17 @@ pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Resu
         // Fallback reveal: show_live presents at alpha 0; the frontend normally
         // reveals via revealOverlay() one double-rAF after presentationId bumps.
         // If that signal is ever lost, reveal after a short delay so the overlay
-        // can't stay invisible. Idempotent with the frontend self-reveal.
+        // can't stay invisible. Gate on RunMode::Live so a cancel-and-reopen
+        // within the 300ms window doesn't reveal the new alpha-0 session early.
         let app_fallback = app.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            let _ = overlay::reveal(&app_fallback);
+            let still_live = app_fallback.try_state::<AppState>().map_or(true, |s| {
+                matches!(s.picker_state.current(), picker_session::RunMode::Live)
+            });
+            if still_live {
+                let _ = overlay::reveal(&app_fallback);
+            }
         });
     }
     result
@@ -794,12 +800,20 @@ pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Re
         overlay::show_frozen_pending(app)?;
 
         // Fallback reveal: if the frontend's revealOverlay() signal is ever lost,
-        // reveal after a short delay so the overlay can't stay invisible.
+        // reveal after a short delay so the overlay can't stay invisible. Gate on
+        // freeze_generation so a cancel-and-reopen within 300ms doesn't reveal
+        // the new alpha-0 session before its own double-rAF paint gate runs.
         {
             let app_fallback = app.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                let _ = overlay::reveal(&app_fallback);
+                let still_current = app_fallback
+                    .try_state::<AppState>()
+                    .zip(my_gen)
+                    .map_or(true, |(s, g)| s.freeze_generation.load(Ordering::SeqCst) == g);
+                if still_current {
+                    let _ = overlay::reveal(&app_fallback);
+                }
             });
         }
 

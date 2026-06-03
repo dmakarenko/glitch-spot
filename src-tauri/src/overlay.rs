@@ -229,11 +229,10 @@ pub fn show_window_mode(
     let _ = window.eval(&js);
     window.show()?;
     window.set_focus()?;
-    // Re-assert the frame after show()/set_focus(): this overlay covers the full
-    // physical display (top edge at the menu bar), so macOS constrainFrameRect
-    // pushes it a title-bar height down on the initial show, before the
-    // borderless window is realized. The work-area overlays
-    // (show_live/show_frozen_pending) start below the menu bar and aren't constrained.
+    // Re-assert after show()/set_focus(): macOS constrainFrameRect can push the
+    // window on show. Work-area overlays use a conditional re-assert (they check
+    // outer_position first); full-display mode re-asserts unconditionally since
+    // it covers the menu-bar region and is always constrained.
     window.set_position(PhysicalPosition::new(pos.x, pos.y))?;
     window.set_size(PhysicalSize::new(size.width, size.height))?;
     Ok(())
