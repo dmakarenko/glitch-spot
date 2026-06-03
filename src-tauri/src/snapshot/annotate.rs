@@ -216,23 +216,31 @@ fn draw_filled_rounded_rect(
         draw_filled_rect_mut(img, IpRect::at(x, y).of_size(w as u32, h as u32), color);
         return;
     }
+    // Bands collapse to zero size when r hits half the smaller side; skip those
+    // to avoid imageproc's "width must be strictly positive" panic.
+    let center_h = h - 2 * r;
+    let side_w = w - 2 * r;
     // Center band (full width, inset top/bottom by r).
-    draw_filled_rect_mut(
-        img,
-        IpRect::at(x, y + r).of_size(w as u32, (h - 2 * r) as u32),
-        color,
-    );
+    if center_h > 0 {
+        draw_filled_rect_mut(
+            img,
+            IpRect::at(x, y + r).of_size(w as u32, center_h as u32),
+            color,
+        );
+    }
     // Top and bottom bands (inset left/right by r).
-    draw_filled_rect_mut(
-        img,
-        IpRect::at(x + r, y).of_size((w - 2 * r) as u32, r as u32),
-        color,
-    );
-    draw_filled_rect_mut(
-        img,
-        IpRect::at(x + r, y + h - r).of_size((w - 2 * r) as u32, r as u32),
-        color,
-    );
+    if side_w > 0 {
+        draw_filled_rect_mut(
+            img,
+            IpRect::at(x + r, y).of_size(side_w as u32, r as u32),
+            color,
+        );
+        draw_filled_rect_mut(
+            img,
+            IpRect::at(x + r, y + h - r).of_size(side_w as u32, r as u32),
+            color,
+        );
+    }
     // Four corner circles (right/bottom centers nudged in by 1px to stay in bounds).
     draw_filled_circle_mut(img, (x + r, y + r), r, color);
     draw_filled_circle_mut(img, (x + w - r - 1, y + r), r, color);
@@ -296,5 +304,15 @@ mod tests {
         let font = test_font();
         let scale = PxScale::from(13.0);
         assert_eq!(wrap_text("", &font, scale, 100.0), vec!["".to_string()]);
+    }
+
+    #[test]
+    fn rounded_rect_handles_even_dimensions_without_panicking() {
+        let mut img = RgbaImage::from_pixel(40, 40, Rgba([255, 255, 255, 255]));
+        // Even width and height with r == w/2 / h/2 would make a band zero-sized.
+        draw_filled_rounded_rect(&mut img, 4, 4, 10, 4, 6, Rgba([0, 0, 0, 255]));
+        draw_filled_rounded_rect(&mut img, 4, 20, 4, 10, 6, Rgba([0, 0, 0, 255]));
+        // Center of the first box should be filled black.
+        assert_eq!(img.get_pixel(9, 6), &Rgba([0, 0, 0, 255]));
     }
 }
