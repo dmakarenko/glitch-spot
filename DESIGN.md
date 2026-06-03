@@ -94,7 +94,7 @@ Confirmation dialog triggered by Esc with unsaved annotations.
 
 Anchored below (or above) a rectangle.
 
-- **Background:** translucent (~80% opacity) over `backdrop-filter: blur(8px)`, rotating through three tints per consecutive annotation: neutral `rgba(22,22,22,0.80)`, warm red `rgba(28,18,16,0.80)`, cool cyan `rgba(16,22,24,0.80)`. The variant is keyed off the rectangle id so a note keeps its tint when earlier rectangles are deleted. Blur visibly softens the captured backdrop in frozen/window mode; in live mode (transparent overlay) it is a near no-op and the tint reads as a subtle panel.
+- **Background:** translucent (70% opacity) over `backdrop-filter: blur(8px)`, alternating between two tints per consecutive annotation: neutral `rgba(22,22,22,0.70)` and cool cyan `rgba(16,22,24,0.70)`. The variant is keyed off the rectangle id so a note keeps its tint when earlier rectangles are deleted. Blur visibly softens the captured backdrop in frozen/window mode; in live mode (transparent overlay) it is a near no-op and the tint reads as a subtle panel.
 - **Border:** `1px solid rgba(238,102,51,0.28)`
 - **Border-radius:** `5px`
 - **Text:** `#aaaaaa`

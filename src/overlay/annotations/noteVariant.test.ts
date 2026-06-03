@@ -4,12 +4,12 @@ import { describe, it, expect } from 'vitest';
 import { noteVariant } from './noteVariant';
 
 describe('noteVariant', () => {
-  it('cycles through 0, 1, 2 as the id number increases', () => {
+  it('alternates between 0 and 1 as the id number increases', () => {
     expect(noteVariant('r0')).toBe(0);
     expect(noteVariant('r1')).toBe(1);
-    expect(noteVariant('r2')).toBe(2);
-    expect(noteVariant('r3')).toBe(0);
-    expect(noteVariant('r4')).toBe(1);
+    expect(noteVariant('r2')).toBe(0);
+    expect(noteVariant('r3')).toBe(1);
+    expect(noteVariant('r4')).toBe(0);
   });
 
   it('is stable for a given id regardless of other rects', () => {

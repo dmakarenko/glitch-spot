@@ -9,12 +9,11 @@ const NOTE_WIDTH = 240;
 const NOTE_OFFSET = 6;
 const NOTE_MIN_HEIGHT = 56;
 
-// Translucent backgrounds rotated per annotation: neutral, warm red, cool cyan.
+// Translucent backgrounds alternated per annotation: neutral and cool cyan.
 // Paired with a blur so the captured backdrop reads softly behind the text.
 const VARIANT_BACKGROUNDS = [
-  "rgba(22, 22, 22, 0.80)",
-  "rgba(28, 18, 16, 0.80)",
-  "rgba(16, 22, 24, 0.80)",
+  "rgba(22, 22, 22, 0.70)",
+  "rgba(16, 22, 24, 0.70)",
 ] as const;
 const NOTE_BLUR = "blur(8px)";
 
