@@ -74,6 +74,39 @@ async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
     overlay::hide(&app).map_err(|e| e.to_string())
 }
 
+/// Post a synthetic mouse-moved event at the current cursor location so macOS
+/// re-evaluates the displayed cursor. The overlay's chromatic crosshair is a
+/// CSS cursor, and macOS only redraws the cursor on a mouse event — so after
+/// the overlay is shown under a stationary pointer the cursor stays an arrow
+/// until the user moves the mouse. The event carries the cursor's existing
+/// location, producing no visible movement.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn refresh_cursor() {
+    use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else {
+        return;
+    };
+    // Read the current location in CoreGraphics' global display space by
+    // creating a null event — this avoids the physical-vs-logical pixel
+    // mismatch that would otherwise make the cursor jump on Retina displays.
+    let Ok(here) = CGEvent::new(source.clone()) else {
+        return;
+    };
+    let location = here.location();
+    if let Ok(moved) =
+        CGEvent::new_mouse_event(source, CGEventType::MouseMoved, location, CGMouseButton::Left)
+    {
+        moved.post(CGEventTapLocation::HID);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn refresh_cursor() {}
+
 #[tauri::command]
 fn get_latest_frame(state: tauri::State<'_, AppState>) -> Option<capture::CapturedFrame> {
     state.latest_frame.lock().ok().and_then(|g| g.clone())
@@ -597,10 +630,10 @@ async fn picker_select(
             display,
         })?;
 
-    // Show the overlay first (dim surround + transparent rect — the live window
-    // shows through the brief gap), then capture the isolated window so the user
-    // never sees a blank pause while the grab/encode runs. capture_window filters
-    // with .with_window(), so the visible overlay does not pollute the grab.
+    // Show the overlay first (dim surround + frozen-frame veil), then capture the
+    // isolated window so the user never sees a blank pause while the grab/encode
+    // runs. capture_window filters with .with_window(), so the visible overlay
+    // does not pollute the grab.
     overlay::show_window_mode(&app, window.display_index, &payload).map_err(|e| e.to_string())?;
 
     let mut frame = match capture::capture_window(&app, window_id) {
@@ -923,6 +956,7 @@ pub fn run() {
             open_overlay_live,
             open_overlay_frozen,
             hide_overlay,
+            refresh_cursor,
             get_latest_frame,
             save_snapshot,
             spike_capture::spike_capture,

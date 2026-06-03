@@ -177,7 +177,17 @@ export function Picker() {
     setDrawState((prev) => prev ? { ...prev, curX: e.clientX, curY: e.clientY } : null);
   };
 
-  const highlight = !drawState && session.windows.find((w) => w.window_id === hoveredId);
+  // True once the press has moved far enough to be an intentional drag-to-draw,
+  // not a bare click. Gates the draw visuals so selecting a window with a plain
+  // click flashes nothing — the rect-drawing affordances appear only once you
+  // actually drag.
+  const DRAG_DRAW_THRESHOLD_PX = 4;
+  const dragging =
+    drawState != null &&
+    (Math.abs(drawState.curX - drawState.anchorX) >= DRAG_DRAW_THRESHOLD_PX ||
+      Math.abs(drawState.curY - drawState.anchorY) >= DRAG_DRAW_THRESHOLD_PX);
+
+  const highlight = !dragging && session.windows.find((w) => w.window_id === hoveredId);
 
   // Window being drawn — for the visual veil and clamped preview rect.
   const drawingWindow = drawState
@@ -219,12 +229,11 @@ export function Picker() {
           />
         ))}
 
-      {/* Window-mode overlay rendered inside the picker during drag-to-draw */}
-      {drawState && (
+      {/* Draw affordances during an intentional drag-to-draw: a checker texture
+          on the selected window plus the live preview rect. No full-screen dim —
+          selecting a window must not darken the rest of the screen. */}
+      {dragging && (
         <>
-          <div
-            style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.40)", pointerEvents: "none" }}
-          />
           {drawingWindowCss && (
             <div
               style={{

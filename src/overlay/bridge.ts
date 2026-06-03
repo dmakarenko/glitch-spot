@@ -9,6 +9,11 @@ export interface OverlayBridge {
   getFrame(): Promise<string | null>
   saveSnapshot(mode: string, annotations: AnnotationPayload[]): Promise<void>
   cancel(): void
+  // Ask the native layer to redraw the OS cursor. The crosshair is a CSS
+  // cursor, and macOS only re-evaluates the displayed cursor on a mouse event;
+  // after the overlay is shown under a stationary pointer the cursor stays an
+  // arrow until the user moves the mouse.
+  refreshCursor(): void
 }
 
 type TauriFrame = {
@@ -34,6 +39,9 @@ class TauriBridge implements OverlayBridge {
   }
   cancel(): void {
     invoke('hide_overlay')
+  }
+  refreshCursor(): void {
+    invoke('refresh_cursor')
   }
 }
 
@@ -85,6 +93,9 @@ class ElectronBridge implements OverlayBridge {
   cancel(): void {
     window.glitchSpotBridge!.cancel()
   }
+  // Electron renders the overlay in a real focused window; the CSS-cursor
+  // redraw quirk is specific to the Tauri menu-bar overlay.
+  refreshCursor(): void {}
 }
 
 export function createBridge(): OverlayBridge {
