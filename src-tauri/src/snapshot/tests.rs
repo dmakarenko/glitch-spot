@@ -309,9 +309,9 @@ fn annotated_png_draws_pill_badge_at_rect_top_left() {
 }
 
 #[test]
-fn annotated_png_does_not_draw_note_panel() {
-    // Note panels were removed when the renderer was unified with the canvas
-    // exporter. Below the rect, pixels must stay white.
+fn annotated_png_draws_caption_below_rect_when_note_present() {
+    // When an annotation has a non-blank note, a caption box is rendered just
+    // below the rectangle. The pixel directly under the rect must not be white.
     let clean = solid_white_png(200, 200);
     let annos = vec![Annotation {
         id: "anno_1".into(),
@@ -322,16 +322,17 @@ fn annotated_png_does_not_draw_note_panel() {
             w: 60.0,
             h: 30.0,
         },
-        note: "this used to render a panel".into(),
+        note: "caption text".into(),
         label: "01".into(),
     }];
     let bytes = render_annotated_png(&clean, &annos, 2.0).unwrap();
     let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
-    let below_rect = img.get_pixel(40, 70);
-    assert_eq!(
-        below_rect,
-        &Rgba([255, 255, 255, 255]),
-        "no panel below the rect, got {below_rect:?}"
+    // rect bottom at scale 2 = (20+30)*2 = 100, offset 6*2=12, so caption top ~112.
+    // Sample at y=120 which should be inside the caption box.
+    let caption_px = img.get_pixel(40, 120);
+    assert!(
+        caption_px[0] < 250,
+        "expected a caption pixel below the rect, got {caption_px:?}"
     );
 }
 

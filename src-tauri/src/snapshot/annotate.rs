@@ -21,27 +21,16 @@ const PILL_R_CSS: f32 = 9.0;
 const BADGE_FONT_PX_CSS: f32 = 11.0;
 
 // CSS-pixel caption geometry; mirrors src/overlay/annotate.ts.
-#[allow(dead_code)]
 const CAPTION_BG: Rgba<u8> = Rgba([22, 22, 22, 255]); // #161616
-#[allow(dead_code)]
 const CAPTION_BORDER: Rgba<u8> = Rgba([238, 102, 51, 255]); // accent, opaque
-#[allow(dead_code)]
 const CAPTION_TEXT: Rgba<u8> = Rgba([170, 170, 170, 255]); // #aaaaaa
-#[allow(dead_code)]
 const CAPTION_MAX_W_CSS: f32 = 240.0;
-#[allow(dead_code)]
 const CAPTION_OFFSET_CSS: f32 = 6.0;
-#[allow(dead_code)]
 const CAPTION_PAD_X_CSS: f32 = 8.0;
-#[allow(dead_code)]
 const CAPTION_PAD_Y_CSS: f32 = 6.0;
-#[allow(dead_code)]
 const CAPTION_RADIUS_CSS: f32 = 6.0;
-#[allow(dead_code)]
 const CAPTION_BORDER_W_CSS: f32 = 1.0;
-#[allow(dead_code)]
 const CAPTION_FONT_PX_CSS: f32 = 13.0;
-#[allow(dead_code)]
 const CAPTION_LINE_HEIGHT: f32 = 1.4;
 
 #[derive(Debug, thiserror::Error)]
@@ -75,6 +64,10 @@ pub fn render_annotated_png(
     for anno in annotations {
         draw_rect_border(&mut img, anno, border_width);
         draw_pill_badge(&mut img, anno, pill_w, pill_h, pill_r, &font, badge_scale);
+    }
+
+    for anno in annotations {
+        draw_caption(&mut img, anno, scale_factor, &font);
     }
 
     let mut out = Vec::new();
@@ -154,7 +147,6 @@ fn draw_pill_badge(
 /// Greedy word-wrap `text` into lines no wider than `max_w` px under `font`/`scale`.
 /// Explicit newlines split paragraphs; a single word wider than `max_w` is
 /// hard-broken character-by-character so no line ever overflows.
-#[allow(dead_code)]
 fn wrap_text(text: &str, font: &FontRef<'_>, scale: PxScale, max_w: f32) -> Vec<String> {
     let scaled = font.as_scaled(scale);
     let char_w = |c: char| scaled.h_advance(scaled.scaled_glyph(c).id);
@@ -198,7 +190,6 @@ fn wrap_text(text: &str, font: &FontRef<'_>, scale: PxScale, max_w: f32) -> Vec<
 
 /// Fill a rounded rectangle by compositing axis-aligned bands and four corner
 /// circles. `r` is clamped to half the smaller side. All pixels written opaque.
-#[allow(dead_code)]
 fn draw_filled_rounded_rect(
     img: &mut RgbaImage,
     x: i32,
@@ -246,6 +237,76 @@ fn draw_filled_rounded_rect(
     draw_filled_circle_mut(img, (x + w - r - 1, y + r), r, color);
     draw_filled_circle_mut(img, (x + r, y + h - r - 1), r, color);
     draw_filled_circle_mut(img, (x + w - r - 1, y + h - r - 1), r, color);
+}
+
+/// Draw the annotation's note as a word-wrapped caption box anchored below the
+/// rectangle (flipped above on bottom-overflow, clamped fully on-canvas).
+/// No-op when the note is blank.
+fn draw_caption(img: &mut RgbaImage, anno: &Annotation, scale_factor: f32, font: &FontRef<'_>) {
+    let note = anno.note.trim();
+    if note.is_empty() {
+        return;
+    }
+
+    let pad_x = (CAPTION_PAD_X_CSS * scale_factor).round() as i32;
+    let pad_y = (CAPTION_PAD_Y_CSS * scale_factor).round() as i32;
+    let radius = (CAPTION_RADIUS_CSS * scale_factor).round() as i32;
+    let offset = (CAPTION_OFFSET_CSS * scale_factor).round() as i32;
+    let border_w = (CAPTION_BORDER_W_CSS * scale_factor).round().max(1.0) as i32;
+    let font_px = CAPTION_FONT_PX_CSS * scale_factor;
+    let scale = PxScale::from(font_px);
+    let line_h = (font_px * CAPTION_LINE_HEIGHT).round() as i32;
+    let max_box_w = (CAPTION_MAX_W_CSS * scale_factor).round() as i32;
+    let text_max_w = (max_box_w - 2 * pad_x).max(1) as f32;
+
+    let lines = wrap_text(note, font, scale, text_max_w);
+
+    let scaled = font.as_scaled(scale);
+    let widest = lines
+        .iter()
+        .map(|l| {
+            l.chars()
+                .map(|c| scaled.h_advance(scaled.scaled_glyph(c).id))
+                .sum::<f32>()
+        })
+        .fold(0.0_f32, f32::max);
+
+    let box_w = ((widest.ceil() as i32) + 2 * pad_x).min(max_box_w);
+    let box_h = lines.len() as i32 * line_h + 2 * pad_y;
+
+    let rect_x = anno.coords.x.round() as i32;
+    let rect_y = anno.coords.y.round() as i32;
+    let rect_h = anno.coords.h.round() as i32;
+    let img_w = img.width() as i32;
+    let img_h = img.height() as i32;
+
+    // Below the rect; flip above if placing below overflows the bottom edge.
+    let below_y = rect_y + rect_h + offset;
+    let mut box_y = if below_y + box_h > img_h {
+        rect_y - offset - box_h
+    } else {
+        below_y
+    };
+    box_y = box_y.clamp(0, (img_h - box_h).max(0));
+    let box_x = rect_x.clamp(0, (img_w - box_w).max(0));
+
+    // Border layer, then inset background fill -> clean 1px rounded border.
+    draw_filled_rounded_rect(img, box_x, box_y, box_w, box_h, radius, CAPTION_BORDER);
+    draw_filled_rounded_rect(
+        img,
+        box_x + border_w,
+        box_y + border_w,
+        box_w - 2 * border_w,
+        box_h - 2 * border_w,
+        (radius - border_w).max(0),
+        CAPTION_BG,
+    );
+
+    for (i, line) in lines.iter().enumerate() {
+        let tx = box_x + pad_x;
+        let ty = box_y + pad_y + i as i32 * line_h;
+        draw_text_mut(img, CAPTION_TEXT, tx, ty, scale, font, line);
+    }
 }
 
 #[cfg(test)]
@@ -314,5 +375,49 @@ mod tests {
         draw_filled_rounded_rect(&mut img, 4, 20, 4, 10, 6, Rgba([0, 0, 0, 255]));
         // Center of the first box should be filled black.
         assert_eq!(img.get_pixel(9, 6), &Rgba([0, 0, 0, 255]));
+    }
+
+    use crate::snapshot::Coords;
+
+    fn white_png(w: u32, h: u32) -> Vec<u8> {
+        let img = RgbaImage::from_pixel(w, h, Rgba([255, 255, 255, 255]));
+        let mut out = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
+        out
+    }
+
+    fn anno_with_note(note: &str) -> Annotation {
+        Annotation {
+            id: "a1".into(),
+            shape: "rect".into(),
+            coords: Coords { x: 40.0, y: 40.0, w: 120.0, h: 80.0 },
+            note: note.into(),
+            label: "01".into(),
+        }
+    }
+
+    #[test]
+    fn caption_draws_dark_pixels_below_the_rect_when_note_present() {
+        let clean = white_png(400, 400);
+        let out =
+            render_annotated_png(&clean, &[anno_with_note("hello world")], 1.0).unwrap();
+        let img = image::load_from_memory(&out).unwrap().to_rgba8();
+        assert_eq!(img.dimensions(), (400, 400), "dimensions must not change");
+        // The caption box sits just below the rect (rect bottom = 40+80 = 120,
+        // gap 6 -> box top ~126). Sample a pixel inside the box; it must be dark
+        // (#161616 fill or accent border), not the white background.
+        let px = img.get_pixel(50, 135);
+        assert!(px[0] < 250, "expected a non-white caption pixel, got {px:?}");
+    }
+
+    #[test]
+    fn no_caption_when_note_is_blank() {
+        let clean = white_png(400, 400);
+        let out = render_annotated_png(&clean, &[anno_with_note("   ")], 1.0).unwrap();
+        let img = image::load_from_memory(&out).unwrap().to_rgba8();
+        // Same sample point as above must stay white -- no caption box drawn.
+        assert_eq!(img.get_pixel(50, 135), &Rgba([255, 255, 255, 255]));
     }
 }
