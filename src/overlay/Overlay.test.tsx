@@ -3,10 +3,14 @@
 
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi, afterEach, beforeAll } from "vitest";
+import { describe, expect, it, vi, afterEach, beforeAll, beforeEach } from "vitest";
 import { render, act, cleanup } from "@testing-library/react";
 import { Overlay } from "./Overlay";
 import type { WindowModePayload } from "../picker/types";
+
+const { invokeMock } = vi.hoisted(() => ({
+  invokeMock: vi.fn((..._args: unknown[]) => Promise.resolve(null)),
+}));
 
 beforeAll(() => {
   // jsdom does not implement the Web Animations API. The frozen-frame shimmer
@@ -20,7 +24,7 @@ beforeAll(() => {
 });
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: () => Promise.resolve(null),
+  invoke: invokeMock,
 }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: () => Promise.resolve(() => {}),
@@ -57,17 +61,56 @@ describe("<Overlay/> window mode", () => {
     const payload = makeWindowPayload();
     presentWindowMode(payload);
 
-    const spotlight = getByTestId("window-spotlight");
-    const { window_rect_css } = payload;
-    expect(spotlight.style.left).toBe(`${window_rect_css.x}px`);
-    expect(spotlight.style.top).toBe(`${window_rect_css.y}px`);
-    expect(spotlight.style.width).toBe(`${window_rect_css.w}px`);
-    expect(spotlight.style.height).toBe(`${window_rect_css.h}px`);
-    // The dim lives in the box-shadow spread, leaving the window rect clear.
-    expect(spotlight.style.boxShadow).not.toBe("");
-    // Must not capture clicks — outside-click-to-cancel relies on the
-    // full-screen DrawingLayer underneath catching them.
-    expect(spotlight.style.pointerEvents).toBe("none");
+    const { window_rect_css: r } = payload;
+    // Four solid panels frame the clear window rect (top / bottom / left /
+    // right). Solid fills rasterise immediately; a 100vmax box-shadow spread
+    // rasterised late and flashed undimmed for a frame on show.
+    const top = getByTestId("window-dim-top");
+    expect(top.style.top).toBe("0px");
+    expect(top.style.height).toBe(`${r.y}px`);
+
+    const bottom = getByTestId("window-dim-bottom");
+    expect(bottom.style.top).toBe(`${r.y + r.h}px`);
+
+    const left = getByTestId("window-dim-left");
+    expect(left.style.top).toBe(`${r.y}px`);
+    expect(left.style.width).toBe(`${r.x}px`);
+    expect(left.style.height).toBe(`${r.h}px`);
+
+    const right = getByTestId("window-dim-right");
+    expect(right.style.top).toBe(`${r.y}px`);
+    expect(right.style.left).toBe(`${r.x + r.w}px`);
+    expect(right.style.height).toBe(`${r.h}px`);
+
+    for (const panel of [top, bottom, left, right]) {
+      // Dim is 40% black; panels must not capture clicks — outside-click-to-
+      // cancel relies on the full-screen DrawingLayer underneath catching them.
+      expect(panel.style.background).toContain("rgba(0, 0, 0");
+      expect(panel.style.pointerEvents).toBe("none");
+    }
+  });
+});
+
+describe("<Overlay/> post-paint signals", () => {
+  beforeEach(() => {
+    // Run rAF synchronously so the post-paint signals are observable here.
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    invokeMock.mockClear();
+  });
+
+  it("nudges the OS cursor after presenting so the crosshair appears without a manual mouse move", () => {
+    // The crosshair is a CSS cursor that macOS only redraws on a mouse event.
+    render(<Overlay />);
+    invokeMock.mockClear(); // ignore the mount-time get_latest_frame probe
+    presentWindowMode(makeWindowPayload());
+    expect(invokeMock).toHaveBeenCalledWith("refresh_cursor");
   });
 
   it("renders a clipped frozen-frame box mirroring the full-screen frozen render", () => {
