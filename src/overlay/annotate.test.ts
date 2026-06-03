@@ -1,6 +1,6 @@
 // ABOUTME: Tests for the canvas-based annotated PNG renderer.
-// ABOUTME: Verifies that renderAnnotated returns a base64 string and draws
-// ABOUTME: zero-padded labels on a pill badge for each annotation.
+// ABOUTME: Verifies renderAnnotated draws pill badges with zero-padded labels and
+// ABOUTME: note captions (wrapped, positioned, skipped when blank) for each annotation.
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 
 // Capture mock ctx as a module-level variable so assertions can reference it.
