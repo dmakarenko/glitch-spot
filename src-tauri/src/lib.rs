@@ -751,6 +751,16 @@ pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Resu
         if let Some(state) = app.try_state::<AppState>() {
             state.picker_state.reset_to_idle();
         }
+    } else {
+        // Fallback reveal: show_live presents at alpha 0; the frontend normally
+        // reveals via revealOverlay() one double-rAF after presentationId bumps.
+        // If that signal is ever lost, reveal after a short delay so the overlay
+        // can't stay invisible. Idempotent with the frontend self-reveal.
+        let app_fallback = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            let _ = overlay::reveal(&app_fallback);
+        });
     }
     result
 }
@@ -777,10 +787,21 @@ pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Re
     // overlay before capturing, a capture/encode error would otherwise leave the
     // grey overlay stuck on screen.
     let result = (|| -> anyhow::Result<()> {
-        // Paint the grey overlay immediately — before the (slower) capture — so
-        // pressing the shortcut feels instant. The capture excludes our own
-        // overlay window, so showing it first doesn't pollute the screenshot.
+        // Show the grey overlay immediately — before the (slower) capture — so
+        // pressing the shortcut feels instant. show_frozen_pending presents at
+        // alpha 0; the frontend's double-rAF revealOverlay() brings it to alpha 1
+        // once the grey veil has painted at the correct position.
         overlay::show_frozen_pending(app)?;
+
+        // Fallback reveal: if the frontend's revealOverlay() signal is ever lost,
+        // reveal after a short delay so the overlay can't stay invisible.
+        {
+            let app_fallback = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                let _ = overlay::reveal(&app_fallback);
+            });
+        }
 
         let frame = capture::capture_active_monitor(app)?;
 

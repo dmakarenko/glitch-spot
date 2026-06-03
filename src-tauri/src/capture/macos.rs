@@ -105,6 +105,7 @@ pub(super) fn capture_active_monitor(app: &tauri::AppHandle) -> Result<CapturedF
     let crop_y = work_pos.y.saturating_sub(monitor.position().y).max(0) as u32;
     let crop_w = work_size.width.min(pixel_width.saturating_sub(crop_x));
     let crop_h = work_size.height.min(pixel_height.saturating_sub(crop_y));
+
     let cropped = image::imageops::crop_imm(&img, crop_x, crop_y, crop_w, crop_h).to_image();
 
     Ok(CapturedFrame {

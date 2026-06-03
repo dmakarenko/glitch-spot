@@ -18,7 +18,9 @@ pub enum OverlayError {
     Serde(#[from] serde_json::Error),
 }
 
-fn position_over_active_monitor(app: &tauri::AppHandle) -> Result<WebviewWindow, OverlayError> {
+fn position_over_active_monitor(
+    app: &tauri::AppHandle,
+) -> Result<(WebviewWindow, PhysicalPosition<i32>, PhysicalSize<u32>), OverlayError> {
     let window: WebviewWindow = app
         .get_webview_window(OVERLAY_LABEL)
         .ok_or(OverlayError::WindowMissing)?;
@@ -49,7 +51,7 @@ fn position_over_active_monitor(app: &tauri::AppHandle) -> Result<WebviewWindow,
     window.set_position(PhysicalPosition::new(work_pos.x, work_pos.y))?;
     window.set_size(PhysicalSize::new(work_size.width, work_size.height))?;
 
-    Ok(window)
+    Ok((window, work_pos, work_size))
 }
 
 /// Set a webview window's alpha. The overlay and the picker pool are shown at
@@ -85,11 +87,13 @@ pub fn set_window_alpha(_window: &WebviewWindow, _alpha: f64) {}
 
 /// Show the overlay as a transparent annotation layer over the live desktop.
 pub fn show_live(app: &tauri::AppHandle) -> Result<(), OverlayError> {
-    let window = position_over_active_monitor(app)?;
+    let (window, work_pos, work_size) = position_over_active_monitor(app)?;
 
-    // Reset alpha in case a window-mode present was aborted before its reveal
-    // left the window at alpha 0; live/frozen overlays are always fully opaque.
-    set_window_alpha(&window, 1.0);
+    // Show at alpha 0 so that macOS constrainFrameRect's position push (observed
+    // on the primary display) isn't visible. The re-assert below corrects the
+    // position before the frontend signals reveal. The frontend's presentationId
+    // double-rAF effect calls revealOverlay() (~33ms) to bring alpha to 1.
+    set_window_alpha(&window, 0.0);
 
     // Synchronously reset any prior frozen frame the overlay might still be
     // painting from a previous show. The eval is processed by the webview's
@@ -98,6 +102,13 @@ pub fn show_live(app: &tauri::AppHandle) -> Result<(), OverlayError> {
 
     window.show()?;
     window.set_focus()?;
+    if window.outer_position().map_or(false, |actual| {
+        (actual.x - work_pos.x).unsigned_abs() > 10
+            || (actual.y - work_pos.y).unsigned_abs() > 10
+    }) {
+        window.set_position(PhysicalPosition::new(work_pos.x, work_pos.y))?;
+        window.set_size(PhysicalSize::new(work_size.width, work_size.height))?;
+    }
     Ok(())
 }
 
@@ -105,14 +116,32 @@ pub fn show_live(app: &tauri::AppHandle) -> Result<(), OverlayError> {
 /// engaged" backdrop. Shown immediately on trigger so the overlay paints before
 /// the (slower) screen capture runs; frames arrive afterwards via [`push_frame`].
 pub fn show_frozen_pending(app: &tauri::AppHandle) -> Result<(), OverlayError> {
-    let window = position_over_active_monitor(app)?;
+    let (window, work_pos, work_size) = position_over_active_monitor(app)?;
 
-    set_window_alpha(&window, 1.0);
+    // Show at alpha 0: prevents the brief wrong-position flash that macOS
+    // constrainFrameRect causes on show(), and prevents a stale capture from a
+    // prior session blinking in before React resets. The frontend's
+    // presentationId double-rAF effect calls revealOverlay() (~33ms) once the
+    // grey veil has painted at the correct position.
+    set_window_alpha(&window, 0.0);
 
     let _ = window.eval("if (window.__glitchSpotPresent) window.__glitchSpotPresent('frozen');");
 
     window.show()?;
     window.set_focus()?;
+
+    // Re-assert if macOS constrainFrameRect pushed the window during show().
+    // Empirically observed on the primary display: y jumps by ~1400px. Secondary
+    // display is not pushed and must NOT be re-asserted — unconditional re-assert
+    // corrupts the secondary position. Check first; only act if pushed.
+    if window.outer_position().map_or(false, |actual| {
+        (actual.x - work_pos.x).unsigned_abs() > 10
+            || (actual.y - work_pos.y).unsigned_abs() > 10
+    }) {
+        window.set_position(PhysicalPosition::new(work_pos.x, work_pos.y))?;
+        window.set_size(PhysicalSize::new(work_size.width, work_size.height))?;
+    }
+
     Ok(())
 }
 
