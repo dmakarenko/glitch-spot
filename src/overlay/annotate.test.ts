@@ -39,10 +39,10 @@ afterAll(() => {
   vi.unstubAllGlobals()
 })
 
-function installImageMock() {
+function installImageMock(width = 800, height = 600) {
   const ImageMock = vi.fn().mockImplementation(function (this: HTMLImageElement) {
-    Object.defineProperty(this, 'naturalWidth', { value: 800, configurable: true })
-    Object.defineProperty(this, 'naturalHeight', { value: 600, configurable: true })
+    Object.defineProperty(this, 'naturalWidth', { value: width, configurable: true })
+    Object.defineProperty(this, 'naturalHeight', { value: height, configurable: true })
     Object.defineProperty(this, 'src', {
       set(_url: string) {
         queueMicrotask(() => {
@@ -132,6 +132,25 @@ describe('renderAnnotated', () => {
     }
     // The wrapped lines reconstruct the original note (word order preserved).
     expect(captionCalls.map((c) => c[0]).join(' ')).toBe(note)
+  })
+
+  it('caps the caption box to the canvas width on a narrow image', async () => {
+    mockCtx.roundRect.mockClear()
+    const { renderAnnotated } = await import('./annotate')
+
+    // Canvas narrower than the 240px caption max; a long note would otherwise
+    // produce a box wider than the canvas and clip on the right.
+    installImageMock(100, 600)
+
+    const note = 'alpha bravo charlie delta echo foxtrot golf hotel india'
+    const annotations = [{ id: 'a1', x: 10, y: 20, w: 60, h: 30, note }]
+    await renderAnnotated('blob:fake', annotations, 1)
+
+    // Every roundRect (pill + caption border + caption fill) must fit within the
+    // 100px canvas — no box wider than the image.
+    const widths = mockCtx.roundRect.mock.calls.map((c) => c[2])
+    expect(widths.length).toBeGreaterThan(1) // a caption box was drawn
+    for (const w of widths) expect(w).toBeLessThanOrEqual(100)
   })
 
   it('draws no caption when the note is blank', async () => {

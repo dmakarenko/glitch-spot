@@ -73,6 +73,9 @@ export async function renderAnnotated(
   const CAPTION_FONT_PX = 13 * scaleFactor
   const CAPTION_LINE_HEIGHT = 1.4
   const lineH = Math.round(CAPTION_FONT_PX * CAPTION_LINE_HEIGHT)
+  // Cap the caption width to the canvas so a narrow capture wraps the note to fit
+  // rather than overflowing the right edge and clipping the text.
+  const captionMaxW = Math.min(CAPTION_MAX_W, canvas.width)
 
   annotations.forEach((rect) => {
     const note = rect.note.trim()
@@ -84,11 +87,11 @@ export async function renderAnnotated(
 
     ctx.font = `${CAPTION_FONT_PX}px system-ui`
     const measure = (s: string) => ctx.measureText(s).width
-    const textMaxW = Math.max(1, CAPTION_MAX_W - 2 * CAPTION_PAD_X)
+    const textMaxW = Math.max(1, captionMaxW - 2 * CAPTION_PAD_X)
     const lines = wrapNote(note, textMaxW, measure)
 
     const widest = lines.reduce((m, l) => Math.max(m, measure(l)), 0)
-    const boxW = Math.min(CAPTION_MAX_W, Math.ceil(widest) + 2 * CAPTION_PAD_X)
+    const boxW = Math.min(captionMaxW, Math.ceil(widest) + 2 * CAPTION_PAD_X)
     const boxH = lines.length * lineH + 2 * CAPTION_PAD_Y
 
     // Below the rect; flip above on bottom-overflow; clamp fully on-canvas.

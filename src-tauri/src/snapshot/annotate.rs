@@ -256,7 +256,11 @@ fn draw_caption(img: &mut RgbaImage, anno: &Annotation, scale_factor: f32, font:
     let font_px = CAPTION_FONT_PX_CSS * scale_factor;
     let scale = PxScale::from(font_px);
     let line_h = (font_px * CAPTION_LINE_HEIGHT).round() as i32;
-    let max_box_w = (CAPTION_MAX_W_CSS * scale_factor).round() as i32;
+    let img_w = img.width() as i32;
+    let img_h = img.height() as i32;
+    // Cap the caption width to the image so a narrow capture wraps the note to fit
+    // rather than overflowing the right edge and clipping the text.
+    let max_box_w = ((CAPTION_MAX_W_CSS * scale_factor).round() as i32).min(img_w);
     let text_max_w = (max_box_w - 2 * pad_x).max(1) as f32;
 
     let lines = wrap_text(note, font, scale, text_max_w);
@@ -277,8 +281,6 @@ fn draw_caption(img: &mut RgbaImage, anno: &Annotation, scale_factor: f32, font:
     let rect_x = anno.coords.x.round() as i32;
     let rect_y = anno.coords.y.round() as i32;
     let rect_h = anno.coords.h.round() as i32;
-    let img_w = img.width() as i32;
-    let img_h = img.height() as i32;
 
     // Below the rect; flip above if placing below overflows the bottom edge.
     let below_y = rect_y + rect_h + offset;
@@ -439,5 +441,33 @@ mod tests {
         // = 114; box spans y[114,144), so (50,140) lands inside the flipped box.
         let px = img.get_pixel(50, 140);
         assert!(px[0] < 250, "expected flipped caption pixel above the rect, got {px:?}");
+    }
+
+    #[test]
+    fn caption_does_not_clip_against_a_narrow_image() {
+        // A small rect near the top so the caption renders below it without flipping.
+        // The note is long enough that, uncapped, the caption box would be wider than
+        // this 130px image and get clipped at the right edge.
+        let anno = Annotation {
+            id: "a1".into(),
+            shape: "rect".into(),
+            coords: Coords { x: 10.0, y: 8.0, w: 40.0, h: 16.0 },
+            note: "alpha bravo charlie delta echo foxtrot golf hotel india juliet".into(),
+            label: "01".into(),
+        };
+        let w = 130u32;
+        let out = render_annotated_png(&white_png(w, 300), &[anno], 1.0).unwrap();
+        let img = image::load_from_memory(&out).unwrap().to_rgba8();
+
+        // At the image's right edge, mid-caption, the box must stay on-canvas: the
+        // pixel is either background (white) or the box's own border (accent, r >> b),
+        // never the interior fill (#161616, r≈b) that a right-clipped box leaves behind.
+        let px = img.get_pixel(w - 1, 55);
+        let is_white = px[0] > 250 && px[1] > 250 && px[2] > 250;
+        let is_border = px[0] as i32 > px[2] as i32 + 40;
+        assert!(
+            is_white || is_border,
+            "caption reached the image's right edge as interior fill (clipped), got {px:?}"
+        );
     }
 }
