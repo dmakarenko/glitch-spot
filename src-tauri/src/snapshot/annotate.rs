@@ -1,4 +1,4 @@
-// ABOUTME: Renders rectangle borders + numbered pill badges onto a clone of the
+// ABOUTME: Renders rectangle borders, numbered pill badges, and note captions onto a clone of the
 // ABOUTME: clean captured PNG to produce the annotated PNG for snapshot.images.annotated.
 
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
@@ -419,5 +419,25 @@ mod tests {
         let img = image::load_from_memory(&out).unwrap().to_rgba8();
         // Same sample point as above must stay white -- no caption box drawn.
         assert_eq!(img.get_pixel(50, 135), &Rgba([255, 255, 255, 255]));
+    }
+
+    #[test]
+    fn caption_flips_above_rect_near_bottom_edge() {
+        let clean = white_png(200, 200);
+        // Rect low on the canvas: below_y = 150 + 40 + 6 = 196; a one-line caption
+        // box (~30px tall) would overflow 200, so the caption flips ABOVE the rect.
+        let anno = Annotation {
+            id: "a1".into(),
+            shape: "rect".into(),
+            coords: Coords { x: 40.0, y: 150.0, w: 120.0, h: 40.0 },
+            note: "near the bottom".into(),
+            label: "01".into(),
+        };
+        let out = render_annotated_png(&clean, &[anno], 1.0).unwrap();
+        let img = image::load_from_memory(&out).unwrap().to_rgba8();
+        // box_h = round(13*1.4) + 2*round(6) = 18 + 12 = 30; flipped box_y = 150 - 6 - 30
+        // = 114; box spans y[114,144), so (50,140) lands inside the flipped box.
+        let px = img.get_pixel(50, 140);
+        assert!(px[0] < 250, "expected flipped caption pixel above the rect, got {px:?}");
     }
 }
