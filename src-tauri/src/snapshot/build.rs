@@ -8,8 +8,8 @@ use chrono::Utc;
 use crate::capture::CapturedFrame;
 use crate::snapshot::annotate::{render_annotated_png, AnnotateError};
 use crate::snapshot::{
-    annotated_png_filename, clean_png_filename, new_id, Annotation, Context, Coords, Images,
-    OsInfo, ScreenInfo, Snapshot,
+    annotated_png_filename, clean_png_filename, default_agent_prompt, new_id, Annotation, Context,
+    Coords, Images, OsInfo, ScreenInfo, Snapshot,
 };
 
 /// One annotation as received from the React side. Coordinates are CSS pixels
@@ -114,6 +114,7 @@ pub fn build(
             clean: clean_path.to_string_lossy().into_owned(),
             annotated: Some(annotated_path.to_string_lossy().into_owned()),
         },
+        agent_prompt: default_agent_prompt(),
     };
     Ok(BuiltSnapshot {
         snapshot,

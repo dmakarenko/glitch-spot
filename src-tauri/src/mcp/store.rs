@@ -136,6 +136,7 @@ mod tests {
                 window: None,
             },
             images: Images { clean: "/tmp/clean.png".to_string(), annotated: None },
+            agent_prompt: crate::snapshot::default_agent_prompt(),
         }
     }
 

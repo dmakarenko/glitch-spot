@@ -36,6 +36,7 @@ fn sample_snapshot() -> Snapshot {
             clean: "/tmp/glitch-spot-snap_test123.png".into(),
             annotated: None,
         },
+        agent_prompt: default_agent_prompt(),
     }
 }
 
@@ -66,6 +67,16 @@ fn annotation_serializes_with_label() {
     assert!(
         json.contains("\"label\":\"01\""),
         "expected label field on annotation, got {json}"
+    );
+}
+
+#[test]
+fn agent_prompt_present_in_json() {
+    let s = sample_snapshot();
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(
+        json.contains("\"agent_prompt\""),
+        "expected agent_prompt field in serialized JSON, got {json}"
     );
 }
 
@@ -401,6 +412,7 @@ fn context_window_round_trips() {
             }),
         },
         images: Images { clean: "x".into(), annotated: None },
+        agent_prompt: default_agent_prompt(),
     };
     let json = serde_json::to_string(&s).unwrap();
     let back: Snapshot = serde_json::from_str(&json).unwrap();
