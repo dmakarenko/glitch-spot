@@ -12,7 +12,7 @@ function createMockCtx() {
     strokeRect: vi.fn(),
     fillRect: vi.fn(),
     fillText: vi.fn(),
-    measureText: vi.fn().mockReturnValue({ width: 50 }),
+    measureText: vi.fn((s: string) => ({ width: s.length * 8 })),
     beginPath: vi.fn(),
     arc: vi.fn(),
     roundRect: vi.fn(),
@@ -90,5 +90,37 @@ describe('renderAnnotated', () => {
 
     const labels = mockCtx.fillText.mock.calls.map((c) => c[0])
     expect(labels).toEqual(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10'])
+  })
+
+  it('draws a caption box and the note text when a note is present', async () => {
+    mockCtx.fillText.mockClear()
+    mockCtx.roundRect.mockClear()
+    const { renderAnnotated } = await import('./annotate')
+
+    installImageMock()
+
+    const annotations = [{ id: 'a1', x: 10, y: 20, w: 100, h: 50, note: 'fix this' }]
+    await renderAnnotated('blob:fake', annotations, 1)
+
+    // Caption text is drawn (a short note stays one line: "fix this").
+    const texts = mockCtx.fillText.mock.calls.map((c) => c[0])
+    expect(texts).toContain('fix this')
+    // Pill badge (1 roundRect) + caption border + caption fill (2 roundRect) = 3.
+    expect(mockCtx.roundRect).toHaveBeenCalledTimes(3)
+  })
+
+  it('draws no caption when the note is blank', async () => {
+    mockCtx.fillText.mockClear()
+    mockCtx.roundRect.mockClear()
+    const { renderAnnotated } = await import('./annotate')
+
+    installImageMock()
+
+    const annotations = [{ id: 'a1', x: 10, y: 20, w: 100, h: 50, note: '   ' }]
+    await renderAnnotated('blob:fake', annotations, 1)
+
+    const texts = mockCtx.fillText.mock.calls.map((c) => c[0])
+    expect(texts).toEqual(['01']) // only the badge label, no caption text
+    expect(mockCtx.roundRect).toHaveBeenCalledTimes(1) // only the pill badge
   })
 })
