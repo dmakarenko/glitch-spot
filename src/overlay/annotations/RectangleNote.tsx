@@ -3,10 +3,20 @@
 
 import { useEffect, useRef } from "react";
 import type { Rect } from "./types";
+import { noteVariant } from "./noteVariant";
 
 const NOTE_WIDTH = 240;
 const NOTE_OFFSET = 6;
 const NOTE_MIN_HEIGHT = 56;
+
+// Translucent backgrounds rotated per annotation: neutral, warm red, cool cyan.
+// Paired with a blur so the captured backdrop reads softly behind the text.
+const VARIANT_BACKGROUNDS = [
+  "rgba(22, 22, 22, 0.80)",
+  "rgba(28, 18, 16, 0.80)",
+  "rgba(16, 22, 24, 0.80)",
+] as const;
+const NOTE_BLUR = "blur(8px)";
 
 type Props = {
   rect: Rect;
@@ -30,6 +40,8 @@ export function RectangleNote({ rect, containerHeight, onChange, autoFocus }: Pr
   // Keep within left/right bounds.
   const left = Math.max(0, Math.min(rect.x, window.innerWidth - NOTE_WIDTH));
 
+  const background = VARIANT_BACKGROUNDS[noteVariant(rect.id)];
+
   return (
     <textarea
       ref={ref}
@@ -48,7 +60,9 @@ export function RectangleNote({ rect, containerHeight, onChange, autoFocus }: Pr
         minHeight: NOTE_MIN_HEIGHT,
         padding: "6px 8px",
         font: "13px/1.4 system-ui",
-        background: "#161616",
+        background,
+        backdropFilter: NOTE_BLUR,
+        WebkitBackdropFilter: NOTE_BLUR,
         color: "#aaaaaa",
         border: "1px solid rgba(238, 102, 51, 0.28)",
         borderRadius: 6,
