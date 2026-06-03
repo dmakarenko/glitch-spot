@@ -53,6 +53,8 @@ export function Picker() {
   const [session, setSession] = useState<PickerStartPayload | null>(null);
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const [drawState, setDrawState] = useState<DrawState | null>(null);
+  // Bumped each time Rust starts a picker session; drives the post-paint reveal.
+  const [presentationId, setPresentationId] = useState(0);
 
   // Always-current ref so the global mouseup handler never reads stale state.
   const drawStateRef = useRef<DrawState | null>(null);
@@ -65,11 +67,38 @@ export function Picker() {
         setSession(p);
         setHoveredId(null);
         setDrawState(null);
+        setPresentationId((n) => n + 1);
       };
     return () => {
       delete (window as unknown as { __glitchSpotPickerStart?: unknown }).__glitchSpotPickerStart;
     };
   }, []);
+
+  // After each session start, once the picker's frame has painted (one rAF past
+  // the React commit), reveal this picker window. The pool windows are reused
+  // across displays and shown at alpha 0 (rendering but invisible) so each
+  // repaints the new session's layout before becoming visible — otherwise show()
+  // composites the previous display's retained buffer and flashes the last
+  // session's hover checker for a beat. The native command fades the calling
+  // window in to alpha 1; a fallback timer in show_picker reveals anyway if this
+  // signal is ever lost.
+  useEffect(() => {
+    if (presentationId === 0) return;
+    // Double rAF: a single rAF fires before the upcoming paint, so revealing
+    // then can flip alpha to 1 before the new frame composites — across a
+    // display/DPR change that lags and briefly shows the stale backing buffer.
+    // The second rAF runs after the first paint, so the new layout is on screen.
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        invoke("reveal_window");
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [presentationId]);
 
   // Esc cancels.
   useEffect(() => {

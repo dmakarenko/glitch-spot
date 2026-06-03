@@ -52,9 +52,44 @@ fn position_over_active_monitor(app: &tauri::AppHandle) -> Result<WebviewWindow,
     Ok(window)
 }
 
+/// Set a webview window's alpha. The overlay and the picker pool are shown at
+/// alpha 0 (ordered-in but invisible) so each repaints the target display's
+/// layout before it's revealed at alpha 1 — otherwise `show()` composites the
+/// previous display's retained backing buffer for a beat. A hidden (occluded)
+/// WKWebView won't repaint, but an ordered-in alpha-0 window renders normally.
+#[cfg(target_os = "macos")]
+pub fn set_window_alpha(window: &WebviewWindow, alpha: f64) {
+    let Ok(ns_window) = window.ns_window() else {
+        return;
+    };
+    // `setAlphaValue:` is AppKit and must run on the main thread; the overlay
+    // commands run on the async runtime. run_on_main_thread queues FIFO behind
+    // the window's other main-thread ops (set_position/show), so an alpha-0 set
+    // before show() is applied before the window is ordered in. The pointer is
+    // cast through usize to cross the Send boundary into the closure.
+    let ns_window = ns_window as usize;
+    let _ = window.run_on_main_thread(move || {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        let ns_window = ns_window as *mut AnyObject;
+        if !ns_window.is_null() {
+            unsafe {
+                let _: () = msg_send![ns_window, setAlphaValue: alpha];
+            }
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_window_alpha(_window: &WebviewWindow, _alpha: f64) {}
+
 /// Show the overlay as a transparent annotation layer over the live desktop.
 pub fn show_live(app: &tauri::AppHandle) -> Result<(), OverlayError> {
     let window = position_over_active_monitor(app)?;
+
+    // Reset alpha in case a window-mode present was aborted before its reveal
+    // left the window at alpha 0; live/frozen overlays are always fully opaque.
+    set_window_alpha(&window, 1.0);
 
     // Synchronously reset any prior frozen frame the overlay might still be
     // painting from a previous show. The eval is processed by the webview's
@@ -71,6 +106,8 @@ pub fn show_live(app: &tauri::AppHandle) -> Result<(), OverlayError> {
 /// the (slower) screen capture runs; frames arrive afterwards via [`push_frame`].
 pub fn show_frozen_pending(app: &tauri::AppHandle) -> Result<(), OverlayError> {
     let window = position_over_active_monitor(app)?;
+
+    set_window_alpha(&window, 1.0);
 
     let _ = window.eval("if (window.__glitchSpotPresent) window.__glitchSpotPresent('frozen');");
 
@@ -147,6 +184,14 @@ pub fn show_window_mode(
     window.set_position(PhysicalPosition::new(pos.x, pos.y))?;
     window.set_size(PhysicalSize::new(size.width, size.height))?;
 
+    // Show invisible: the overlay is a single window repositioned across
+    // displays, and macOS retains the previous display's last-painted buffer.
+    // Showing at alpha 0 lets the (now ordered-in, un-occluded) window repaint
+    // this display's window-mode layout while unseen; `reveal` (or the fallback
+    // timer in picker_select) fades it to alpha 1 once the frontend signals its
+    // frame has painted, so show() can't flash the prior display's stale frame.
+    set_window_alpha(&window, 0.0);
+
     let json = serde_json::to_string(payload)?;
     let js = format!(
         "if (window.__glitchSpotPresent) window.__glitchSpotPresent('window', {});",
@@ -162,5 +207,17 @@ pub fn show_window_mode(
     // (show_live/show_frozen_pending) start below the menu bar and aren't constrained.
     window.set_position(PhysicalPosition::new(pos.x, pos.y))?;
     window.set_size(PhysicalSize::new(size.width, size.height))?;
+    Ok(())
+}
+
+/// Fade the overlay in to full opacity after a window-mode present (see
+/// `show_window_mode`). Idempotent — the frontend signals this one rAF after its
+/// window-mode frame paints, and picker_select schedules a fallback call in case
+/// that signal is lost; calling it on an already-opaque overlay is harmless.
+pub fn reveal(app: &tauri::AppHandle) -> Result<(), OverlayError> {
+    let window = app
+        .get_webview_window(OVERLAY_LABEL)
+        .ok_or(OverlayError::WindowMissing)?;
+    set_window_alpha(&window, 1.0);
     Ok(())
 }

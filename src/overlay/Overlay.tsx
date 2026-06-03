@@ -339,14 +339,34 @@ export function Overlay() {
   }, [annotations.rects, mode])
 
   // After each present, once the overlay's frame has painted (one rAF past the
-  // React commit), nudge the OS cursor. The crosshair is a CSS cursor and macOS
-  // only redraws the cursor on a mouse event, so a synthetic OS mouse-move makes
-  // WebKit re-evaluate it against the painted DOM rather than leaving a stale
-  // arrow under a stationary pointer.
+  // React commit), do two things. First, reveal the overlay: in window mode the
+  // native layer shows the window at alpha 0 (rendering but invisible) so it
+  // repaints the new display's layout before becoming visible — this signal
+  // tells it the frame has landed and it can fade in to alpha 1, so show() can't
+  // composite the previous display's stale buffer for a beat. (No-op natively
+  // for live/frozen presents, which are shown opaque directly.) Second, nudge
+  // the OS cursor: the crosshair is a CSS cursor and macOS only redraws the
+  // cursor on a mouse event, so a synthetic OS mouse-move makes WebKit
+  // re-evaluate it against the painted DOM rather than leaving a stale arrow
+  // under a stationary pointer.
   useEffect(() => {
     if (presentationId === 0) return
-    const raf = requestAnimationFrame(() => bridge.refreshCursor())
-    return () => cancelAnimationFrame(raf)
+    // Double rAF: a single rAF fires *before* the upcoming paint, so revealing
+    // then can flip alpha to 1 before the new frame has composited — across a
+    // display/DPR change (Retina ↔ non-Retina) that first composite lags and the
+    // window briefly shows its stale backing buffer. The second rAF runs after
+    // the first paint completes, so the new layout is on screen before reveal.
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        bridge.revealOverlay()
+        bridge.refreshCursor()
+      })
+    })
+    return () => {
+      cancelAnimationFrame(raf1)
+      cancelAnimationFrame(raf2)
+    }
   }, [presentationId])
 
   if (mode === 'window' && windowPayload) {

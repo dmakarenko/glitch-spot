@@ -14,6 +14,12 @@ export interface OverlayBridge {
   // after the overlay is shown under a stationary pointer the cursor stays an
   // arrow until the user moves the mouse.
   refreshCursor(): void
+  // Signal that the latest present has painted. The window-mode overlay is
+  // shown at alpha 0 (rendering but invisible) so it repaints the target
+  // display's layout before becoming visible; this tells the native layer the
+  // frame has landed and it can fade the window in to alpha 1. No-op natively
+  // when no reveal is pending.
+  revealOverlay(): void
 }
 
 type TauriFrame = {
@@ -42,6 +48,9 @@ class TauriBridge implements OverlayBridge {
   }
   refreshCursor(): void {
     invoke('refresh_cursor')
+  }
+  revealOverlay(): void {
+    invoke('reveal_window')
   }
 }
 
@@ -96,6 +105,9 @@ class ElectronBridge implements OverlayBridge {
   // Electron renders the overlay in a real focused window; the CSS-cursor
   // redraw quirk is specific to the Tauri menu-bar overlay.
   refreshCursor(): void {}
+  // Electron shows the overlay window directly; the alpha-0 reveal dance is
+  // specific to the Tauri single-window overlay repositioned across displays.
+  revealOverlay(): void {}
 }
 
 export function createBridge(): OverlayBridge {
