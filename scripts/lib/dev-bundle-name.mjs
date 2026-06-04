@@ -15,7 +15,9 @@ export function devProductName(baseName, sha, dirty = false) {
 // instead of merging with the installed release app under the shared id.
 export function devIdentifier(baseIdentifier) {
   if (!baseIdentifier) throw new Error("baseIdentifier is required");
-  return `${baseIdentifier}.debug`;
+  const lastDot = baseIdentifier.lastIndexOf(".");
+  const prefix = lastDot === -1 ? baseIdentifier : baseIdentifier.slice(0, lastDot);
+  return `${prefix}.dev`;
 }
 
 function readConf(root) {
