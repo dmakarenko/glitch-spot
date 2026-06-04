@@ -19,8 +19,8 @@ describe("devProductName", () => {
 });
 
 describe("devIdentifier", () => {
-  it("appends a .debug suffix so dev builds get their own TCC entry", () => {
-    expect(devIdentifier("com.glitchspot.app")).toBe("com.glitchspot.app.debug");
+  it("replaces the last segment with .dev so dev builds get their own TCC entry", () => {
+    expect(devIdentifier("spot.glitch.release")).toBe("spot.glitch.dev");
   });
   it("requires a base identifier", () => {
     expect(() => devIdentifier("")).toThrow();
