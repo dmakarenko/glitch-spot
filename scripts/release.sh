@@ -77,9 +77,16 @@ done
 
 node scripts/lib/version.mjs apply "$BUMP" >/dev/null
 
-# --- Build (unsigned, arm64) ---
+# --- Build (ad-hoc signed, arm64) ---
 echo "Building DMG…"
 npm run tauri -- build
+
+# Tauri ad-hoc signs the bundle (bundle.macOS.signingIdentity "-"). Without a valid
+# bundle signature, Apple Silicon reports downloaded builds as "damaged and can't be
+# opened". Refuse to ship a DMG whose app fails strict signature verification.
+APP="$(ls -dt src-tauri/target/release/bundle/macos/*.app 2>/dev/null | head -1 || true)"
+[ -n "$APP" ] || { echo "No .app bundle was produced under target/release/bundle/macos/." >&2; exit 1; }
+codesign --verify --deep --strict --verbose=2 "$APP" || { echo "Code signature verification failed for $APP — refusing to ship." >&2; exit 1; }
 
 DMG="$(ls -t src-tauri/target/release/bundle/dmg/*.dmg 2>/dev/null | head -1 || true)"
 [ -n "$DMG" ] || { echo "No DMG was produced under target/release/bundle/dmg/." >&2; exit 1; }
@@ -105,9 +112,9 @@ git push origin "$TAG"
 
 BODY="$(mktemp)"
 cat > "$BODY" <<'NOTE'
-This build is **unsigned**. On first launch macOS will block it.
+This build is **ad-hoc signed but not notarized**, so macOS warns on first launch.
 
-Right-click **Glitch Spot.app** → **Open** (then confirm in the dialog), or run:
+**Right-click Glitch Spot.app → Open**, then confirm in the dialog. If it's still blocked, run:
 
 ```
 xattr -dr com.apple.quarantine "/Applications/Glitch Spot.app"
