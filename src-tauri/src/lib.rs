@@ -935,6 +935,23 @@ mod tests {
         let _router = crate::share::router::build_share_router(temp.path().to_path_buf());
         // Smoke test: just confirm construction doesn't panic.
     }
+
+    // Only meaningful in a debug build, where autostart_on_launch() must be false.
+    // Under `cargo test --release` debug_assertions is off (release autostarts), so
+    // skip rather than assert the wrong branch.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_builds_do_not_autoregister_login_item() {
+        assert!(!autostart_on_launch());
+    }
+}
+
+/// Whether this build registers itself as a macOS login item on launch.
+/// Only release builds auto-start; dev/debug builds must not add themselves to
+/// Login Items, since their productName is per-build and the binary lives at a
+/// throwaway path.
+fn autostart_on_launch() -> bool {
+    !cfg!(debug_assertions)
 }
 
 pub fn run() {
@@ -1005,7 +1022,10 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             // Auto-enable login item on first launch (if not already registered).
-            {
+            // Release builds only: dev/debug builds carry a per-build productName,
+            // so auto-registering would litter ~/Library/LaunchAgents with throwaway
+            // entries pointing at temporary build paths.
+            if autostart_on_launch() {
                 use tauri_plugin_autostart::ManagerExt;
                 let manager = app.autolaunch();
                 if !manager.is_enabled().unwrap_or(false) {

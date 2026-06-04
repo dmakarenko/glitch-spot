@@ -11,6 +11,7 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bundle:dev": "bash scripts/bundle-dev.sh",
     "release": "bash scripts/release.sh"
   },
   "dependencies": {
