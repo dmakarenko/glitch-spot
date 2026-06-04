@@ -6,6 +6,41 @@ use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
 
 const OVERLAY_LABEL: &str = "overlay";
 
+// CGPoint / CGSize / CGRect with explicit Objective-C encodings so msg_send!
+// dispatches struct returns/arguments correctly on both x86_64 and aarch64.
+#[cfg(target_os = "macos")]
+mod cg {
+    use objc2::encode::{Encode, Encoding, RefEncode};
+
+    #[repr(C)] #[derive(Clone, Copy)]
+    pub struct CGPoint { pub x: f64, pub y: f64 }
+    unsafe impl Encode for CGPoint {
+        const ENCODING: Encoding = Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]);
+    }
+    unsafe impl RefEncode for CGPoint {
+        const ENCODING_REF: Encoding = Encoding::Pointer(&Self::ENCODING);
+    }
+
+    #[repr(C)] #[derive(Clone, Copy)]
+    pub struct CGSize { pub width: f64, pub height: f64 }
+    unsafe impl Encode for CGSize {
+        const ENCODING: Encoding = Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]);
+    }
+    unsafe impl RefEncode for CGSize {
+        const ENCODING_REF: Encoding = Encoding::Pointer(&Self::ENCODING);
+    }
+
+    #[repr(C)] #[derive(Clone, Copy)]
+    pub struct CGRect { pub origin: CGPoint, pub size: CGSize }
+    unsafe impl Encode for CGRect {
+        const ENCODING: Encoding =
+            Encoding::Struct("CGRect", &[CGPoint::ENCODING, CGSize::ENCODING]);
+    }
+    unsafe impl RefEncode for CGRect {
+        const ENCODING_REF: Encoding = Encoding::Pointer(&Self::ENCODING);
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum OverlayError {
     #[error("overlay window not found")]
@@ -18,9 +53,17 @@ pub enum OverlayError {
     Serde(#[from] serde_json::Error),
 }
 
-fn position_over_active_monitor(
-    app: &tauri::AppHandle,
-) -> Result<(WebviewWindow, PhysicalPosition<i32>, PhysicalSize<u32>), OverlayError> {
+/// Which of the window's screen rectangles to re-assert the frame to after
+/// show(). The work-area overlays (live/frozen) want `Visible` (excludes the
+/// menu bar and Dock — their capture is cropped to match); window mode wants
+/// `Full` so a window overlapping the menu bar can be annotated.
+#[derive(Clone, Copy)]
+enum ScreenRect {
+    Visible,
+    Full,
+}
+
+fn position_over_active_monitor(app: &tauri::AppHandle) -> Result<WebviewWindow, OverlayError> {
     let window: WebviewWindow = app
         .get_webview_window(OVERLAY_LABEL)
         .ok_or(OverlayError::WindowMissing)?;
@@ -51,8 +94,51 @@ fn position_over_active_monitor(
     window.set_position(PhysicalPosition::new(work_pos.x, work_pos.y))?;
     window.set_size(PhysicalSize::new(work_size.width, work_size.height))?;
 
-    Ok((window, work_pos, work_size))
+    Ok(window)
 }
+
+/// Re-assert the window's frame after show() to undo macOS constrainFrameRect
+/// position pushes. Reads the window's own screen geometry via AppKit
+/// (`[NSWindow screen]` → `visibleFrame`/`frame`) and applies it with
+/// `[NSWindow setFrame:display:NO]`, queued on the main thread FIFO after
+/// show(). This runs after orderFront:/constrainFrameRect have pushed the
+/// window, and uses AppKit's own coordinate space — so it is correct for any
+/// display arrangement and any mix of scale factors, without manual conversion.
+/// Both Tauri's show() and this call use run_on_main_thread, so FIFO ordering
+/// is guaranteed.
+#[cfg(target_os = "macos")]
+fn reassert_screen_frame(window: &WebviewWindow, which: ScreenRect) {
+    use cg::CGRect;
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    let Ok(ns_window) = window.ns_window() else { return; };
+    let ns_window = ns_window as usize;
+
+    let _ = window.run_on_main_thread(move || {
+        let ns_window = ns_window as *mut AnyObject;
+        if ns_window.is_null() {
+            return;
+        }
+        unsafe {
+            // The window stays on its intended screen through the constrain push
+            // (which only nudges it down within the same display), so its own
+            // screen's geometry is the frame we want.
+            let screen: *mut AnyObject = msg_send![ns_window, screen];
+            if screen.is_null() {
+                return;
+            }
+            let rect: CGRect = match which {
+                ScreenRect::Visible => msg_send![screen, visibleFrame],
+                ScreenRect::Full => msg_send![screen, frame],
+            };
+            let _: () = msg_send![ns_window, setFrame: rect, display: false];
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reassert_screen_frame(_window: &WebviewWindow, _which: ScreenRect) {}
 
 /// Set a webview window's alpha. The overlay and the picker pool are shown at
 /// alpha 0 (ordered-in but invisible) so each repaints the target display's
@@ -87,7 +173,7 @@ pub fn set_window_alpha(_window: &WebviewWindow, _alpha: f64) {}
 
 /// Show the overlay as a transparent annotation layer over the live desktop.
 pub fn show_live(app: &tauri::AppHandle) -> Result<(), OverlayError> {
-    let (window, work_pos, work_size) = position_over_active_monitor(app)?;
+    let window = position_over_active_monitor(app)?;
 
     // Show at alpha 0 so that macOS constrainFrameRect's position push (observed
     // on the primary display) isn't visible. The re-assert below corrects the
@@ -102,13 +188,9 @@ pub fn show_live(app: &tauri::AppHandle) -> Result<(), OverlayError> {
 
     window.show()?;
     window.set_focus()?;
-    if window.outer_position().map_or(false, |actual| {
-        (actual.x - work_pos.x).unsigned_abs() > 10
-            || (actual.y - work_pos.y).unsigned_abs() > 10
-    }) {
-        window.set_position(PhysicalPosition::new(work_pos.x, work_pos.y))?;
-        window.set_size(PhysicalSize::new(work_size.width, work_size.height))?;
-    }
+    // Queue setFrame:display:NO on the main thread FIFO after orderFront: so it
+    // runs after constrainFrameRect has pushed the window, undoing the push.
+    reassert_screen_frame(&window, ScreenRect::Visible);
     Ok(())
 }
 
@@ -116,7 +198,7 @@ pub fn show_live(app: &tauri::AppHandle) -> Result<(), OverlayError> {
 /// engaged" backdrop. Shown immediately on trigger so the overlay paints before
 /// the (slower) screen capture runs; frames arrive afterwards via [`push_frame`].
 pub fn show_frozen_pending(app: &tauri::AppHandle) -> Result<(), OverlayError> {
-    let (window, work_pos, work_size) = position_over_active_monitor(app)?;
+    let window = position_over_active_monitor(app)?;
 
     // Show at alpha 0: prevents the brief wrong-position flash that macOS
     // constrainFrameRect causes on show(), and prevents a stale capture from a
@@ -129,18 +211,9 @@ pub fn show_frozen_pending(app: &tauri::AppHandle) -> Result<(), OverlayError> {
 
     window.show()?;
     window.set_focus()?;
-
-    // Re-assert if macOS constrainFrameRect pushed the window during show().
-    // Empirically observed on the primary display: y jumps by ~1400px. Secondary
-    // display is not pushed and must NOT be re-asserted — unconditional re-assert
-    // corrupts the secondary position. Check first; only act if pushed.
-    if window.outer_position().map_or(false, |actual| {
-        (actual.x - work_pos.x).unsigned_abs() > 10
-            || (actual.y - work_pos.y).unsigned_abs() > 10
-    }) {
-        window.set_position(PhysicalPosition::new(work_pos.x, work_pos.y))?;
-        window.set_size(PhysicalSize::new(work_size.width, work_size.height))?;
-    }
+    // Queue setFrame:display:NO on the main thread FIFO after orderFront: so it
+    // runs after constrainFrameRect has pushed the window, undoing the push.
+    reassert_screen_frame(&window, ScreenRect::Visible);
 
     Ok(())
 }
@@ -229,12 +302,12 @@ pub fn show_window_mode(
     let _ = window.eval(&js);
     window.show()?;
     window.set_focus()?;
-    // Re-assert after show()/set_focus(): macOS constrainFrameRect can push the
-    // window on show. Work-area overlays use a conditional re-assert (they check
-    // outer_position first); full-display mode re-asserts unconditionally since
-    // it covers the menu-bar region and is always constrained.
-    window.set_position(PhysicalPosition::new(pos.x, pos.y))?;
-    window.set_size(PhysicalSize::new(size.width, size.height))?;
+    // Re-assert after show(): macOS constrainFrameRect pushes a full-display
+    // window down (it covers the menu-bar region). Queue setFrame: on the main
+    // thread FIFO after orderFront: so it runs after the push — re-asserting via
+    // Tauri set_position here would run on the async runtime *before* the queued
+    // orderFront:/constrainFrameRect in release builds, missing the push.
+    reassert_screen_frame(&window, ScreenRect::Full);
     Ok(())
 }
 
