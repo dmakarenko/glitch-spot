@@ -112,9 +112,14 @@ git push origin "$TAG"
 
 BODY="$(mktemp)"
 cat > "$BODY" <<'NOTE'
-This build is **ad-hoc signed but not notarized**, so macOS warns on first launch.
+This build is **ad-hoc signed but not notarized**, so macOS blocks it on first launch with *"Apple could not verify…"*.
 
-**Right-click Glitch Spot.app → Open**, then confirm in the dialog. If it's still blocked, run:
+To open it (once):
+
+1. Click **Done** (not "Move to Bin").
+2. Open **System Settings → Privacy & Security**, scroll to **Security**, and click **Open Anyway** next to Glitch Spot.
+
+Or clear the quarantine flag from a terminal:
 
 ```
 xattr -dr com.apple.quarantine "/Applications/Glitch Spot.app"
