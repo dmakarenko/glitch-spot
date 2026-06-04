@@ -44,11 +44,17 @@ fn main() {
     println!("cargo:rustc-env=GIT_BRANCH={branch}");
     println!("cargo:rustc-env=GIT_SHA={sha}");
 
-    // No `rerun-if-changed` lines on purpose: we want the git values to
-    // refresh on *every* rebuild, including pure src-edit cycles that don't
-    // touch git. With no explicit triggers, cargo falls back to scanning the
-    // package source tree — which already changes whenever a rebuild is
-    // meaningful, so build.rs reruns exactly when we want it to.
+    // Re-run when HEAD moves so the embedded SHA stays accurate. Without an
+    // explicit trigger, cargo fingerprints only the package's source files —
+    // git HEAD is invisible to it, so a commit/checkout/rebase would NOT
+    // re-run this script and the embedded SHA would go stale (it did: builds
+    // kept baking an old commit across rebases). `logs/HEAD` (the reflog) is
+    // rewritten on every HEAD movement — commit, checkout, rebase, reset — and
+    // `--git-path` resolves it correctly inside linked worktrees too.
+    let logs_head = git_output(&["rev-parse", "--git-path", "logs/HEAD"]);
+    if logs_head != "unknown" {
+        println!("cargo:rerun-if-changed={logs_head}");
+    }
 
     tauri_build::build()
 }
