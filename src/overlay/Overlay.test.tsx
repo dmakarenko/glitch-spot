@@ -4,7 +4,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi, afterEach, beforeAll, beforeEach } from "vitest";
-import { render, act, cleanup, findByText } from "@testing-library/react";
+import { render, act, cleanup, findByText, waitFor } from "@testing-library/react";
 import { Overlay } from "./Overlay";
 import type { WindowModePayload } from "../picker/types";
 
@@ -144,6 +144,75 @@ describe("Overlay clipboard format", () => {
     // Toolbar is now visible (1 rect); "Copy Image" must appear in the save button
     expect(invokeMock).toHaveBeenCalledWith("get_clipboard_format");
     await findByText(container, /Copy Image/);
+  });
+});
+
+describe("Overlay handleFormatChange", () => {
+  afterEach(() => {
+    cleanup();
+    invokeMock.mockReset();
+    invokeMock.mockImplementation((..._args: unknown[]) => Promise.resolve(null));
+  });
+
+  it("persists the format via set_clipboard_format then triggers save_snapshot", async () => {
+    // Arrange: get_clipboard_format returns 'json' (the default) on init
+    invokeMock.mockImplementation((cmd: unknown) => {
+      if (cmd === "get_clipboard_format") return Promise.resolve("json" as unknown as null);
+      return Promise.resolve(null);
+    });
+
+    const { getByTestId } = render(<Overlay />);
+
+    // Present with an initial rect so Toolbar renders (rectCount > 0)
+    act(() => {
+      (
+        window as unknown as {
+          __glitchSpotPresent: (mode: string, payload: unknown) => void;
+        }
+      ).__glitchSpotPresent("window", {
+        app_name: "Safari",
+        title: "Reader",
+        window_id: 7,
+        window_rect_css: { x: 0, y: 0, w: 800, h: 600 },
+        window_rect_physical: { x: 0, y: 0, w: 1600, h: 1200 },
+        display_scale_factor: 2,
+        initial_rect_css: { x: 10, y: 10, w: 200, h: 100 },
+      });
+    });
+
+    // Wait for async getClipboardFormat to resolve
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    invokeMock.mockClear();
+
+    // Act: open the format dropdown and select 'image'
+    act(() => {
+      getByTestId("toolbar-chevron").click();
+    });
+
+    await act(async () => {
+      getByTestId("toolbar-option-image").click();
+      // Flush the awaited setClipboardFormat promise inside handleFormatChange
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Assert: set_clipboard_format was called with 'image' before save_snapshot
+    const calls = invokeMock.mock.calls.map((c) => c[0]);
+    const formatIdx = calls.indexOf("set_clipboard_format");
+    const saveIdx = calls.indexOf("save_snapshot");
+
+    expect(formatIdx).toBeGreaterThanOrEqual(0);
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("set_clipboard_format", { format: "image" });
+    });
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("save_snapshot", expect.anything());
+    });
+    // Ordering: persist must precede save
+    expect(formatIdx).toBeLessThan(saveIdx);
   });
 });
 
