@@ -144,18 +144,25 @@ git push origin "$TAG"
 
 BODY="$(mktemp)"
 cat > "$BODY" <<'NOTE'
-This build is **signed but not notarized by Apple**, so macOS blocks it on first launch with *"Apple could not verify…"*.
+This build is **signed but not notarized by Apple**, so macOS shows *"Apple could not verify…"* — first when you open the downloaded **`.dmg`**, and possibly again on the app's first launch. This is expected; the app is safe to open.
 
-To open it (once):
+**Easiest — clear the quarantine flag in Terminal, then open the DMG:**
 
-1. Click **Done** (not "Move to Bin").
-2. Open **System Settings → Privacy & Security**, scroll to **Security**, and click **Open Anyway** next to Glitch Spot.
+```
+xattr -dr com.apple.quarantine ~/Downloads/Glitch-Spot_*_aarch64.dmg
+open ~/Downloads/Glitch-Spot_*_aarch64.dmg
+```
 
-Or clear the quarantine flag from a terminal:
+Drag **Glitch Spot** to Applications. If the app is still blocked on first launch:
 
 ```
 xattr -dr com.apple.quarantine "/Applications/Glitch Spot.app"
 ```
+
+**Or via System Settings** (repeat at each prompt — once for the DMG, once for the app):
+
+1. Click **Done** (not "Move to Bin").
+2. Open **System Settings → Privacy & Security**, scroll to **Security**, and click **Open Anyway**.
 
 ---
 NOTE
