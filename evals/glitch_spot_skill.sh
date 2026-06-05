@@ -36,7 +36,7 @@ run_with_timeout() {
 }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BINARY="$REPO_ROOT/src-tauri/target/debug/mcp_server"
+BINARY="$REPO_ROOT/src-tauri/target/debug/examples/mcp_server"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -47,7 +47,7 @@ build_server() {
         # shellcheck source=/dev/null
         [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
     fi
-    (cd "$REPO_ROOT/src-tauri" && cargo build --bin mcp_server) \
+    (cd "$REPO_ROOT/src-tauri" && cargo build --example mcp_server) \
         || { echo "ERROR: cargo build failed (see output above)."; exit 1; }
 }
 
@@ -193,7 +193,7 @@ This eval cannot be automated because it requires a multi-turn CC session.
 
 Steps:
   1. Start the server:
-       src-tauri/target/debug/mcp_server
+       src-tauri/target/debug/examples/mcp_server
 
   2. In a new terminal, open a CC session:
        claude

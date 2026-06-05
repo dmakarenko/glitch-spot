@@ -13,10 +13,6 @@ default-run = "glitch_spot"
 name = "glitch_spot"
 crate-type = ["lib", "cdylib", "staticlib"]
 
-[[bin]]
-name = "mcp_server"
-path = "src/bin/mcp_server.rs"
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
