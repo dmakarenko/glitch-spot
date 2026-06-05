@@ -30,6 +30,12 @@ need node; need gh; need cargo; need git
 # host would mislabel the artifact, so refuse rather than ship a wrong-arch DMG.
 [ "$(uname -m)" = "arm64" ] || { echo "This release builds an arm64-only DMG; host arch is '$(uname -m)'. Aborting." >&2; exit 1; }
 
+# The bundle identifier anchors both TCC permission grants and the signing designated
+# requirement. Renaming it orphans every existing grant with no migration path, so pin it.
+EXPECTED_ID="spot.glitch.release"
+ACTUAL_ID="$(node -p "require('$ROOT/src-tauri/tauri.conf.json').identifier")"
+[ "$ACTUAL_ID" = "$EXPECTED_ID" ] || { echo "tauri.conf.json identifier is '$ACTUAL_ID', expected '$EXPECTED_ID'. Renaming the bundle id orphans all TCC grants — aborting." >&2; exit 1; }
+
 if [ "$DRY" -eq 0 ]; then
   branch="$(git rev-parse --abbrev-ref HEAD)"
   [ "$branch" = "main" ] || { echo "Releases must be cut from 'main' (currently on '$branch'). Use --dry-run to test elsewhere." >&2; exit 1; }
@@ -77,16 +83,42 @@ done
 
 node scripts/lib/version.mjs apply "$BUMP" >/dev/null
 
-# --- Build (ad-hoc signed, arm64) ---
+# --- Build (signed with the stable release identity, arm64) ---
+# Sign releases with a self-signed code-signing identity so the designated requirement
+# is anchored to the certificate rather than a per-build cdhash. That keeps the app's
+# identity stable across rebuilds, so a granted Screen Recording permission survives
+# updates instead of re-prompting every release. The identity lives only on this
+# machine — keep the exported .p12 backed up. Dev/clone builds stay ad-hoc via
+# tauri.conf.json's signingIdentity "-".
+#
+# The cert is self-signed (CSSMERR_TP_NOT_TRUSTED), so it never appears under
+# `find-identity -v` (valid-only); list without -v and match by name.
+SIGN_ID="Glitch Spot Self-Signed"
+if security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_ID"; then
+  export APPLE_SIGNING_IDENTITY="$SIGN_ID"
+  echo "Signing identity: $SIGN_ID"
+elif [ "$DRY" -eq 1 ]; then
+  echo "WARNING: signing identity '$SIGN_ID' not in keychain — dry-run will build ad-hoc." >&2
+else
+  echo "Release signing identity '$SIGN_ID' not found. Import the .p12 backup into the login keychain first." >&2
+  exit 1
+fi
+
 echo "Building DMG…"
 npm run tauri -- build
 
-# Tauri ad-hoc signs the bundle (bundle.macOS.signingIdentity "-"). Without a valid
-# bundle signature, Apple Silicon reports downloaded builds as "damaged and can't be
-# opened". Refuse to ship a DMG whose app fails strict signature verification.
+# Without a valid bundle signature, Apple Silicon reports downloaded builds as "damaged
+# and can't be opened". Refuse to ship a DMG whose app fails strict signature verification.
 APP="$(ls -dt src-tauri/target/release/bundle/macos/*.app 2>/dev/null | head -1 || true)"
 [ -n "$APP" ] || { echo "No .app bundle was produced under target/release/bundle/macos/." >&2; exit 1; }
 codesign --verify --deep --strict --verbose=2 "$APP" || { echo "Code signature verification failed for $APP — refusing to ship." >&2; exit 1; }
+
+# When signed with the release identity, the designated requirement must be anchored to
+# the certificate (stable across rebuilds), not a bare cdhash. A cdhash DR means the cert
+# was not actually used — every update would then orphan the prior permission grant.
+if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+  codesign -d -r- "$APP" 2>&1 | grep -q "certificate leaf" || { echo "Signed bundle's designated requirement is not certificate-anchored — refusing to ship." >&2; exit 1; }
+fi
 
 DMG="$(ls -t src-tauri/target/release/bundle/dmg/*.dmg 2>/dev/null | head -1 || true)"
 [ -n "$DMG" ] || { echo "No DMG was produced under target/release/bundle/dmg/." >&2; exit 1; }
@@ -112,7 +144,7 @@ git push origin "$TAG"
 
 BODY="$(mktemp)"
 cat > "$BODY" <<'NOTE'
-This build is **ad-hoc signed but not notarized**, so macOS blocks it on first launch with *"Apple could not verify…"*.
+This build is **signed but not notarized by Apple**, so macOS blocks it on first launch with *"Apple could not verify…"*.
 
 To open it (once):
 
