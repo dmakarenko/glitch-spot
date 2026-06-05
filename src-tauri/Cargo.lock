@@ -1603,7 +1603,7 @@ dependencies = [
 
 [[package]]
 name = "glitch_spot"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "ab_glyph",
  "anyhow",
