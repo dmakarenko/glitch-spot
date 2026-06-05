@@ -229,10 +229,28 @@ async fn save_snapshot(
     }
     tray::refresh_menu(&app);
 
-    let json = serde_json::to_string_pretty(&snap).map_err(|e| e.to_string())?;
-    app.clipboard()
-        .write_text(json)
-        .map_err(|e| format!("clipboard: {e}"))?;
+    match state.settings.current_clipboard_format() {
+        settings::ClipboardFormat::Json | settings::ClipboardFormat::Prompt => {
+            // Prompt is reserved; falls through to JSON until implemented.
+            let json = serde_json::to_string_pretty(&snap).map_err(|e| e.to_string())?;
+            app.clipboard()
+                .write_text(json)
+                .map_err(|e| format!("clipboard: {e}"))?;
+        }
+        settings::ClipboardFormat::Image => {
+            let rgba = image::load_from_memory_with_format(
+                &built.annotated_bytes,
+                image::ImageFormat::Png,
+            )
+            .map_err(|e| format!("image decode: {e}"))?
+            .to_rgba8();
+            let (w, h) = (rgba.width(), rgba.height());
+            let tauri_img = tauri::image::Image::new_owned(rgba.into_vec(), w, h);
+            app.clipboard()
+                .write_image(&tauri_img)
+                .map_err(|e| format!("clipboard image: {e}"))?;
+        }
+    }
 
     overlay::hide(&app).map_err(|e| e.to_string())?;
     state.picker_state.reset_to_idle();
@@ -746,6 +764,24 @@ fn set_tray_appearance(
     do_set_tray_appearance(&state, animated, coloured)
 }
 
+#[tauri::command]
+fn get_clipboard_format(state: tauri::State<'_, AppState>) -> String {
+    state.settings.current_clipboard_format().as_str().to_string()
+}
+
+#[tauri::command]
+fn set_clipboard_format(
+    state: tauri::State<'_, AppState>,
+    format: String,
+) -> Result<(), String> {
+    let fmt = settings::ClipboardFormat::from_name(&format)
+        .ok_or_else(|| format!("unknown clipboard format: {format}"))?;
+    state
+        .settings
+        .save_clipboard_format(&state.config_dir, fmt)
+        .map_err(|e| e.to_string())
+}
+
 pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if let Some(state) = app.try_state::<AppState>() {
         state.picker_state.try_enter_live().map_err(anyhow::Error::msg)?;
@@ -1082,6 +1118,8 @@ pub fn run() {
             picker_select,
             picker_cancel,
             set_tray_appearance,
+            get_clipboard_format,
+            set_clipboard_format,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
