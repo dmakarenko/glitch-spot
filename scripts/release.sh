@@ -104,11 +104,11 @@ else
   exit 1
 fi
 
-echo "Building DMG…"
+echo "Building app…"
 npm run tauri -- build
 
 # Without a valid bundle signature, Apple Silicon reports downloaded builds as "damaged
-# and can't be opened". Refuse to ship a DMG whose app fails strict signature verification.
+# and can't be opened". Refuse to ship a build whose app fails strict signature verification.
 APP="$(ls -dt src-tauri/target/release/bundle/macos/*.app 2>/dev/null | head -1 || true)"
 [ -n "$APP" ] || { echo "No .app bundle was produced under target/release/bundle/macos/." >&2; exit 1; }
 codesign --verify --deep --strict --verbose=2 "$APP" || { echo "Code signature verification failed for $APP — refusing to ship." >&2; exit 1; }
@@ -120,10 +120,13 @@ if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
   codesign -d -r- "$APP" 2>&1 | grep -q "certificate leaf" || { echo "Signed bundle's designated requirement is not certificate-anchored — refusing to ship." >&2; exit 1; }
 fi
 
-DMG="$(ls -t src-tauri/target/release/bundle/dmg/*.dmg 2>/dev/null | head -1 || true)"
-[ -n "$DMG" ] || { echo "No DMG was produced under target/release/bundle/dmg/." >&2; exit 1; }
-ARTIFACT="/tmp/Glitch-Spot_${NEW}_aarch64.dmg"
-cp "$DMG" "$ARTIFACT"
+# Distribute the signed .app as a zip (via ditto, which preserves the code signature —
+# plain `zip` can corrupt bundle signatures). A zip avoids the DMG-mount Gatekeeper gate
+# macOS 26 adds, so users hit a single "could not verify" prompt instead of two.
+ARTIFACT="/tmp/Glitch-Spot_${NEW}_aarch64.zip"
+rm -f "$ARTIFACT"
+ditto -c -k --keepParent "$APP" "$ARTIFACT"
+[ -s "$ARTIFACT" ] || { echo "Failed to produce the .app zip at $ARTIFACT." >&2; exit 1; }
 echo "Artifact: $ARTIFACT"
 
 if [ "$DRY" -eq 1 ]; then
@@ -144,25 +147,22 @@ git push origin "$TAG"
 
 BODY="$(mktemp)"
 cat > "$BODY" <<'NOTE'
-This build is **signed but not notarized by Apple**, so macOS shows *"Apple could not verify…"* — first when you open the downloaded **`.dmg`**, and possibly again on the app's first launch. This is expected; the app is safe to open.
+This build is **signed but not notarized by Apple**, so macOS shows *"Apple could not verify…"* on first launch. This is expected; the app is safe to open.
 
-**Easiest — clear the quarantine flag in Terminal, then open the DMG:**
+**Install:**
 
-```
-xattr -dr com.apple.quarantine ~/Downloads/Glitch-Spot_*_aarch64.dmg
-open ~/Downloads/Glitch-Spot_*_aarch64.dmg
-```
+1. Unzip the download (double-click) — you'll get **Glitch Spot.app**.
+2. **Move it to /Applications** (running it from Downloads can misbehave).
+3. Launch it, then get past the one-time prompt either way below.
 
-Drag **Glitch Spot** to Applications. If the app is still blocked on first launch:
+**Terminal** — clear the quarantine flag and open it:
 
 ```
 xattr -dr com.apple.quarantine "/Applications/Glitch Spot.app"
+open "/Applications/Glitch Spot.app"
 ```
 
-**Or via System Settings** (repeat at each prompt — once for the DMG, once for the app):
-
-1. Click **Done** (not "Move to Bin").
-2. Open **System Settings → Privacy & Security**, scroll to **Security**, and click **Open Anyway**.
+**Or System Settings:** click **Done** (not "Move to Bin"), then open **System Settings → Privacy & Security**, scroll to **Security**, and click **Open Anyway**.
 
 ---
 NOTE
