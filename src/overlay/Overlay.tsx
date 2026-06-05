@@ -3,6 +3,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { createBridge } from './bridge'
+import type { ClipboardFormat } from './bridge'
 import { DrawingLayer, nextRectId } from './annotations/DrawingLayer'
 import { MIN_RECT_DIMENSION } from './annotations/state'
 import { DiscardModal } from './annotations/DiscardModal'
@@ -194,6 +195,7 @@ export function Overlay() {
   const imageUrlRef = useRef<string | null>(null)
   const [annotations, dispatch] = useReducer(reducer, initialState)
   const [showDiscardModal, setShowDiscardModal] = useState(false)
+  const [clipboardFormat, setClipboardFormat] = useState<ClipboardFormat>('json')
   // Bumped each time Rust presents the overlay; drives the post-paint cursor
   // refresh below.
   const [presentationId, setPresentationId] = useState(0)
@@ -213,6 +215,16 @@ export function Overlay() {
       setShowDiscardModal(false)
     } catch (err) {
       console.error('saveSnapshot failed', err)
+    }
+  }
+
+  const handleFormatChange = async (format: ClipboardFormat) => {
+    try {
+      await bridge.setClipboardFormat(format)
+      setClipboardFormat(format)
+      handleSave()
+    } catch (err) {
+      console.error('setClipboardFormat failed', err)
     }
   }
 
@@ -259,6 +271,8 @@ export function Overlay() {
         }
       }
     };
+
+    bridge.getClipboardFormat().then(setClipboardFormat).catch(console.error)
 
     let unlistenFrame: (() => void) | null = null;
     let cancelled = false;
@@ -417,7 +431,7 @@ export function Overlay() {
             }
           }}
         />
-        <Toolbar rectCount={annotations.rects.length} onSave={handleSave} />
+        <Toolbar rectCount={annotations.rects.length} clipboardFormat={clipboardFormat} onSave={handleSave} onChangeFormat={handleFormatChange} />
         {showDiscardModal && (
           <DiscardModal
             onDiscard={() => {
@@ -456,7 +470,7 @@ export function Overlay() {
         }}
       />
       <DrawingLayer state={annotations} dispatch={dispatch} />
-      <Toolbar rectCount={annotations.rects.length} onSave={handleSave} />
+      <Toolbar rectCount={annotations.rects.length} clipboardFormat={clipboardFormat} onSave={handleSave} onChangeFormat={handleFormatChange} />
       {showDiscardModal && (
         <DiscardModal
           onDiscard={() => {

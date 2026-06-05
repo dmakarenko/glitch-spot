@@ -60,6 +60,34 @@ impl SnapshotRetention {
     }
 }
 
+/// Which format is copied to the clipboard after a successful save.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClipboardFormat {
+    #[default]
+    Json,
+    Image,
+    Prompt,
+}
+
+impl ClipboardFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Json    => "json",
+            Self::Image   => "image",
+            Self::Prompt  => "prompt",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<Self> {
+        match s {
+            "json"   => Some(Self::Json),
+            "image"  => Some(Self::Image),
+            "prompt" => Some(Self::Prompt),
+            _        => None,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct ConfigFile {
     #[serde(default)]
@@ -96,6 +124,8 @@ struct TraySection {
 struct SnapshotSection {
     #[serde(default)]
     retention: Option<String>,
+    #[serde(default)]
+    clipboard_format: Option<String>,
 }
 
 pub struct Settings {
@@ -108,6 +138,7 @@ pub struct Settings {
     tray_animated: Arc<AtomicBool>,
     tray_coloured: Arc<AtomicBool>,
     snapshot_retention: RwLock<SnapshotRetention>,
+    clipboard_format: RwLock<ClipboardFormat>,
 }
 
 impl Settings {
@@ -167,12 +198,20 @@ impl Settings {
             .and_then(SnapshotRetention::from_name)
             .unwrap_or_default();
 
+        let clipboard_format = parsed
+            .get("snapshot")
+            .and_then(|s| s.get("clipboard_format"))
+            .and_then(|v| v.as_str())
+            .and_then(ClipboardFormat::from_name)
+            .unwrap_or_default();
+
         Ok(Settings {
             provider: RwLock::new(provider),
             mcp_port,
             tray_animated: Arc::new(AtomicBool::new(tray_animated)),
             tray_coloured: Arc::new(AtomicBool::new(tray_coloured)),
             snapshot_retention: RwLock::new(snapshot_retention),
+            clipboard_format: RwLock::new(clipboard_format),
         })
     }
 
@@ -231,6 +270,19 @@ impl Settings {
         self.write_config_file(dir)
     }
 
+    pub fn current_clipboard_format(&self) -> ClipboardFormat {
+        *self.clipboard_format.read().expect("settings lock poisoned")
+    }
+
+    /// Update the in-memory clipboard format AND persist it to disk.
+    pub fn save_clipboard_format(&self, dir: &Path, format: ClipboardFormat) -> io::Result<()> {
+        {
+            let mut w = self.clipboard_format.write().expect("settings lock poisoned");
+            *w = format;
+        }
+        self.write_config_file(dir)
+    }
+
     /// Snapshot all in-memory settings into the on-disk config. All `save_*`
     /// methods go through here so that saving one section never silently drops
     /// the others.
@@ -247,6 +299,7 @@ impl Settings {
             },
             snapshot: SnapshotSection {
                 retention: Some(self.current_retention().as_str().to_string()),
+                clipboard_format: Some(self.current_clipboard_format().as_str().to_string()),
             },
         };
         let text = toml::to_string_pretty(&cfg).map_err(io::Error::other)?;
@@ -521,5 +574,60 @@ mod tests {
         assert_eq!(reloaded.current_provider(), ProviderKind::Ngrok, "provider preserved");
         assert_eq!(reloaded.current_tray(), (false, false), "tray preserved");
         assert_eq!(reloaded.current_retention(), SnapshotRetention::Days7, "retention applied");
+    }
+
+    #[test]
+    fn missing_clipboard_format_yields_json_default() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.current_clipboard_format(), ClipboardFormat::Json);
+    }
+
+    #[test]
+    fn explicit_clipboard_format_image_is_parsed() {
+        let temp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            b"[snapshot]\nclipboard_format = \"image\"\n",
+        )
+        .unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.current_clipboard_format(), ClipboardFormat::Image);
+    }
+
+    #[test]
+    fn unknown_clipboard_format_falls_back_to_json() {
+        let temp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            b"[snapshot]\nclipboard_format = \"bogus\"\n",
+        )
+        .unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.current_clipboard_format(), ClipboardFormat::Json);
+    }
+
+    #[test]
+    fn save_clipboard_format_roundtrip() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        settings.save_clipboard_format(temp.path(), ClipboardFormat::Image).unwrap();
+
+        let reloaded = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(reloaded.current_clipboard_format(), ClipboardFormat::Image);
+    }
+
+    #[test]
+    fn save_clipboard_format_preserves_other_sections() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        settings.save_provider(temp.path(), ProviderKind::Ngrok).unwrap();
+        settings.save_tray_appearance(temp.path(), false, false).unwrap();
+        settings.save_clipboard_format(temp.path(), ClipboardFormat::Image).unwrap();
+
+        let reloaded = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(reloaded.current_provider(), ProviderKind::Ngrok, "provider preserved");
+        assert_eq!(reloaded.current_tray(), (false, false), "tray preserved");
+        assert_eq!(reloaded.current_clipboard_format(), ClipboardFormat::Image, "format applied");
     }
 }
