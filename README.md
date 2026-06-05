@@ -28,18 +28,23 @@ result becomes a structured snapshot your AI coding agent can read directly.
 
 ## Install
 
-Builds are **unsigned** and **Apple Silicon only** (arm64), so macOS Gatekeeper blocks the
-first launch.
+Builds are **signed but not notarized** and **Apple Silicon only** (arm64), so macOS shows a
+one-time *"Apple could not verify…"* prompt on first launch.
 
-1. Download `Glitch-Spot_<version>_aarch64.dmg` from the
+1. Download `Glitch-Spot_<version>_aarch64.zip` from the
    [latest release](https://github.com/dmakarenko/glitch-spot/releases/latest).
-2. Open the DMG and drag **Glitch Spot** to **Applications**.
-3. First launch: right-click **Glitch Spot.app** → **Open**, then confirm. (A normal
-   double-click only offers "Move to Trash".) Or clear the quarantine flag manually:
+2. Double-click to unzip, then drag **Glitch Spot** to **Applications**.
+3. Clear the one-time prompt — fastest via Terminal:
 
    ```
    xattr -dr com.apple.quarantine "/Applications/Glitch Spot.app"
+   open "/Applications/Glitch Spot.app"
    ```
+
+   Or open **System Settings → Privacy & Security** and click **Open Anyway**.
+
+See **[docs/INSTALL.md](docs/INSTALL.md)** for the full walkthrough with screenshots,
+including granting Screen Recording permission.
 
 The app appears in the menu bar — there is no Dock icon or window.
 
@@ -58,12 +63,12 @@ Built and published locally (no CI). From a clean `main`:
 
 ```bash
 npm run release -- patch        # or minor | major | an explicit X.Y.Z
-npm run release -- patch --dry-run   # build the DMG, change nothing in git/GitHub
+npm run release -- patch --dry-run   # build the app, change nothing in git/GitHub
 ```
 
 This bumps the version across `package.json`, `package-lock.json`,
 `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock`; commits and
-tags `vX.Y.Z`; builds an unsigned arm64 DMG; pushes; and creates the GitHub Release with
+tags `vX.Y.Z`; builds a signed arm64 `.zip`; pushes; and creates the GitHub Release with
 auto-generated notes.
 
 If a release fails **before** the commit (e.g. the build errors), the version files are
