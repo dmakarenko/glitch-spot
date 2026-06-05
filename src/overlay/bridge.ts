@@ -4,6 +4,8 @@ import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import type { AnnotationPayload, GlitchSpotNativeBridge } from '../../packages/electron/src/types'
 
+export type ClipboardFormat = 'json' | 'image' | 'prompt'
+
 export interface OverlayBridge {
   onFrame(cb: (blobUrl: string) => void): Promise<() => void>
   getFrame(): Promise<string | null>
@@ -20,6 +22,8 @@ export interface OverlayBridge {
   // frame has landed and it can fade the window in to alpha 1. No-op natively
   // when no reveal is pending.
   revealOverlay(): void
+  getClipboardFormat(): Promise<ClipboardFormat>
+  setClipboardFormat(format: ClipboardFormat): Promise<void>
 }
 
 type TauriFrame = {
@@ -51,6 +55,12 @@ class TauriBridge implements OverlayBridge {
   }
   revealOverlay(): void {
     invoke('reveal_window')
+  }
+  async getClipboardFormat(): Promise<ClipboardFormat> {
+    return invoke<string>('get_clipboard_format') as Promise<ClipboardFormat>
+  }
+  async setClipboardFormat(format: ClipboardFormat): Promise<void> {
+    await invoke('set_clipboard_format', { format })
   }
 }
 
@@ -108,6 +118,10 @@ class ElectronBridge implements OverlayBridge {
   // Electron shows the overlay window directly; the alpha-0 reveal dance is
   // specific to the Tauri single-window overlay repositioned across displays.
   revealOverlay(): void {}
+  async getClipboardFormat(): Promise<ClipboardFormat> {
+    return 'json'
+  }
+  async setClipboardFormat(_format: ClipboardFormat): Promise<void> {}
 }
 
 export function createBridge(): OverlayBridge {

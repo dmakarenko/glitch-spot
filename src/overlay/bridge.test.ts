@@ -7,6 +7,40 @@ beforeEach(() => {
   delete window.glitchSpotBridge
 })
 
+describe('TauriBridge clipboard format', () => {
+  it('exposes getClipboardFormat', async () => {
+    const { createBridge } = await import('./bridge')
+    const bridge = createBridge()
+    expect(typeof bridge.getClipboardFormat).toBe('function')
+  })
+
+  it('exposes setClipboardFormat', async () => {
+    const { createBridge } = await import('./bridge')
+    const bridge = createBridge()
+    expect(typeof bridge.setClipboardFormat).toBe('function')
+  })
+})
+
+describe('ElectronBridge clipboard format', () => {
+  it('getClipboardFormat resolves to json', async () => {
+    window.glitchSpotBridge = {
+      onFrame: vi.fn(), offFrame: vi.fn(), saveSnapshot: vi.fn(), cancel: vi.fn(),
+    }
+    const { createBridge } = await import('./bridge')
+    const bridge = createBridge()
+    await expect(bridge.getClipboardFormat()).resolves.toBe('json')
+  })
+
+  it('setClipboardFormat resolves without throwing', async () => {
+    window.glitchSpotBridge = {
+      onFrame: vi.fn(), offFrame: vi.fn(), saveSnapshot: vi.fn(), cancel: vi.fn(),
+    }
+    const { createBridge } = await import('./bridge')
+    const bridge = createBridge()
+    await expect(bridge.setClipboardFormat('image')).resolves.toBeUndefined()
+  })
+})
+
 describe('createBridge', () => {
   it('returns TauriBridge when neither __TAURI__ nor glitchSpotBridge is set (Tauri 2 default)', async () => {
     // Tauri 2 does not set window.__TAURI__ unless withGlobalTauri is enabled
