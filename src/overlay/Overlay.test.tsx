@@ -4,7 +4,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi, afterEach, beforeAll, beforeEach } from "vitest";
-import { render, act, cleanup } from "@testing-library/react";
+import { render, act, cleanup, findByText } from "@testing-library/react";
 import { Overlay } from "./Overlay";
 import type { WindowModePayload } from "../picker/types";
 
@@ -88,6 +88,62 @@ describe("<Overlay/> window mode", () => {
       expect(panel.style.background).toContain("rgba(0, 0, 0");
       expect(panel.style.pointerEvents).toBe("none");
     }
+  });
+});
+
+describe("Overlay clipboard format", () => {
+  afterEach(() => {
+    cleanup();
+    invokeMock.mockReset();
+    invokeMock.mockImplementation((..._args: unknown[]) => Promise.resolve(null));
+  });
+
+  it("passes clipboardFormat prop to Toolbar", async () => {
+    // Make getClipboardFormat return 'image' so Toolbar renders "Copy Image"
+    invokeMock.mockImplementation((cmd: unknown) => {
+      if (cmd === "get_clipboard_format") return Promise.resolve("image" as unknown as null);
+      return Promise.resolve(null);
+    });
+
+    const { container } = render(<Overlay />);
+
+    // Add a rect so Toolbar becomes visible (Toolbar returns null when rectCount === 0)
+    act(() => {
+      (
+        window as unknown as {
+          __glitchSpotPresent: (mode: string) => void;
+        }
+      ).__glitchSpotPresent("frozen");
+    });
+
+    // Draw a rect by dispatching directly via the state — simulate a rect in the
+    // DOM by looking for the toolbar after state propagates.
+    // We need a rect to make Toolbar render. We dispatch a synthetic present with
+    // an initial rect via window mode with initial_rect_css.
+    act(() => {
+      (
+        window as unknown as {
+          __glitchSpotPresent: (mode: string, payload: unknown) => void;
+        }
+      ).__glitchSpotPresent("window", {
+        app_name: "Safari",
+        title: "Reader",
+        window_id: 7,
+        window_rect_css: { x: 0, y: 0, w: 800, h: 600 },
+        window_rect_physical: { x: 0, y: 0, w: 1600, h: 1200 },
+        display_scale_factor: 2,
+        initial_rect_css: { x: 10, y: 10, w: 200, h: 100 },
+      });
+    });
+
+    // Wait for the async getClipboardFormat call to resolve and re-render
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Toolbar is now visible (1 rect); "Copy Image" must appear in the save button
+    expect(invokeMock).toHaveBeenCalledWith("get_clipboard_format");
+    await findByText(container, /Copy Image/);
   });
 });
 
