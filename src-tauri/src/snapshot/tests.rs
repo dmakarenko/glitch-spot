@@ -19,6 +19,7 @@ fn sample_snapshot() -> Snapshot {
             note: "make this smaller".into(),
             label: "01".into(),
         }],
+        redactions: vec![],
         context: Context {
             screen: ScreenInfo {
                 width: 2560,
@@ -397,6 +398,7 @@ fn context_window_round_trips() {
         created_at: "2026-05-27T10:00:00Z".into(),
         mode: "window".into(),
         annotations: vec![],
+        redactions: vec![],
         context: Context {
             screen: ScreenInfo {
                 width: 1440,
@@ -499,4 +501,20 @@ fn context_window_omitted_when_none() {
     s.context.window = None;
     let json = serde_json::to_string(&s).unwrap();
     assert!(!json.contains("\"window\""), "expected `window` key omitted, got: {json}");
+}
+
+#[test]
+fn snapshot_without_redactions_field_deserializes_to_empty() {
+    // Older snapshots have no `redactions` key; serde(default) must fill it.
+    let json = r#"{
+        "id": "x", "created_at": "t", "mode": "frozen",
+        "annotations": [],
+        "context": {
+            "screen": {"width": 1, "height": 1, "scale_factor": 1.0, "display_index": 0},
+            "os": {"platform": "macos", "version": "14"}
+        },
+        "images": {"clean": "c", "annotated": "a"}
+    }"#;
+    let snap: crate::snapshot::Snapshot = serde_json::from_str(json).unwrap();
+    assert!(snap.redactions.is_empty());
 }

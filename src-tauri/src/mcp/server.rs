@@ -239,6 +239,7 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             mode: "frozen".to_string(),
             annotations: vec![],
+            redactions: vec![],
             context: Context {
                 screen: ScreenInfo { width: 1440, height: 900, scale_factor: 2.0, display_index: 0 },
                 os: OsInfo { platform: "macos".to_string(), version: "15.0".to_string() },

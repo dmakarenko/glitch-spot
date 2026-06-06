@@ -102,6 +102,7 @@ pub fn build(
         created_at: Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         mode: mode.to_string(),
         annotations,
+        redactions: vec![],
         context: Context {
             screen: ScreenInfo {
                 width: frame.width,
