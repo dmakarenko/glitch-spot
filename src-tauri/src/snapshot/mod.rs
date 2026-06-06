@@ -147,6 +147,7 @@ pub fn render_as_prompt(snap: &Snapshot) -> String {
 pub mod annotate;
 pub mod build;
 pub mod persist;
+pub mod redact;
 
 pub use build::BuiltSnapshot;
 
