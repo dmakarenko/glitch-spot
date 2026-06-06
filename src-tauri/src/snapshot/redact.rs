@@ -106,6 +106,8 @@ fn branded(img: &mut RgbaImage, (x0, y0, x1, y1): (u32, u32, u32, u32), scale_fa
         let mut col = 0u32;
         while bx < x1 {
             let bx_end = (bx + block).min(x1);
+            // Deterministic palette pick from the block's grid position only —
+            // never reads a source pixel, so the cover leaks zero content.
             let color = match (row.wrapping_add(col.wrapping_mul(3))) % 4 {
                 0 => ACCENT,
                 1 => ACCENT_DIM,
@@ -143,13 +145,18 @@ mod tests {
 
     #[test]
     fn pixelate_changes_region_and_preserves_outside() {
+        // Left half red, right half blue. Redact only an inner rect that straddles
+        // the colour boundary so the block average differs from both source colours.
         let mut img = RgbaImage::from_fn(20, 20, |x, _| {
             if x < 10 { Rgba([255, 0, 0, 255]) } else { Rgba([0, 0, 255, 255]) }
         });
-        apply_redaction(&mut img, Region { x: 0, y: 0, w: 20, h: 20 }, RedactionStyle::Pixelated, 1.0);
-        let p = img.get_pixel(5, 5);
+        apply_redaction(&mut img, Region { x: 4, y: 4, w: 12, h: 12 }, RedactionStyle::Pixelated, 1.0);
+        let p = img.get_pixel(8, 8);
         assert_ne!(p, &Rgba([255, 0, 0, 255]));
         assert_ne!(p, &Rgba([0, 0, 255, 255]));
+        // Outside the redacted rect stays the original source colour.
+        assert_eq!(img.get_pixel(0, 0), &Rgba([255, 0, 0, 255]), "outside untouched (red side)");
+        assert_eq!(img.get_pixel(19, 19), &Rgba([0, 0, 255, 255]), "outside untouched (blue side)");
     }
 
     #[test]
@@ -171,5 +178,18 @@ mod tests {
         let mut img = solid_red(10, 10);
         apply_redaction(&mut img, Region { x: -4, y: -4, w: 40, h: 40 }, RedactionStyle::Solid, 1.0);
         assert_ne!(img.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
+    }
+
+    #[test]
+    fn pixelate_block_size_scales_with_scale_factor() {
+        // At scale 2.0 the block is 24px, so a single 24x24 region is one block:
+        // the whole region becomes one flat averaged colour.
+        let mut img = RgbaImage::from_fn(24, 24, |x, _| {
+            if x < 12 { Rgba([255, 0, 0, 255]) } else { Rgba([0, 0, 255, 255]) }
+        });
+        apply_redaction(&mut img, Region { x: 0, y: 0, w: 24, h: 24 }, RedactionStyle::Pixelated, 2.0);
+        let corner = *img.get_pixel(0, 0);
+        let opposite = *img.get_pixel(23, 23);
+        assert_eq!(corner, opposite, "one 24px block at scale 2.0 → uniform fill");
     }
 }
