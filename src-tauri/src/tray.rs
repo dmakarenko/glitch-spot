@@ -1,7 +1,7 @@
 // ABOUTME: Menu bar tray icon setup and dynamic menu builder for Glitch Spot.
 // ABOUTME: Rebuilds the menu on every tray click to reflect current snapshot age and autostart state.
 
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Utc};
 use tauri::{
     menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -192,6 +192,10 @@ pub(crate) fn mcp_status_label(healthy: bool, port: u16) -> String {
     format!("{indicator} MCP Server :{port}")
 }
 
+pub(crate) fn release_version_label() -> String {
+    format!("Version: {} ({})", env!("CARGO_PKG_VERSION"), env!("GIT_SHA"))
+}
+
 /// Read the shared `bound` flag that the MCP server toggles around its
 /// bind+serve loop. True ⇒ *this* process owns the listener (not just "some
 /// process is on the port"), which is what we want to communicate to the user.
@@ -371,23 +375,33 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .id("quit")
         .build(app)?;
 
+    #[cfg(debug_assertions)]
     let build_branch = MenuItemBuilder::new(format!("branch: {}", env!("GIT_BRANCH")))
         .id("build_branch")
         .enabled(false)
         .build(app)?;
 
+    #[cfg(debug_assertions)]
     let build_commit = MenuItemBuilder::new(format!("commit: {}", env!("GIT_SHA")))
         .id("build_commit")
         .enabled(false)
         .build(app)?;
 
-    let started_at = state.started_at.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S %Z");
-    let build_built_at = MenuItemBuilder::new(format!("started: {started_at}"))
-        .id("build_built_at")
+    #[cfg(debug_assertions)]
+    let build_built_at = MenuItemBuilder::new(
+        format!("started: {}", state.started_at.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S %Z"))
+    )
+    .id("build_built_at")
+    .enabled(false)
+    .build(app)?;
+
+    #[cfg(not(debug_assertions))]
+    let build_version = MenuItemBuilder::new(release_version_label())
+        .id("build_version")
         .enabled(false)
         .build(app)?;
 
-    MenuBuilder::new(app)
+    let menu_builder = MenuBuilder::new(app)
         .item(&capture_live)
         .item(&capture_frozen)
         .item(&capture_window)
@@ -402,10 +416,18 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&tray_submenu)
         .item(&retention_submenu)
         .item(&launch_at_login)
-        .item(&PredefinedMenuItem::separator(app)?)
+        .item(&PredefinedMenuItem::separator(app)?);
+
+    #[cfg(debug_assertions)]
+    let menu_builder = menu_builder
         .item(&build_branch)
         .item(&build_commit)
-        .item(&build_built_at)
+        .item(&build_built_at);
+
+    #[cfg(not(debug_assertions))]
+    let menu_builder = menu_builder.item(&build_version);
+
+    menu_builder
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&quit)
         .build()
@@ -993,6 +1015,14 @@ mod tests {
         assert_eq!(format_snapshot_age(ts, now), "1 day ago");
         let (ts, now) = at(172800);
         assert_eq!(format_snapshot_age(ts, now), "2 days ago");
+    }
+
+    #[test]
+    fn release_version_label_has_expected_format() {
+        let label = release_version_label();
+        assert!(label.starts_with("Version: "), "expected 'Version: ' prefix, got: {label}");
+        assert!(label.contains('('), "expected '(' in label, got: {label}");
+        assert!(label.ends_with(')'), "expected ')' suffix, got: {label}");
     }
 
     #[test]
