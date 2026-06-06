@@ -145,11 +145,13 @@ fn build_scales_annotation_coords_by_scale_factor() {
             w: 30.0,
             h: 40.0,
             note: "hi".into(),
+            kind: "annotation".into(),
         }],
         "macos",
         "26.0",
         temp.path(),
         None,
+        crate::settings::RedactionStyle::Branded,
     )
     .unwrap();
     assert_eq!(built.snapshot.annotations.len(), 1);
@@ -171,9 +173,10 @@ fn build_assigns_zero_padded_labels_from_array_position() {
             w: 1.0,
             h: 1.0,
             note: String::new(),
+            kind: "annotation".into(),
         })
         .collect();
-    let (built, _) = build(&fake_frame(), "frozen", incoming, "macos", "26.0", temp.path(), None).unwrap();
+    let (built, _) = build(&fake_frame(), "frozen", incoming, "macos", "26.0", temp.path(), None, crate::settings::RedactionStyle::Branded).unwrap();
     let labels: Vec<String> = built
         .snapshot
         .annotations
@@ -202,7 +205,7 @@ fn format_label_zero_pads_and_expands() {
 fn build_returns_paths_under_base_dir_and_bytes_match_frame() {
     let temp = tempfile::TempDir::new().unwrap();
     let frame = fake_frame();
-    let (built, _) = build(&frame, "live", vec![], "macos", "26.0", temp.path(), None).unwrap();
+    let (built, _) = build(&frame, "live", vec![], "macos", "26.0", temp.path(), None, crate::settings::RedactionStyle::Branded).unwrap();
 
     // Embedded paths point under `temp/{id}/...`
     let id = &built.snapshot.id;
@@ -368,6 +371,7 @@ fn build_crop_origin_translates_annotation_coords_into_window_local() {
         w: 80.0,
         h: 40.0,
         note: "n".into(),
+        kind: "annotation".into(),
     }];
 
     let temp = TempDir::new().unwrap();
@@ -380,6 +384,7 @@ fn build_crop_origin_translates_annotation_coords_into_window_local() {
         "26.0",
         temp.path(),
         Some((60.0, 30.0)),
+        crate::settings::RedactionStyle::Branded,
     )
     .expect("build with crop_origin should succeed");
     let a = &built.snapshot.annotations[0];
