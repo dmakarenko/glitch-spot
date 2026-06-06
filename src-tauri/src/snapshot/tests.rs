@@ -421,6 +421,79 @@ fn context_window_round_trips() {
 }
 
 #[test]
+fn render_as_prompt_contains_annotation_labels_and_notes() {
+    let mut s = sample_snapshot();
+    s.annotations.push(Annotation {
+        id: "anno_2".into(),
+        shape: "rect".into(),
+        coords: Coords { x: 10.0, y: 20.0, w: 100.0, h: 50.0 },
+        note: "increase contrast here".into(),
+        label: "02".into(),
+    });
+    let prompt = render_as_prompt(&s);
+    assert!(prompt.contains("[01]"), "should include label [01], got:\n{prompt}");
+    assert!(prompt.contains("make this smaller"), "should include first note, got:\n{prompt}");
+    assert!(prompt.contains("[02]"), "should include label [02], got:\n{prompt}");
+    assert!(prompt.contains("increase contrast here"), "should include second note, got:\n{prompt}");
+}
+
+#[test]
+fn render_as_prompt_contains_coords() {
+    let s = sample_snapshot();
+    let prompt = render_as_prompt(&s);
+    // coords for the sample annotation: x=280 y=620 w=560 h=120
+    assert!(prompt.contains("280"), "should include x coord, got:\n{prompt}");
+    assert!(prompt.contains("620"), "should include y coord, got:\n{prompt}");
+}
+
+#[test]
+fn render_as_prompt_contains_file_paths() {
+    let s = sample_snapshot();
+    let prompt = render_as_prompt(&s);
+    assert!(
+        prompt.contains("/tmp/glitch-spot-snap_test123.png"),
+        "should include clean image path, got:\n{prompt}"
+    );
+    // JSON path derived: parent of clean + {id}.json
+    assert!(
+        prompt.contains("snap_test123.json"),
+        "should include JSON file path, got:\n{prompt}"
+    );
+}
+
+#[test]
+fn render_as_prompt_includes_window_context_when_present() {
+    let mut s = sample_snapshot();
+    s.context.window = Some(WindowInfo {
+        app_name: "Xcode".into(),
+        title: "ContentView.swift".into(),
+        bounds: WindowBounds { x: 0, y: 0, w: 1440, h: 900 },
+        window_id: 42,
+    });
+    let prompt = render_as_prompt(&s);
+    assert!(prompt.contains("Xcode"), "should include app name, got:\n{prompt}");
+    assert!(prompt.contains("ContentView.swift"), "should include window title, got:\n{prompt}");
+}
+
+#[test]
+fn render_as_prompt_no_window_skips_window_line() {
+    let s = sample_snapshot(); // window: None
+    let prompt = render_as_prompt(&s);
+    assert!(!prompt.contains("Window:"), "should not have Window: line, got:\n{prompt}");
+}
+
+#[test]
+fn render_as_prompt_is_instructional() {
+    let s = sample_snapshot();
+    let prompt = render_as_prompt(&s);
+    // Should contain some instruction-to-agent phrasing
+    assert!(
+        prompt.to_lowercase().contains("review") || prompt.to_lowercase().contains("feedback"),
+        "prompt should have instructional tone, got:\n{prompt}"
+    );
+}
+
+#[test]
 fn context_window_omitted_when_none() {
     let mut s = sample_snapshot();
     s.context.window = None;

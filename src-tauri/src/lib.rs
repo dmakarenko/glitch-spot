@@ -238,8 +238,7 @@ async fn save_snapshot(
         tokio::task::spawn_blocking(move || snapshot::persist::write(&base_for_write, &built));
 
     let clipboard_result: Result<(), String> = match state.settings.current_clipboard_format() {
-        settings::ClipboardFormat::Json | settings::ClipboardFormat::Prompt => {
-            // Prompt is reserved; falls through to JSON until implemented.
+        settings::ClipboardFormat::Json => {
             serde_json::to_string_pretty(&snap)
                 .map_err(|e| e.to_string())
                 .and_then(|json| {
@@ -247,6 +246,12 @@ async fn save_snapshot(
                         .write_text(json)
                         .map_err(|e| format!("clipboard: {e}"))
                 })
+        }
+        settings::ClipboardFormat::Prompt => {
+            let prompt = snapshot::render_as_prompt(&snap);
+            app.clipboard()
+                .write_text(prompt)
+                .map_err(|e| format!("clipboard: {e}"))
         }
         settings::ClipboardFormat::Image => {
             let (w, h) = (annotated_image.width(), annotated_image.height());

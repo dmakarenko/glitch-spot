@@ -67,15 +67,15 @@ describe('Toolbar', () => {
     expect(getByTestId('toolbar-option-json').dataset.active).toBe('false')
   })
 
-  it('prompt option is rendered but disabled', () => {
+  it('prompt option is rendered and enabled', () => {
     const onChangeFormat = vi.fn()
     const { getByTestId } = render(
       <Toolbar rectCount={1} clipboardFormat="json" onSave={vi.fn()} onChangeFormat={onChangeFormat} />
     )
     fireEvent.click(getByTestId('toolbar-chevron'))
     const promptOption = getByTestId('toolbar-option-prompt')
-    expect(promptOption.dataset.disabled).toBe('true')
+    expect(promptOption.dataset.disabled).toBe('false')
     fireEvent.click(promptOption)
-    expect(onChangeFormat).not.toHaveBeenCalled()
+    expect(onChangeFormat).toHaveBeenCalledWith('prompt')
   })
 })

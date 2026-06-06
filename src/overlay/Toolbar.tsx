@@ -43,7 +43,7 @@ export function Toolbar({ rectCount, clipboardFormat, onSave, onChangeFormat }: 
   const options: { format: ClipboardFormat; disabled: boolean }[] = [
     { format: 'json',   disabled: false },
     { format: 'image',  disabled: false },
-    { format: 'prompt', disabled: true },
+    { format: 'prompt', disabled: false },
   ]
 
   return (

@@ -80,6 +80,70 @@ pub struct Images {
     pub annotated: Option<String>,
 }
 
+/// Renders a snapshot as a plain-text prompt ready to paste into a coding agent.
+/// Includes instructional framing, each annotation with its label, note, and
+/// physical-pixel coordinates, window context when available, and absolute
+/// file paths for the annotated image, clean image, and snapshot JSON.
+pub fn render_as_prompt(snap: &Snapshot) -> String {
+    let mut out = String::new();
+
+    out.push_str("The user annotated a screenshot with Glitch Spot. Review the following feedback:\n\n");
+
+    // Context line
+    if let Some(w) = &snap.context.window {
+        out.push_str(&format!("Window: \"{}\" — \"{}\"\n", w.app_name, w.title));
+    }
+    out.push_str(&format!(
+        "Captured: {} | Mode: {} | {} {} | Screen: {}×{} @{}x\n",
+        snap.created_at,
+        snap.mode,
+        snap.context.os.platform,
+        snap.context.os.version,
+        snap.context.screen.width,
+        snap.context.screen.height,
+        snap.context.screen.scale_factor,
+    ));
+
+    // Annotations
+    out.push('\n');
+    let count = snap.annotations.len();
+    if count == 0 {
+        out.push_str("No annotations.\n");
+    } else {
+        out.push_str(&format!("Annotations ({count}):\n"));
+        for a in &snap.annotations {
+            let note = if a.note.trim().is_empty() { "(no note)" } else { a.note.trim() };
+            out.push_str(&format!(
+                "  [{}] {}\n       coords: x={} y={} w={} h={} (physical px)\n",
+                a.label,
+                note,
+                a.coords.x as i64,
+                a.coords.y as i64,
+                a.coords.w as i64,
+                a.coords.h as i64,
+            ));
+        }
+    }
+
+    // File paths
+    out.push('\n');
+    out.push_str("Files:\n");
+    if let Some(annotated) = &snap.images.annotated {
+        out.push_str(&format!("  Annotated image: {annotated}\n"));
+    }
+    out.push_str(&format!("  Clean screenshot: {}\n", snap.images.clean));
+    let json_path = std::path::Path::new(&snap.images.clean)
+        .parent()
+        .map(|p| p.join(snapshot_json_filename(&snap.id)))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| snapshot_json_filename(&snap.id));
+    out.push_str(&format!("  Snapshot JSON:    {json_path}\n"));
+
+    out.push_str("\nReference annotations by their label (e.g. [01]) when describing changes.");
+
+    out
+}
+
 pub mod annotate;
 pub mod build;
 pub mod persist;
