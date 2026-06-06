@@ -37,11 +37,20 @@ const CAPTION_LINE_HEIGHT: f32 = 1.4;
 pub enum AnnotateError {
     #[error("image decode/encode: {0}")]
     Image(#[from] ImageError),
+    #[error("encode: {0}")]
+    Encode(String),
     #[error("bundled font failed to parse")]
     Font,
 }
 
-/// Decode the clean PNG, draw rectangle borders + numbered badges, re-encode.
+/// Decode the clean PNG, draw rectangle borders + numbered badges + captions,
+/// re-encode. Returns both the encoded PNG bytes (for the on-disk annotated
+/// image) and the composited `RgbaImage`, so a caller copying to the clipboard
+/// can reuse the raw pixels instead of decoding the PNG a second time.
+///
+/// Encoding goes through [`crate::capture::encode_png`] (fixed `Up` filter) to
+/// avoid the default Adaptive filter's per-row 5-filter search, which costs
+/// ~1.6s on a 23MP Retina frame.
 ///
 /// `scale_factor` is the snapshot's `frame.scale_factor`. All CSS-pixel constants
 /// are multiplied by it so the rendered geometry matches the live overlay's
@@ -50,7 +59,7 @@ pub fn render_annotated_png(
     clean_png: &[u8],
     annotations: &[Annotation],
     scale_factor: f32,
-) -> Result<Vec<u8>, AnnotateError> {
+) -> Result<(Vec<u8>, RgbaImage), AnnotateError> {
     let mut img =
         image::load_from_memory_with_format(clean_png, image::ImageFormat::Png)?.to_rgba8();
     let font = FontRef::try_from_slice(FONT_BYTES).map_err(|_| AnnotateError::Font)?;
@@ -70,10 +79,8 @@ pub fn render_annotated_png(
         draw_caption(&mut img, anno, scale_factor, &font);
     }
 
-    let mut out = Vec::new();
-    image::DynamicImage::ImageRgba8(img)
-        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)?;
-    Ok(out)
+    let png = crate::capture::encode_png(&img).map_err(|e| AnnotateError::Encode(e.to_string()))?;
+    Ok((png, img))
 }
 
 fn draw_rect_border(img: &mut RgbaImage, anno: &Annotation, border_width: i32) {
@@ -403,7 +410,7 @@ mod tests {
     #[test]
     fn caption_draws_dark_pixels_below_the_rect_when_note_present() {
         let clean = white_png(400, 400);
-        let out =
+        let (out, _) =
             render_annotated_png(&clean, &[anno_with_note("hello world")], 1.0).unwrap();
         let img = image::load_from_memory(&out).unwrap().to_rgba8();
         assert_eq!(img.dimensions(), (400, 400), "dimensions must not change");
@@ -417,7 +424,7 @@ mod tests {
     #[test]
     fn no_caption_when_note_is_blank() {
         let clean = white_png(400, 400);
-        let out = render_annotated_png(&clean, &[anno_with_note("   ")], 1.0).unwrap();
+        let (out, _) = render_annotated_png(&clean, &[anno_with_note("   ")], 1.0).unwrap();
         let img = image::load_from_memory(&out).unwrap().to_rgba8();
         // Same sample point as above must stay white -- no caption box drawn.
         assert_eq!(img.get_pixel(50, 135), &Rgba([255, 255, 255, 255]));
@@ -435,7 +442,7 @@ mod tests {
             note: "near the bottom".into(),
             label: "01".into(),
         };
-        let out = render_annotated_png(&clean, &[anno], 1.0).unwrap();
+        let (out, _) = render_annotated_png(&clean, &[anno], 1.0).unwrap();
         let img = image::load_from_memory(&out).unwrap().to_rgba8();
         // box_h = round(13*1.4) + 2*round(6) = 18 + 12 = 30; flipped box_y = 150 - 6 - 30
         // = 114; box spans y[114,144), so (50,140) lands inside the flipped box.
@@ -456,7 +463,7 @@ mod tests {
             label: "01".into(),
         };
         let w = 130u32;
-        let out = render_annotated_png(&white_png(w, 300), &[anno], 1.0).unwrap();
+        let (out, _) = render_annotated_png(&white_png(w, 300), &[anno], 1.0).unwrap();
         let img = image::load_from_memory(&out).unwrap().to_rgba8();
 
         // At the image's right edge, mid-caption, the box must stay on-canvas: the
@@ -469,5 +476,17 @@ mod tests {
             is_white || is_border,
             "caption reached the image's right edge as interior fill (clipped), got {px:?}"
         );
+    }
+
+    #[test]
+    fn returned_image_matches_the_encoded_png() {
+        // The clipboard path reuses the returned RgbaImage instead of decoding
+        // the PNG again, so the two must be pixel-identical.
+        let clean = white_png(120, 90);
+        let (png, img) =
+            render_annotated_png(&clean, &[anno_with_note("hello world")], 2.0).unwrap();
+        let decoded = image::load_from_memory(&png).unwrap().to_rgba8();
+        assert_eq!(img.dimensions(), decoded.dimensions());
+        assert_eq!(img.as_raw(), decoded.as_raw(), "RGBA must equal the decoded PNG");
     }
 }

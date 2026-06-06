@@ -154,6 +154,11 @@ async fn save_snapshot(
 ) -> Result<snapshot::Snapshot, String> {
     let (frame, crop_origin) = match mode.as_str() {
         "frozen" => {
+            // Dismiss the overlay immediately — the saved image comes from the
+            // cached frame, not a re-capture, so hiding first doesn't affect the
+            // output. This matches `live` (which hides up front) so the overlay
+            // doesn't linger on screen during the annotate/encode/persist work.
+            overlay::hide(&app).map_err(|e| e.to_string())?;
             let frame = state
                 .latest_frame
                 .lock()
@@ -173,6 +178,10 @@ async fn save_snapshot(
             (frame, None)
         }
         "window" => {
+            // Dismiss the overlay immediately (see the `frozen` arm) — window mode
+            // also saves from the cached frame, so hiding first is safe and keeps
+            // the overlay from lingering during the annotate/encode/persist work.
+            overlay::hide(&app).map_err(|e| e.to_string())?;
             let session = match state.picker_state.current() {
                 picker_session::RunMode::Annotating { session } => session,
                 other => return Err(format!("save_snapshot('window') while in {:?}", other)),
@@ -188,7 +197,7 @@ async fn save_snapshot(
     let os_version: String = tauri_plugin_os::version().to_string();
 
     let base = snapshot::persist::snapshots_dir().map_err(|e| e.to_string())?;
-    let mut built = snapshot::build::build(
+    let (mut built, annotated_image) = snapshot::build::build(
         &frame,
         &mode,
         annotations,
@@ -218,10 +227,44 @@ async fn save_snapshot(
         }
     }
 
-    snapshot::persist::write(&base, &built).map_err(|e| e.to_string())?;
-    let snap = built.snapshot;
+    let snap = built.snapshot.clone();
 
-    // Notify any waiting MCP caller.
+    // Persist to disk and copy to the clipboard concurrently: the disk write
+    // needs the encoded PNG bytes (moved into the blocking task with `built`),
+    // while the clipboard copy reuses the already-composited RGBA — so neither
+    // waits on the other, and the Image path skips re-decoding the annotated PNG.
+    let base_for_write = base.clone();
+    let write_task =
+        tokio::task::spawn_blocking(move || snapshot::persist::write(&base_for_write, &built));
+
+    let clipboard_result: Result<(), String> = match state.settings.current_clipboard_format() {
+        settings::ClipboardFormat::Json | settings::ClipboardFormat::Prompt => {
+            // Prompt is reserved; falls through to JSON until implemented.
+            serde_json::to_string_pretty(&snap)
+                .map_err(|e| e.to_string())
+                .and_then(|json| {
+                    app.clipboard()
+                        .write_text(json)
+                        .map_err(|e| format!("clipboard: {e}"))
+                })
+        }
+        settings::ClipboardFormat::Image => {
+            let (w, h) = (annotated_image.width(), annotated_image.height());
+            let tauri_img = tauri::image::Image::new_owned(annotated_image.into_vec(), w, h);
+            app.clipboard()
+                .write_image(&tauri_img)
+                .map_err(|e| format!("clipboard image: {e}"))
+        }
+    };
+
+    // The disk write must succeed before we publish — MCP/share consumers read
+    // the on-disk files. A clipboard failure is reported only after publishing,
+    // so a saved-and-published snapshot isn't lost to a clipboard hiccup.
+    write_task
+        .await
+        .map_err(|e| format!("persist task: {e}"))?
+        .map_err(|e| e.to_string())?;
+
     state.snapshot_store.publish(snap.clone());
 
     if let Ok(mut ts) = state.latest_snapshot_at.lock() {
@@ -229,28 +272,7 @@ async fn save_snapshot(
     }
     tray::refresh_menu(&app);
 
-    match state.settings.current_clipboard_format() {
-        settings::ClipboardFormat::Json | settings::ClipboardFormat::Prompt => {
-            // Prompt is reserved; falls through to JSON until implemented.
-            let json = serde_json::to_string_pretty(&snap).map_err(|e| e.to_string())?;
-            app.clipboard()
-                .write_text(json)
-                .map_err(|e| format!("clipboard: {e}"))?;
-        }
-        settings::ClipboardFormat::Image => {
-            let rgba = image::load_from_memory_with_format(
-                &built.annotated_bytes,
-                image::ImageFormat::Png,
-            )
-            .map_err(|e| format!("image decode: {e}"))?
-            .to_rgba8();
-            let (w, h) = (rgba.width(), rgba.height());
-            let tauri_img = tauri::image::Image::new_owned(rgba.into_vec(), w, h);
-            app.clipboard()
-                .write_image(&tauri_img)
-                .map_err(|e| format!("clipboard image: {e}"))?;
-        }
-    }
+    clipboard_result?;
 
     overlay::hide(&app).map_err(|e| e.to_string())?;
     state.picker_state.reset_to_idle();

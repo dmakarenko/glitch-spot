@@ -44,7 +44,7 @@ fn build_then_persist_writes_files_at_paths_in_snapshot_images() {
         note: "e2e".into(),
     }];
 
-    let built = build(&frame, "frozen", annotations, "macos", "26.0", temp.path(), None).unwrap();
+    let (built, _) = build(&frame, "frozen", annotations, "macos", "26.0", temp.path(), None).unwrap();
     persist::write(temp.path(), &built).unwrap();
 
     // The paths embedded in the snapshot must actually point to the files on disk.
@@ -84,7 +84,7 @@ fn build_then_persist_writes_files_at_paths_in_snapshot_images() {
 fn cleanup_removes_a_persisted_snapshot_dir_after_24h() {
     let temp = TempDir::new().unwrap();
     let frame = fake_frame();
-    let built = build(&frame, "frozen", vec![], "macos", "26.0", temp.path(), None).unwrap();
+    let (built, _) = build(&frame, "frozen", vec![], "macos", "26.0", temp.path(), None).unwrap();
     persist::write(temp.path(), &built).unwrap();
 
     let snap_dir = temp.path().join(&built.snapshot.id);

@@ -134,7 +134,7 @@ fn fake_frame() -> CapturedFrame {
 #[test]
 fn build_scales_annotation_coords_by_scale_factor() {
     let temp = tempfile::TempDir::new().unwrap();
-    let built = build(
+    let (built, _) = build(
         &fake_frame(),
         "frozen",
         vec![IncomingAnnotation {
@@ -172,7 +172,7 @@ fn build_assigns_zero_padded_labels_from_array_position() {
             note: String::new(),
         })
         .collect();
-    let built = build(&fake_frame(), "frozen", incoming, "macos", "26.0", temp.path(), None).unwrap();
+    let (built, _) = build(&fake_frame(), "frozen", incoming, "macos", "26.0", temp.path(), None).unwrap();
     let labels: Vec<String> = built
         .snapshot
         .annotations
@@ -201,7 +201,7 @@ fn format_label_zero_pads_and_expands() {
 fn build_returns_paths_under_base_dir_and_bytes_match_frame() {
     let temp = tempfile::TempDir::new().unwrap();
     let frame = fake_frame();
-    let built = build(&frame, "live", vec![], "macos", "26.0", temp.path(), None).unwrap();
+    let (built, _) = build(&frame, "live", vec![], "macos", "26.0", temp.path(), None).unwrap();
 
     // Embedded paths point under `temp/{id}/...`
     let id = &built.snapshot.id;
@@ -251,7 +251,7 @@ fn solid_white_png(width: u32, height: u32) -> Vec<u8> {
 #[test]
 fn annotated_png_round_trips_with_no_annotations() {
     let clean = solid_white_png(32, 32);
-    let bytes = render_annotated_png(&clean, &[], 2.0).unwrap();
+    let (bytes, _) = render_annotated_png(&clean, &[], 2.0).unwrap();
     assert!(
         bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]),
         "must be a PNG"
@@ -277,7 +277,7 @@ fn annotated_png_draws_accent_pixels_on_rect_border() {
         note: String::new(),
         label: "01".into(),
     }];
-    let bytes = render_annotated_png(&clean, &annos, 2.0).unwrap();
+    let (bytes, _) = render_annotated_png(&clean, &annos, 2.0).unwrap();
     let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
     let top_left = img.get_pixel(40, 40);
     assert_eq!(
@@ -309,7 +309,7 @@ fn annotated_png_draws_pill_badge_at_rect_top_left() {
         note: String::new(),
         label: "01".into(),
     }];
-    let bytes = render_annotated_png(&clean, &annos, 2.0).unwrap();
+    let (bytes, _) = render_annotated_png(&clean, &annos, 2.0).unwrap();
     let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
     // Sample a pixel that should sit inside the badge body (above the rect's top).
     let inside_badge = img.get_pixel(50, 40);
@@ -336,7 +336,7 @@ fn annotated_png_draws_caption_below_rect_when_note_present() {
         note: "caption text".into(),
         label: "01".into(),
     }];
-    let bytes = render_annotated_png(&clean, &annos, 2.0).unwrap();
+    let (bytes, _) = render_annotated_png(&clean, &annos, 2.0).unwrap();
     let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
     // rect bottom at scale 2 = (20+30)*2 = 100, offset 6*2=12, so caption top ~112.
     // Sample at y=120 which should be inside the caption box.
@@ -371,7 +371,7 @@ fn build_crop_origin_translates_annotation_coords_into_window_local() {
 
     let temp = TempDir::new().unwrap();
     // crop_origin in physical pixels: (60, 30)
-    let built = build(
+    let (built, _) = build(
         &frame,
         "window",
         annotations,

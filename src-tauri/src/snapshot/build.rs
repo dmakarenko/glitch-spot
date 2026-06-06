@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use chrono::Utc;
+use image::RgbaImage;
 
 use crate::capture::CapturedFrame;
 use crate::snapshot::annotate::{render_annotated_png, AnnotateError};
@@ -57,6 +58,9 @@ pub fn format_label(idx: usize) -> String {
 /// Pure function — no filesystem writes. The embedded `images.{clean,annotated}`
 /// paths are computed as `{base_dir}/{id}/clean.png` and `…/annotated.png`,
 /// matching the layout that `persist::write` will materialise.
+///
+/// Also returns the composited annotated `RgbaImage` so a caller can copy it to
+/// the clipboard without decoding `annotated_bytes` again.
 pub fn build(
     frame: &CapturedFrame,
     mode: &str,
@@ -65,7 +69,7 @@ pub fn build(
     os_version: &str,
     base_dir: &Path,
     crop_origin: Option<(f32, f32)>,
-) -> Result<BuiltSnapshot, BuildError> {
+) -> Result<(BuiltSnapshot, RgbaImage), BuildError> {
     let id = new_id();
     let dir = base_dir.join(&id);
     let clean_path = dir.join(clean_png_filename(&id));
@@ -90,7 +94,8 @@ pub fn build(
         })
         .collect();
 
-    let annotated_bytes = render_annotated_png(&frame.png, &annotations, frame.scale_factor)?;
+    let (annotated_bytes, annotated_image) =
+        render_annotated_png(&frame.png, &annotations, frame.scale_factor)?;
 
     let snapshot = Snapshot {
         id,
@@ -116,9 +121,12 @@ pub fn build(
         },
         agent_prompt: default_agent_prompt(),
     };
-    Ok(BuiltSnapshot {
-        snapshot,
-        clean_bytes: frame.png.clone(),
-        annotated_bytes,
-    })
+    Ok((
+        BuiltSnapshot {
+            snapshot,
+            clean_bytes: frame.png.clone(),
+            annotated_bytes,
+        },
+        annotated_image,
+    ))
 }
