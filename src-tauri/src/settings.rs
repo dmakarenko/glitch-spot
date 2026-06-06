@@ -88,6 +88,39 @@ impl ClipboardFormat {
     }
 }
 
+/// How a redaction region is covered in the saved images.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RedactionStyle {
+    /// Opaque dark box — destroys the underlying content.
+    Solid,
+    /// Averaged mosaic. Safe at coarse block sizes; not guaranteed against a
+    /// determined attacker on known-charset text.
+    Pixelated,
+    /// Accent glitch mosaic whose pixels are independent of the source content —
+    /// destroys the underlying content. Default.
+    #[default]
+    Branded,
+}
+
+impl RedactionStyle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Solid      => "solid",
+            Self::Pixelated  => "pixelated",
+            Self::Branded    => "branded",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<Self> {
+        match s {
+            "solid"     => Some(Self::Solid),
+            "pixelated" => Some(Self::Pixelated),
+            "branded"   => Some(Self::Branded),
+            _           => None,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct ConfigFile {
     #[serde(default)]
@@ -126,6 +159,8 @@ struct SnapshotSection {
     retention: Option<String>,
     #[serde(default)]
     clipboard_format: Option<String>,
+    #[serde(default)]
+    redaction_style: Option<String>,
 }
 
 pub struct Settings {
@@ -139,6 +174,7 @@ pub struct Settings {
     tray_coloured: Arc<AtomicBool>,
     snapshot_retention: RwLock<SnapshotRetention>,
     clipboard_format: RwLock<ClipboardFormat>,
+    redaction_style: RwLock<RedactionStyle>,
 }
 
 impl Settings {
@@ -205,6 +241,13 @@ impl Settings {
             .and_then(ClipboardFormat::from_name)
             .unwrap_or_default();
 
+        let redaction_style = parsed
+            .get("snapshot")
+            .and_then(|s| s.get("redaction_style"))
+            .and_then(|v| v.as_str())
+            .and_then(RedactionStyle::from_name)
+            .unwrap_or_default();
+
         Ok(Settings {
             provider: RwLock::new(provider),
             mcp_port,
@@ -212,6 +255,7 @@ impl Settings {
             tray_coloured: Arc::new(AtomicBool::new(tray_coloured)),
             snapshot_retention: RwLock::new(snapshot_retention),
             clipboard_format: RwLock::new(clipboard_format),
+            redaction_style: RwLock::new(redaction_style),
         })
     }
 
@@ -283,6 +327,19 @@ impl Settings {
         self.write_config_file(dir)
     }
 
+    pub fn current_redaction_style(&self) -> RedactionStyle {
+        *self.redaction_style.read().expect("settings lock poisoned")
+    }
+
+    /// Update the in-memory redaction style AND persist it to disk.
+    pub fn save_redaction_style(&self, dir: &Path, style: RedactionStyle) -> io::Result<()> {
+        {
+            let mut w = self.redaction_style.write().expect("settings lock poisoned");
+            *w = style;
+        }
+        self.write_config_file(dir)
+    }
+
     /// Snapshot all in-memory settings into the on-disk config. All `save_*`
     /// methods go through here so that saving one section never silently drops
     /// the others.
@@ -300,6 +357,7 @@ impl Settings {
             snapshot: SnapshotSection {
                 retention: Some(self.current_retention().as_str().to_string()),
                 clipboard_format: Some(self.current_clipboard_format().as_str().to_string()),
+                redaction_style: Some(self.current_redaction_style().as_str().to_string()),
             },
         };
         let text = toml::to_string_pretty(&cfg).map_err(io::Error::other)?;
@@ -629,5 +687,58 @@ mod tests {
         assert_eq!(reloaded.current_provider(), ProviderKind::Ngrok, "provider preserved");
         assert_eq!(reloaded.current_tray(), (false, false), "tray preserved");
         assert_eq!(reloaded.current_clipboard_format(), ClipboardFormat::Image, "format applied");
+    }
+
+    #[test]
+    fn missing_redaction_style_yields_branded_default() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.current_redaction_style(), RedactionStyle::Branded);
+    }
+
+    #[test]
+    fn explicit_redaction_style_solid_is_parsed() {
+        let temp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            b"[snapshot]\nredaction_style = \"solid\"\n",
+        )
+        .unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.current_redaction_style(), RedactionStyle::Solid);
+    }
+
+    #[test]
+    fn unknown_redaction_style_falls_back_to_branded() {
+        let temp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            b"[snapshot]\nredaction_style = \"bogus\"\n",
+        )
+        .unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(settings.current_redaction_style(), RedactionStyle::Branded);
+    }
+
+    #[test]
+    fn save_redaction_style_roundtrip() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        settings.save_redaction_style(temp.path(), RedactionStyle::Pixelated).unwrap();
+        let reloaded = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(reloaded.current_redaction_style(), RedactionStyle::Pixelated);
+    }
+
+    #[test]
+    fn save_redaction_style_preserves_other_sections() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        settings.save_provider(temp.path(), ProviderKind::Ngrok).unwrap();
+        settings.save_clipboard_format(temp.path(), ClipboardFormat::Image).unwrap();
+        settings.save_redaction_style(temp.path(), RedactionStyle::Solid).unwrap();
+        let reloaded = Settings::load_from(temp.path()).unwrap();
+        assert_eq!(reloaded.current_provider(), ProviderKind::Ngrok, "provider preserved");
+        assert_eq!(reloaded.current_clipboard_format(), ClipboardFormat::Image, "format preserved");
+        assert_eq!(reloaded.current_redaction_style(), RedactionStyle::Solid, "style applied");
     }
 }
