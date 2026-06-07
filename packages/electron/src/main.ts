@@ -77,18 +77,20 @@ export class GlitchSpot {
         id: `snap_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
         created_at: new Date().toISOString(),
         mode: 'frozen',
-        annotations: payload.annotations.map((a, idx) => ({
-          id: a.id,
-          shape: 'rect',
-          coords: {
-            x: a.x * display.scaleFactor,
-            y: a.y * display.scaleFactor,
-            w: a.w * display.scaleFactor,
-            h: a.h * display.scaleFactor,
-          },
-          note: a.note,
-          label: formatLabel(idx),
-        })),
+        annotations: payload.annotations
+          .filter((a) => a.kind !== 'redaction')
+          .map((a, idx) => ({
+            id: a.id,
+            shape: 'rect',
+            coords: {
+              x: a.x * display.scaleFactor,
+              y: a.y * display.scaleFactor,
+              w: a.w * display.scaleFactor,
+              h: a.h * display.scaleFactor,
+            },
+            note: a.note,
+            label: formatLabel(idx),
+          })),
         context: {
           screen: {
             width: bounds.width * display.scaleFactor,

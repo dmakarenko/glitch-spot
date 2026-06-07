@@ -2,7 +2,7 @@
 // ABOUTME: Draws annotation rectangles, pill badges, and note captions onto the clean image.
 import type { AnnotationPayload } from '../../packages/electron/src/types'
 import type { RedactionStyle } from './bridge'
-import { formatLabel } from './annotations/label'
+import { annotationLabels } from './annotations/label'
 import { wrapNote } from './annotations/wrapNote'
 
 const COVER_DARK = '#0c0c0c' // DESIGN.md background — matches redact.rs COVER_DARK
@@ -118,9 +118,12 @@ export async function renderAnnotated(
   const PILL_H = 18 * scaleFactor
   const PILL_R = 9 * scaleFactor
 
+  const labels = annotationLabels(annotations)
+
   // Pass 1: rectangles + pill badges.
   annotations.forEach((rect, idx) => {
-    if (rect.kind === 'redaction') return
+    const label = labels[idx]
+    if (rect.kind === 'redaction' || label === null) return
     const x = rect.x * scaleFactor
     const y = rect.y * scaleFactor
     const w = rect.w * scaleFactor
@@ -142,7 +145,7 @@ export async function renderAnnotated(
     ctx.font = `bold ${11 * scaleFactor}px sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(formatLabel(idx), pillX + PILL_W / 2, pillY + PILL_H / 2)
+    ctx.fillText(label, pillX + PILL_W / 2, pillY + PILL_H / 2)
     ctx.textAlign = 'left'
     ctx.textBaseline = 'alphabetic'
   })

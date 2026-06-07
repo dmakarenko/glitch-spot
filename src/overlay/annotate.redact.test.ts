@@ -1,5 +1,5 @@
-// ABOUTME: Tests for the redactClean function in annotate.ts.
-// ABOUTME: Verifies that redaction regions are covered on the clean canvas before the annotated image is derived.
+// ABOUTME: Tests for the redactClean and renderAnnotated functions in annotate.ts.
+// ABOUTME: Verifies redaction covering and annotation label numbering correctness.
 import { describe, it, expect, beforeAll, afterEach } from 'vitest'
 import { redactClean } from './annotate'
 
@@ -15,6 +15,42 @@ beforeAll(() => {
 afterEach(() => {
   ;(document as unknown as { createElement: typeof document.createElement }).createElement =
     pristineCreateElement
+})
+
+describe('renderAnnotated', () => {
+  it('numbers annotations only, skipping redactions', async () => {
+    const texts: string[] = []
+    const fakeCtx = {
+      drawImage: () => {},
+      strokeRect: () => {},
+      fillRect: () => {},
+      beginPath: () => {}, roundRect: () => {}, fill: () => {}, stroke: () => {},
+      measureText: () => ({ width: 10 }),
+      fillText: (t: string) => texts.push(t),
+      getImageData: () => ({ data: new Uint8ClampedArray(4) }),
+      putImageData: () => {},
+      set fillStyle(_v: string) {}, get fillStyle() { return '#000' },
+      set strokeStyle(_v: string) {}, get strokeStyle() { return '#000' },
+      set lineWidth(_v: number) {}, get lineWidth() { return 1 },
+      set font(_v: string) {}, get font() { return '' },
+      set textAlign(_v: string) {}, get textAlign() { return 'left' },
+      set textBaseline(_v: string) {}, get textBaseline() { return 'alphabetic' },
+    }
+    const fakeCanvas = { width: 200, height: 200, getContext: () => fakeCtx, toDataURL: () => 'data:image/png;base64,AAAA' }
+    ;(document as unknown as { createElement: (t: string) => unknown }).createElement = (t: string) => t === 'canvas' ? fakeCanvas : pristineCreateElement(t)
+    class FakeImage { naturalWidth = 200; naturalHeight = 200; onload: (() => void) | null = null; set src(_s: string) { this.onload?.() } }
+    ;(globalThis as unknown as { Image: unknown }).Image = FakeImage as unknown
+
+    const { renderAnnotated } = await import('./annotate')
+    await renderAnnotated('blob:x', [
+      { id: 'a1', x: 5,  y: 5, w: 30, h: 30, note: 'first',  kind: 'annotation' },
+      { id: 'r1', x: 40, y: 5, w: 30, h: 30, note: '',       kind: 'redaction' },
+      { id: 'a2', x: 80, y: 5, w: 30, h: 30, note: 'second', kind: 'annotation' },
+    ], 1)
+    // Only the two annotation badges were drawn, numbered 01 and 02 (redaction skipped, not consuming 02).
+    const labels = texts.filter((t) => /^\d{2}$/.test(t))
+    expect(labels).toEqual(['01', '02'])
+  })
 })
 
 describe('redactClean', () => {
