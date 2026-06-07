@@ -366,6 +366,25 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&ret_never)
         .build()?;
 
+    let current_redaction = state.settings.current_redaction_style();
+    let redact_solid = CheckMenuItemBuilder::new("Solid fill")
+        .id("redaction:solid")
+        .checked(matches!(current_redaction, crate::settings::RedactionStyle::Solid))
+        .build(app)?;
+    let redact_pixelated = CheckMenuItemBuilder::new("Pixelated")
+        .id("redaction:pixelated")
+        .checked(matches!(current_redaction, crate::settings::RedactionStyle::Pixelated))
+        .build(app)?;
+    let redact_branded = CheckMenuItemBuilder::new("Branded pixelated")
+        .id("redaction:branded")
+        .checked(matches!(current_redaction, crate::settings::RedactionStyle::Branded))
+        .build(app)?;
+    let redaction_submenu = SubmenuBuilder::new(app, "Redaction style")
+        .item(&redact_solid)
+        .item(&redact_pixelated)
+        .item(&redact_branded)
+        .build()?;
+
     let launch_at_login = CheckMenuItemBuilder::new("Launch at Login")
         .id("launch_at_login")
         .checked(autostart_on)
@@ -415,6 +434,7 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&tray_submenu)
         .item(&retention_submenu)
+        .item(&redaction_submenu)
         .item(&launch_at_login)
         .item(&PredefinedMenuItem::separator(app)?);
 
@@ -613,6 +633,16 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                         }
                         refresh_menu(&app2);
                     });
+                }
+                "redaction:solid"
+                | "redaction:pixelated"
+                | "redaction:branded" => {
+                    let key = event.id.as_ref().split(':').nth(1).unwrap_or("branded").to_string();
+                    let state = app.state::<crate::AppState>();
+                    if let Err(e) = crate::do_set_redaction_style(&state, key) {
+                        eprintln!("tray: set redaction style failed: {e}");
+                    }
+                    refresh_menu(&app);
                 }
                 "launch_at_login" => {
                     let manager = app.autolaunch();

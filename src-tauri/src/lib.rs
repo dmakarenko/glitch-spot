@@ -351,6 +351,17 @@ pub(crate) fn do_set_tray_appearance(
         .map_err(|e| e.to_string())
 }
 
+/// Persists the redaction style. Shared by the Tauri command and the tray menu
+/// handler.
+pub(crate) fn do_set_redaction_style(state: &AppState, key: String) -> Result<(), String> {
+    let style = settings::RedactionStyle::from_name(&key)
+        .ok_or_else(|| format!("unknown redaction style: {key}"))?;
+    state
+        .settings
+        .save_redaction_style(&state.config_dir, style)
+        .map_err(|e| e.to_string())
+}
+
 /// Persists the snapshot retention setting and immediately sweeps snapshots
 /// that now exceed the new threshold. Expires in-memory state for any
 /// snapshot whose directory was deleted.
@@ -810,6 +821,19 @@ fn set_clipboard_format(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_redaction_style(state: tauri::State<'_, AppState>) -> String {
+    state.settings.current_redaction_style().as_str().to_string()
+}
+
+#[tauri::command]
+fn set_redaction_style(
+    state: tauri::State<'_, AppState>,
+    style: String,
+) -> Result<(), String> {
+    do_set_redaction_style(&state, style)
+}
+
 pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if let Some(state) = app.try_state::<AppState>() {
         state.picker_state.try_enter_live().map_err(anyhow::Error::msg)?;
@@ -1148,6 +1172,8 @@ pub fn run() {
             set_tray_appearance,
             get_clipboard_format,
             set_clipboard_format,
+            get_redaction_style,
+            set_redaction_style,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
