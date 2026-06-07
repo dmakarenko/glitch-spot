@@ -18,13 +18,15 @@ result becomes a structured snapshot your AI coding agent can read directly.
   screenshot you can mark up (`⌃⌥⌘H`), plus a per-window picker (`⌃⌥⌘J`).
 - **Annotate fast** — drag rectangles, attach inline notes, undo, then save (`⌘⇧↩`) or
   discard.
+- **Redact sensitive regions** — switch to Redact mode and cover passwords, tokens, or PII;
+  the cover is baked into *both* the clean and annotated images before anything is saved or
+  shared. Choose solid fill, pixelated, or mosaic from the toolbar or tray.
 - **Agent-ready snapshots** — every annotation becomes structured JSON (copied to the
   clipboard) plus an annotated PNG. A local MCP server on `127.0.0.1:7820` lets AI coding
   agents pull the latest snapshot — Claude Code does this via the `/glitch-spot` skill.
 - **Share in a click** — publish a snapshot behind a short-lived link via cloudflared,
   ngrok, or Tailscale Funnel.
 - **Stays out of the way** — runs in the menu bar, with no Dock icon or app window.
-- **Embeddable** — `@glitch-spot/electron` brings the same overlay into Electron apps.
 
 ## Install
 
