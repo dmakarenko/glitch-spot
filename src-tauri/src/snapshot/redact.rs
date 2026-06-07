@@ -6,6 +6,9 @@ use image::{Rgba, RgbaImage};
 use crate::settings::RedactionStyle;
 
 const COVER_DARK: Rgba<u8> = Rgba([12, 12, 12, 255]); // #0c0c0c — DESIGN.md background
+/// Warm dark grey for the solid cover — distinctly not pure black so the cover
+/// reads as a deliberate block rather than a hole, while staying dark and on-tone.
+const SOLID_COVER: Rgba<u8> = Rgba([36, 31, 27, 255]); // #241f1b
 const ACCENT: Rgba<u8> = Rgba([238, 102, 51, 255]); // #ee6633
 const ACCENT_DIM: Rgba<u8> = Rgba([120, 52, 26, 255]); // darkened accent for mosaic contrast
 /// Pixelation/branded block size in CSS px. Coarse so a text glyph spans <1 block.
@@ -55,7 +58,7 @@ fn block_px(scale_factor: f32) -> u32 {
 fn solid_fill(img: &mut RgbaImage, (x0, y0, x1, y1): (u32, u32, u32, u32)) {
     for y in y0..y1 {
         for x in x0..x1 {
-            img.put_pixel(x, y, COVER_DARK);
+            img.put_pixel(x, y, SOLID_COVER);
         }
     }
 }
@@ -141,6 +144,19 @@ mod tests {
         assert_ne!(img.get_pixel(8, 8), &Rgba([255, 0, 0, 255]), "region must be covered");
         assert_eq!(img.get_pixel(0, 0), &Rgba([255, 0, 0, 255]), "outside must be untouched");
         assert_eq!(img.get_pixel(19, 19), &Rgba([255, 0, 0, 255]));
+    }
+
+    #[test]
+    fn solid_fill_is_warm_dark_grey_not_black() {
+        // The solid cover must read as a deliberate dark-grey block, not a pure
+        // black hole, and lean warm (R > B).
+        let mut img = solid_red(10, 10);
+        apply_redaction(&mut img, Region { x: 0, y: 0, w: 10, h: 10 }, RedactionStyle::Solid, 1.0);
+        let p = img.get_pixel(5, 5).0;
+        assert_ne!([p[0], p[1], p[2]], [0, 0, 0], "must not be pure black");
+        assert!(p[0] < 80 && p[1] < 80 && p[2] < 80, "must stay dark: {p:?}");
+        assert!(p[0] > p[2], "must lean warm (R > B): {p:?}");
+        assert_eq!(p[3], 255, "must be fully opaque");
     }
 
     #[test]

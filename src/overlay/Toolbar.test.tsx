@@ -1,5 +1,5 @@
 // ABOUTME: Tests for the Toolbar split button — save action, format dropdown, and default tracking.
-// ABOUTME: Also covers the Redact split control: toggle, style picker, and always-visible behavior.
+// ABOUTME: Also covers the Annotate/Redact mode control: mode switching, style picker, and always-visible behavior.
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
@@ -14,16 +14,17 @@ const defaultProps = {
   onChangeFormat: vi.fn(),
   redactMode: false,
   redactionStyle: 'branded' as const,
-  onToggleRedact: vi.fn(),
+  onSetRedactMode: vi.fn(),
   onChangeRedactionStyle: vi.fn(),
 }
 
 describe('Toolbar', () => {
-  it('shows the redact toggle at rectCount=0 and hides the save button', () => {
+  it('shows the Annotate/Redact mode buttons at rectCount=0 and hides the save button', () => {
     const { getByTestId, queryByTestId } = render(
       <Toolbar {...defaultProps} rectCount={0} />
     )
-    expect(getByTestId('toolbar-redact-toggle')).toBeTruthy()
+    expect(getByTestId('toolbar-annotate-btn')).toBeTruthy()
+    expect(getByTestId('toolbar-redact-btn')).toBeTruthy()
     expect(queryByTestId('toolbar-save-btn')).toBeNull()
   })
 
@@ -91,14 +92,23 @@ describe('Toolbar', () => {
     expect(onChangeFormat).toHaveBeenCalledWith('prompt')
   })
 
-  describe('Redact split control', () => {
-    it('calls onToggleRedact when the toggle button is clicked', () => {
-      const onToggleRedact = vi.fn()
+  describe('Annotate/Redact mode control', () => {
+    it('calls onSetRedactMode(true) when the Redact button is clicked', () => {
+      const onSetRedactMode = vi.fn()
       const { getByTestId } = render(
-        <Toolbar {...defaultProps} rectCount={0} onToggleRedact={onToggleRedact} />
+        <Toolbar {...defaultProps} rectCount={0} onSetRedactMode={onSetRedactMode} />
       )
-      fireEvent.click(getByTestId('toolbar-redact-toggle'))
-      expect(onToggleRedact).toHaveBeenCalledTimes(1)
+      fireEvent.click(getByTestId('toolbar-redact-btn'))
+      expect(onSetRedactMode).toHaveBeenCalledWith(true)
+    })
+
+    it('calls onSetRedactMode(false) when the Annotate button is clicked', () => {
+      const onSetRedactMode = vi.fn()
+      const { getByTestId } = render(
+        <Toolbar {...defaultProps} rectCount={0} redactMode={true} onSetRedactMode={onSetRedactMode} />
+      )
+      fireEvent.click(getByTestId('toolbar-annotate-btn'))
+      expect(onSetRedactMode).toHaveBeenCalledWith(false)
     })
 
     it('shows the redact dropdown when chevron is clicked', () => {
@@ -133,12 +143,17 @@ describe('Toolbar', () => {
       expect(getByTestId('toolbar-redact-option-branded').dataset.active).toBe('false')
     })
 
-    it('reflects redactMode=true with orange background on toggle button', () => {
-      const { getByTestId } = render(
+    it('highlights Redact when redactMode=true and Annotate when false', () => {
+      const ORANGE = 'rgb(238, 102, 51)'
+      const { getByTestId, rerender } = render(
         <Toolbar {...defaultProps} rectCount={0} redactMode={true} />
       )
-      const toggle = getByTestId('toolbar-redact-toggle')
-      expect((toggle as HTMLElement).style.background).toBe('rgb(238, 102, 51)')
+      expect((getByTestId('toolbar-redact-btn') as HTMLElement).style.background).toBe(ORANGE)
+      expect((getByTestId('toolbar-annotate-btn') as HTMLElement).style.background).toBe('transparent')
+
+      rerender(<Toolbar {...defaultProps} rectCount={0} redactMode={false} />)
+      expect((getByTestId('toolbar-annotate-btn') as HTMLElement).style.background).toBe(ORANGE)
+      expect((getByTestId('toolbar-redact-btn') as HTMLElement).style.background).toBe('transparent')
     })
   })
 })

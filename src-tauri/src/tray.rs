@@ -375,7 +375,7 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .id("redaction:pixelated")
         .checked(matches!(current_redaction, crate::settings::RedactionStyle::Pixelated))
         .build(app)?;
-    let redact_branded = CheckMenuItemBuilder::new("Branded pixelated")
+    let redact_branded = CheckMenuItemBuilder::new("Mosaic")
         .id("redaction:branded")
         .checked(matches!(current_redaction, crate::settings::RedactionStyle::Branded))
         .build(app)?;

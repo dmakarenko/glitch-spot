@@ -32,7 +32,7 @@ type Props = {
 };
 
 function redactionPreviewBg(style: RedactionStyle): string {
-  if (style === "solid") return "#0c0c0c";
+  if (style === "solid") return "#241f1b"; // warm dark grey — matches annotate.ts SOLID_COVER
   // A small mosaic pattern stands in for the baked cover (no live-screen pixels
   // in the DOM). Branded uses the accent palette; pixelated greys.
   const a = style === "branded" ? "%23ee6633" : "%23777777";

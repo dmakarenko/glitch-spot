@@ -1,5 +1,5 @@
 // ABOUTME: Top-center floating toolbar for the overlay session.
-// ABOUTME: Shows a Redact split control (always visible) and rect count + Save split button (when rects exist).
+// ABOUTME: Shows an Annotate/Redact mode control (always visible) and rect count + Save split button (when rects exist).
 
 import { useState, useEffect, useRef } from 'react'
 import type { ClipboardFormat, RedactionStyle } from './bridge'
@@ -13,7 +13,7 @@ const FORMAT_LABELS: Record<ClipboardFormat, string> = {
 const REDACTION_STYLE_LABELS: Record<RedactionStyle, string> = {
   solid: 'Solid fill',
   pixelated: 'Pixelated',
-  branded: 'Branded pixelated',
+  branded: 'Mosaic',
 }
 
 type Props = {
@@ -23,11 +23,11 @@ type Props = {
   onChangeFormat: (format: ClipboardFormat) => void
   redactMode: boolean
   redactionStyle: RedactionStyle
-  onToggleRedact: () => void
+  onSetRedactMode: (redact: boolean) => void
   onChangeRedactionStyle: (style: RedactionStyle) => void
 }
 
-export function Toolbar({ rectCount, clipboardFormat, onSave, onChangeFormat, redactMode, redactionStyle, onToggleRedact, onChangeRedactionStyle }: Props) {
+export function Toolbar({ rectCount, clipboardFormat, onSave, onChangeFormat, redactMode, redactionStyle, onSetRedactMode, onChangeRedactionStyle }: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -102,9 +102,28 @@ export function Toolbar({ rectCount, clipboardFormat, onSave, onChangeFormat, re
       >
         <div ref={redactRef} style={{ position: 'relative', display: 'flex', borderRadius: 4 }}>
           <button
-            data-testid="toolbar-redact-toggle"
+            data-testid="toolbar-annotate-btn"
             type="button"
-            onClick={onToggleRedact}
+            onClick={() => onSetRedactMode(false)}
+            aria-pressed={!redactMode}
+            style={{
+              padding: '6px 12px',
+              background: !redactMode ? '#ee6633' : 'transparent',
+              color: !redactMode ? '#fff' : '#e0e0e0',
+              border: '1px solid rgba(255,255,255,0.20)',
+              borderRight: 'none',
+              borderRadius: '4px 0 0 4px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            ✎ Annotate
+          </button>
+          <button
+            data-testid="toolbar-redact-btn"
+            type="button"
+            onClick={() => onSetRedactMode(true)}
             aria-pressed={redactMode}
             style={{
               padding: '6px 12px',
@@ -112,7 +131,7 @@ export function Toolbar({ rectCount, clipboardFormat, onSave, onChangeFormat, re
               color: redactMode ? '#fff' : '#e0e0e0',
               border: '1px solid rgba(255,255,255,0.20)',
               borderRight: 'none',
-              borderRadius: '4px 0 0 4px',
+              borderRadius: 0,
               fontWeight: 600,
               cursor: 'pointer',
               whiteSpace: 'nowrap',

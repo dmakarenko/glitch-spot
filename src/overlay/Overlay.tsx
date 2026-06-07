@@ -240,8 +240,6 @@ export function Overlay() {
     }
   }
 
-  const handleToggleRedact = () => setRedactMode((m) => !m)
-
   useEffect(() => {
     // Clear the screenshot back to the bare veil (e.g. on a new present).
     const resetFrames = () => {
@@ -456,7 +454,7 @@ export function Overlay() {
           onChangeFormat={handleFormatChange}
           redactMode={redactMode}
           redactionStyle={redactionStyle}
-          onToggleRedact={handleToggleRedact}
+          onSetRedactMode={setRedactMode}
           onChangeRedactionStyle={handleRedactionStyleChange}
         />
         {showDiscardModal && (
@@ -509,7 +507,7 @@ export function Overlay() {
         onChangeFormat={handleFormatChange}
         redactMode={redactMode}
         redactionStyle={redactionStyle}
-        onToggleRedact={() => setRedactMode((m) => !m)}
+        onSetRedactMode={setRedactMode}
         onChangeRedactionStyle={handleRedactionStyleChange}
       />
       {showDiscardModal && (

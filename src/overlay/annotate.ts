@@ -6,6 +6,7 @@ import { annotationLabels } from './annotations/label'
 import { wrapNote } from './annotations/wrapNote'
 
 const COVER_DARK = '#0c0c0c' // DESIGN.md background — matches redact.rs COVER_DARK
+const SOLID_COVER = '#241f1b' // warm dark grey solid cover — matches redact.rs SOLID_COVER
 const ACCENT = '#ee6633'     // matches redact.rs ACCENT
 const ACCENT_DIM = '#78341a' // matches redact.rs ACCENT_DIM
 const BLOCK_CSS = 12         // coarse block; matches redact.rs BLOCK_CSS
@@ -27,7 +28,7 @@ function coverRegions(
     if (w <= 0 || h <= 0) continue
 
     if (style === 'solid') {
-      ctx.fillStyle = COVER_DARK
+      ctx.fillStyle = SOLID_COVER
       ctx.fillRect(x, y, w, h)
       continue
     }
