@@ -60,7 +60,7 @@ describe('renderAnnotated', () => {
 
     installImageMock()
 
-    const annotations = [{ id: 'a1', x: 10, y: 20, w: 100, h: 50, note: 'test note' }]
+    const annotations = [{ id: 'a1', x: 10, y: 20, w: 100, h: 50, note: 'test note', kind: 'annotation' as const }]
     const resultPromise = renderAnnotated('blob:fake', annotations, 2)
     await expect(resultPromise).resolves.toBe('mock123')
 
@@ -84,6 +84,7 @@ describe('renderAnnotated', () => {
       w: 100,
       h: 50,
       note: '',
+      kind: 'annotation' as const,
     }))
 
     await renderAnnotated('blob:fake', annotations, 1)
@@ -99,7 +100,7 @@ describe('renderAnnotated', () => {
 
     installImageMock()
 
-    const annotations = [{ id: 'a1', x: 10, y: 20, w: 100, h: 50, note: 'fix this' }]
+    const annotations = [{ id: 'a1', x: 10, y: 20, w: 100, h: 50, note: 'fix this', kind: 'annotation' as const }]
     await renderAnnotated('blob:fake', annotations, 1)
 
     // Caption text is drawn at its top-left text origin. For x=10,y=20,h=50 at
@@ -119,7 +120,7 @@ describe('renderAnnotated', () => {
     // measureText mock is s.length * 8; textMaxW = 240 - 2*8 = 224 (~28 chars/line),
     // so this note wraps across multiple lines.
     const note = 'aaaaa bbbbb ccccc ddddd eeeee fffff'
-    const annotations = [{ id: 'a1', x: 10, y: 20, w: 100, h: 50, note }]
+    const annotations = [{ id: 'a1', x: 10, y: 20, w: 100, h: 50, note, kind: 'annotation' as const }]
     await renderAnnotated('blob:fake', annotations, 1)
 
     // Drop the badge label ('01'); the remaining fillText calls are caption lines.
@@ -143,7 +144,7 @@ describe('renderAnnotated', () => {
     installImageMock(100, 600)
 
     const note = 'alpha bravo charlie delta echo foxtrot golf hotel india'
-    const annotations = [{ id: 'a1', x: 10, y: 20, w: 60, h: 30, note }]
+    const annotations = [{ id: 'a1', x: 10, y: 20, w: 60, h: 30, note, kind: 'annotation' as const }]
     await renderAnnotated('blob:fake', annotations, 1)
 
     // Every roundRect (pill + caption border + caption fill) must fit within the
@@ -160,7 +161,7 @@ describe('renderAnnotated', () => {
 
     installImageMock()
 
-    const annotations = [{ id: 'a1', x: 10, y: 20, w: 100, h: 50, note: '   ' }]
+    const annotations = [{ id: 'a1', x: 10, y: 20, w: 100, h: 50, note: '   ', kind: 'annotation' as const }]
     await renderAnnotated('blob:fake', annotations, 1)
 
     const texts = mockCtx.fillText.mock.calls.map((c) => c[0])

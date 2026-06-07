@@ -28,7 +28,7 @@ const px = (v: string) => parseFloat(v);
 
 describe("RectangleNote placement", () => {
   it("places the note below the rect when there is room", () => {
-    const rect: Rect = { id: "r1", x: 10, y: 50, w: 100, h: 30, note: "" };
+    const rect: Rect = { id: "r1", x: 10, y: 50, w: 100, h: 30, note: "", kind: "annotation" as const };
     const ta = renderNote(rect, 800);
     expect(ta.style.top).toBe(`${rect.y + rect.h + NOTE_OFFSET}px`); // 86px
   });
@@ -36,7 +36,7 @@ describe("RectangleNote placement", () => {
   it("flips the note fully above the rect when below would overflow, without overlapping it", () => {
     // Rect near the bottom of a 300px-tall container: placing below overflows,
     // so the note flips above. Its bottom edge must sit at or above the rect top.
-    const rect: Rect = { id: "r1", x: 10, y: 250, w: 100, h: 30, note: "" };
+    const rect: Rect = { id: "r1", x: 10, y: 250, w: 100, h: 30, note: "", kind: "annotation" as const };
     const ta = renderNote(rect, 300);
 
     const top = px(ta.style.top);

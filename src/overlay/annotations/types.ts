@@ -10,6 +10,7 @@ export type Rect = {
   w: number;
   h: number;
   note: string;
+  kind: 'annotation' | 'redaction';
 };
 
 export type ActiveGesture =
@@ -38,7 +39,7 @@ export type HistoryEntry =
   | { kind: 'resize'; id: string; previous: { x: number; y: number; w: number; h: number } };
 
 export type AnnotationsAction =
-  | { type: 'BEGIN_CREATE'; id: string; x: number; y: number }
+  | { type: 'BEGIN_CREATE'; id: string; x: number; y: number; kind: 'annotation' | 'redaction' }
   | {
       type: 'BEGIN_MOVE';
       id: string;
