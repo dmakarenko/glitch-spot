@@ -29,6 +29,16 @@ impl ProviderKind {
             ProviderKind::Tailscale   => "tailscale",
         }
     }
+
+    /// Human-facing name for menus. Distinct from `as_str()`, which is the
+    /// kebab/lowercase key used on disk and in tray menu ids.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ProviderKind::Cloudflared => "Cloudflare",
+            ProviderKind::Ngrok       => "ngrok",
+            ProviderKind::Tailscale   => "Tailscale",
+        }
+    }
 }
 
 use async_trait::async_trait;
@@ -62,5 +72,30 @@ pub trait TunnelProvider: Send + Sync {
     /// off to a separately-running daemon (tailscale funnel --bg).
     fn child_persists_with_tunnel(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_names_are_human_facing() {
+        assert_eq!(ProviderKind::Cloudflared.display_name(), "Cloudflare");
+        assert_eq!(ProviderKind::Ngrok.display_name(), "ngrok");
+        assert_eq!(ProviderKind::Tailscale.display_name(), "Tailscale");
+    }
+
+    #[test]
+    fn as_str_keys_stay_stable_for_persistence_and_ids() {
+        // as_str() is the on-disk config value and the tray menu id suffix.
+        // Changing it would break round-tripping and provider selection, so
+        // it must stay distinct from the human-facing display_name().
+        for kind in [ProviderKind::Cloudflared, ProviderKind::Ngrok, ProviderKind::Tailscale] {
+            assert_eq!(ProviderKind::from_name(kind.as_str()), Some(kind));
+        }
+        assert_eq!(ProviderKind::Cloudflared.as_str(), "cloudflared");
+        assert_eq!(ProviderKind::Ngrok.as_str(), "ngrok");
+        assert_eq!(ProviderKind::Tailscale.as_str(), "tailscale");
     }
 }

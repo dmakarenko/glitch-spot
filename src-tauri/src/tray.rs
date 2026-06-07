@@ -244,6 +244,48 @@ pub fn refresh_menu(app: &AppHandle) {
     }
 }
 
+/// Max characters of an error reason shown inline in the tray menu. The full
+/// text stays available by clicking the item, which copies it to the clipboard.
+const MAX_ERROR_REASON_CHARS: usize = 30;
+
+/// Builds the "Tunnel: …" status-line label. Long error reasons are collapsed
+/// to a single line and truncated; the full reason is recovered by clicking the
+/// item (see the `tunnel_status` menu-event handler).
+pub(crate) fn tunnel_status_label(state: &crate::share::tunnel::TunnelState) -> String {
+    use crate::share::tunnel::TunnelState;
+    match state {
+        TunnelState::Idle => "Tunnel: idle".to_string(),
+        TunnelState::Starting => "Tunnel: starting…".to_string(),
+        TunnelState::Live { url } => {
+            let host = url.trim_start_matches("https://").trim_start_matches("http://");
+            format!("Tunnel: {host}")
+        }
+        TunnelState::Error { reason } => {
+            let one_line = reason.split_whitespace().collect::<Vec<_>>().join(" ");
+            let short = truncate_chars(&one_line, MAX_ERROR_REASON_CHARS);
+            format!("Tunnel: error — {short} (click to copy)")
+        }
+    }
+}
+
+/// Submenu title that surfaces the configured provider in the main menu without
+/// unfolding, e.g. "Tunnel: ngrok". The macOS submenu disclosure arrow is added
+/// by the system.
+pub(crate) fn tunnel_provider_label(kind: crate::settings::ProviderKind) -> String {
+    format!("Tunnel: {}", kind.display_name())
+}
+
+/// Truncates to at most `max` characters on a char boundary, appending an
+/// ellipsis when truncation occurred.
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max).collect();
+        format!("{truncated}…")
+    }
+}
+
 pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let state = app.state::<crate::AppState>();
 
@@ -291,42 +333,43 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .build(app)?;
 
     let has_snapshot = state.snapshot_store.get_latest().is_some();
-    let tunnel_state_label = match state.tunnel.current_state() {
-        crate::share::tunnel::TunnelState::Idle => "Tunnel: idle".to_string(),
-        crate::share::tunnel::TunnelState::Starting => "Tunnel: starting…".to_string(),
-        crate::share::tunnel::TunnelState::Live { url } => {
-            let host = url.trim_start_matches("https://").trim_start_matches("http://");
-            format!("Tunnel: {host}")
-        }
-        crate::share::tunnel::TunnelState::Error { reason } => format!("Tunnel: error — {reason}"),
-    };
+    let tunnel_state = state.tunnel.current_state();
+    let tunnel_state_label = tunnel_status_label(&tunnel_state);
+    let tunnel_is_error =
+        matches!(tunnel_state, crate::share::tunnel::TunnelState::Error { .. });
+    // The status line only appears when the tunnel is active; when idle, the
+    // provider submenu ("Tunnel: <provider>") already conveys everything.
+    let show_status_line =
+        !matches!(tunnel_state, crate::share::tunnel::TunnelState::Idle);
     let share_disabled = !has_snapshot
-        || matches!(state.tunnel.current_state(), crate::share::tunnel::TunnelState::Starting);
+        || matches!(tunnel_state, crate::share::tunnel::TunnelState::Starting);
 
-    let share_latest_item = MenuItemBuilder::new("Share latest snapshot…")
+    let share_latest_item = MenuItemBuilder::new("Share latest snapshot (copy link)")
         .id("share_latest")
         .enabled(!share_disabled)
         .build(app)?;
 
+    // The status line is a passive label except in Error state, where it
+    // becomes clickable to copy the full (untruncated) error to the clipboard.
     let tunnel_status_item = MenuItemBuilder::new(&tunnel_state_label)
         .id("tunnel_status")
-        .enabled(false)
+        .enabled(tunnel_is_error)
         .build(app)?;
 
     let current = state.settings.current_provider();
-    let provider_cf = CheckMenuItemBuilder::new("cloudflared")
+    let provider_cf = CheckMenuItemBuilder::new(crate::settings::ProviderKind::Cloudflared.display_name())
         .id("provider:cloudflared")
         .checked(matches!(current, crate::settings::ProviderKind::Cloudflared))
         .build(app)?;
-    let provider_ng = CheckMenuItemBuilder::new("ngrok")
+    let provider_ng = CheckMenuItemBuilder::new(crate::settings::ProviderKind::Ngrok.display_name())
         .id("provider:ngrok")
         .checked(matches!(current, crate::settings::ProviderKind::Ngrok))
         .build(app)?;
-    let provider_ts = CheckMenuItemBuilder::new("Tailscale Funnel")
+    let provider_ts = CheckMenuItemBuilder::new(crate::settings::ProviderKind::Tailscale.display_name())
         .id("provider:tailscale")
         .checked(matches!(current, crate::settings::ProviderKind::Tailscale))
         .build(app)?;
-    let provider_submenu = SubmenuBuilder::new(app, "Tunnel provider")
+    let provider_submenu = SubmenuBuilder::new(app, tunnel_provider_label(current))
         .item(&provider_cf)
         .item(&provider_ng)
         .item(&provider_ts)
@@ -443,8 +486,15 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&share_status)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&latest_snapshot)
-        .item(&share_latest_item)
-        .item(&tunnel_status_item)
+        .item(&share_latest_item);
+
+    let menu_builder = if show_status_line {
+        menu_builder.item(&tunnel_status_item)
+    } else {
+        menu_builder
+    };
+
+    let menu_builder = menu_builder
         .item(&provider_submenu)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&tray_submenu)
@@ -610,6 +660,25 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                             eprintln!("tray: share_latest failed: {e}");
                         }
                     });
+                }
+                "tunnel_status" => {
+                    // Only clickable in Error state — copy the full (untruncated)
+                    // reason so the user can paste the whole thing for debugging.
+                    let state = app.state::<crate::AppState>();
+                    if let crate::share::tunnel::TunnelState::Error { reason } =
+                        state.tunnel.current_state()
+                    {
+                        let body = match app.clipboard().write_text(reason) {
+                            Ok(()) => "Tunnel error copied to clipboard.".to_string(),
+                            Err(e) => format!("Couldn't copy to clipboard: {e}"),
+                        };
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title("Glitch Spot")
+                            .body(body)
+                            .show();
+                    }
                 }
                 "provider:cloudflared" | "provider:ngrok" | "provider:tailscale" => {
                     let kind = event.id.as_ref().split(':').nth(1).unwrap_or("cloudflared").to_string();
@@ -1068,6 +1137,58 @@ mod tests {
         assert!(label.starts_with("Version: "), "expected 'Version: ' prefix, got: {label}");
         assert!(label.contains('('), "expected '(' in label, got: {label}");
         assert!(label.ends_with(')'), "expected ')' suffix, got: {label}");
+    }
+
+    #[test]
+    fn tunnel_provider_label_shows_human_name() {
+        use crate::settings::ProviderKind;
+        assert_eq!(tunnel_provider_label(ProviderKind::Cloudflared), "Tunnel: Cloudflare");
+        assert_eq!(tunnel_provider_label(ProviderKind::Ngrok), "Tunnel: ngrok");
+        assert_eq!(tunnel_provider_label(ProviderKind::Tailscale), "Tunnel: Tailscale");
+    }
+
+    #[test]
+    fn tunnel_label_idle_starting_live() {
+        use crate::share::tunnel::TunnelState;
+        assert_eq!(tunnel_status_label(&TunnelState::Idle), "Tunnel: idle");
+        assert_eq!(tunnel_status_label(&TunnelState::Starting), "Tunnel: starting…");
+        assert_eq!(
+            tunnel_status_label(&TunnelState::Live {
+                url: "https://abc.trycloudflare.com".into()
+            }),
+            "Tunnel: abc.trycloudflare.com"
+        );
+    }
+
+    #[test]
+    fn tunnel_label_short_error_keeps_full_reason_and_adds_hint() {
+        use crate::share::tunnel::TunnelState;
+        let label = tunnel_status_label(&TunnelState::Error { reason: "boom".into() });
+        assert_eq!(label, "Tunnel: error — boom (click to copy)");
+    }
+
+    #[test]
+    fn tunnel_label_long_error_is_truncated_with_ellipsis_and_hint() {
+        use crate::share::tunnel::TunnelState;
+        let reason = "x".repeat(100);
+        let label = tunnel_status_label(&TunnelState::Error { reason });
+        assert!(label.ends_with(" (click to copy)"), "missing hint: {label}");
+        assert!(label.contains('…'), "missing ellipsis: {label}");
+        let xs = label.chars().filter(|&c| c == 'x').count();
+        assert_eq!(
+            xs, MAX_ERROR_REASON_CHARS,
+            "expected reason truncated to {MAX_ERROR_REASON_CHARS} chars, got {xs}"
+        );
+    }
+
+    #[test]
+    fn tunnel_label_collapses_multiline_error_to_one_line() {
+        use crate::share::tunnel::TunnelState;
+        let label = tunnel_status_label(&TunnelState::Error {
+            reason: "line one\n\tline two".into(),
+        });
+        assert!(!label.contains('\n'), "label should be single-line: {label}");
+        assert!(label.contains("line one line two"), "whitespace not collapsed: {label}");
     }
 
     #[test]
