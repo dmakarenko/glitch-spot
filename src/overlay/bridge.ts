@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { AnnotationPayload, GlitchSpotNativeBridge } from '../../packages/electron/src/types'
 
 export type ClipboardFormat = 'json' | 'image' | 'prompt'
+export type RedactionStyle = 'solid' | 'pixelated' | 'branded'
 
 export interface OverlayBridge {
   onFrame(cb: (blobUrl: string) => void): Promise<() => void>
@@ -24,10 +25,17 @@ export interface OverlayBridge {
   revealOverlay(): void
   getClipboardFormat(): Promise<ClipboardFormat>
   setClipboardFormat(format: ClipboardFormat): Promise<void>
+  getRedactionStyle(): Promise<RedactionStyle>
+  setRedactionStyle(style: RedactionStyle): Promise<void>
 }
 
 type TauriFrame = {
   width: number; height: number; scale_factor: number; png: number[]; display_index: number
+}
+
+function base64PngToBlobUrl(b64: string): string {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+  return URL.createObjectURL(new Blob([bytes], { type: 'image/png' }))
 }
 
 function frameToBlob(frame: TauriFrame): string {
@@ -62,6 +70,12 @@ class TauriBridge implements OverlayBridge {
   async setClipboardFormat(format: ClipboardFormat): Promise<void> {
     await invoke('set_clipboard_format', { format })
   }
+  async getRedactionStyle(): Promise<RedactionStyle> {
+    return invoke<string>('get_redaction_style') as Promise<RedactionStyle>
+  }
+  async setRedactionStyle(style: RedactionStyle): Promise<void> {
+    await invoke('set_redaction_style', { style })
+  }
 }
 
 declare global {
@@ -80,9 +94,7 @@ class ElectronBridge implements OverlayBridge {
     this.frameHandler = (b64: string) => {
       if (this.cleanBlobUrl) URL.revokeObjectURL(this.cleanBlobUrl)
       this.cleanBase64 = b64
-      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
-      const blob = new Blob([bytes], { type: 'image/png' })
-      this.cleanBlobUrl = URL.createObjectURL(blob)
+      this.cleanBlobUrl = base64PngToBlobUrl(b64)
       cb(this.cleanBlobUrl)
     }
     window.glitchSpotBridge!.onFrame(this.frameHandler)
@@ -99,14 +111,27 @@ class ElectronBridge implements OverlayBridge {
     if (!this.cleanBase64 || !this.cleanBlobUrl) {
       throw new Error('[glitch-spot] saveSnapshot called before first frame')
     }
-    const { renderAnnotated } = await import('./annotate')
-    const annotatedBase64 = await renderAnnotated(
+    const { renderAnnotated, redactClean } = await import('./annotate')
+    const style = await this.getRedactionStyle()
+    // Redact the clean image FIRST, then derive the annotated image from the
+    // redacted clean — both bytes that reach the host must be covered.
+    const redactedCleanBase64 = await redactClean(
       this.cleanBlobUrl,
       annotations,
       window.devicePixelRatio,
+      style,
     )
-    // mode is always 'frozen' in v1 — not passed through IPC, set by main process
-    window.glitchSpotBridge!.saveSnapshot(annotations, this.cleanBase64, annotatedBase64)
+    const redactedCleanBlobUrl = base64PngToBlobUrl(redactedCleanBase64)
+    try {
+      const annotatedBase64 = await renderAnnotated(
+        redactedCleanBlobUrl,
+        annotations,
+        window.devicePixelRatio,
+      )
+      window.glitchSpotBridge!.saveSnapshot(annotations, redactedCleanBase64, annotatedBase64)
+    } finally {
+      URL.revokeObjectURL(redactedCleanBlobUrl)
+    }
   }
 
   cancel(): void {
@@ -122,6 +147,10 @@ class ElectronBridge implements OverlayBridge {
     return 'json'
   }
   async setClipboardFormat(_format: ClipboardFormat): Promise<void> {}
+  async getRedactionStyle(): Promise<RedactionStyle> {
+    return 'branded'
+  }
+  async setRedactionStyle(_style: RedactionStyle): Promise<void> {}
 }
 
 export function createBridge(): OverlayBridge {

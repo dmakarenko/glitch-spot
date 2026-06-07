@@ -60,8 +60,20 @@ pub fn render_annotated_png(
     annotations: &[Annotation],
     scale_factor: f32,
 ) -> Result<(Vec<u8>, RgbaImage), AnnotateError> {
-    let mut img =
+    let img =
         image::load_from_memory_with_format(clean_png, image::ImageFormat::Png)?.to_rgba8();
+    render_annotations_onto(img, annotations, scale_factor)
+}
+
+/// Draw rectangle borders, numbered badges, and captions onto an already-decoded
+/// image, then encode. Used directly by the redaction path (which decodes once,
+/// covers the redacted regions, and renders annotations on the result) so the
+/// image is not decoded a second time.
+pub fn render_annotations_onto(
+    mut img: RgbaImage,
+    annotations: &[Annotation],
+    scale_factor: f32,
+) -> Result<(Vec<u8>, RgbaImage), AnnotateError> {
     let font = FontRef::try_from_slice(FONT_BYTES).map_err(|_| AnnotateError::Font)?;
 
     let border_width = (BORDER_WIDTH_CSS * scale_factor).round().max(1.0) as i32;

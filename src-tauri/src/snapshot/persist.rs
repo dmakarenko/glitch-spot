@@ -128,6 +128,7 @@ mod tests {
                 note: "fix this".to_string(),
                 label: "01".to_string(),
             }],
+            redactions: vec![],
             context: Context {
                 screen: ScreenInfo { width: 1440, height: 900, scale_factor: 2.0, display_index: 0 },
                 os: OsInfo { platform: "macos".to_string(), version: "26.0".to_string() },

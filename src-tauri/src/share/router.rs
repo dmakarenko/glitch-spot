@@ -14,6 +14,11 @@ use axum::Router;
 use crate::share::{html, token};
 use crate::snapshot::Snapshot;
 
+/// Local port the share server binds and the tunnel is pointed at. Canonical
+/// home for the value so the bind, the tray status row, and the tunnel target
+/// can't drift apart.
+pub const SHARE_PORT: u16 = 7821;
+
 #[derive(Clone)]
 struct ShareState {
     base: Arc<PathBuf>,
@@ -125,19 +130,26 @@ async fn serve_annotated_png(
     serve_png(state, &id, &tok, filename).await
 }
 
-/// Start the share server. Binds 127.0.0.1:7821; logs and returns on bind failure.
-pub async fn serve_share(base: PathBuf) {
+/// Start the share server. Binds 127.0.0.1:port; logs and returns on bind
+/// failure. The shared `bound` flag is set to true on successful bind and
+/// cleared if/when serve returns — the tray uses it as the health signal,
+/// mirroring the MCP server.
+pub async fn serve_share(base: PathBuf, port: u16, bound: Arc<std::sync::atomic::AtomicBool>) {
+    use std::sync::atomic::Ordering;
     let app = build_share_router(base);
-    let listener = match tokio::net::TcpListener::bind("127.0.0.1:7821").await {
+    let addr = format!("127.0.0.1:{port}");
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("[glitch-spot share] failed to bind 127.0.0.1:7821: {e}");
+            eprintln!("[glitch-spot share] failed to bind {addr}: {e}");
             return;
         }
     };
+    bound.store(true, Ordering::SeqCst);
     if let Err(e) = axum::serve(listener, app).await {
         eprintln!("[glitch-spot share] server error: {e}");
     }
+    bound.store(false, Ordering::SeqCst);
 }
 
 #[cfg(test)]
@@ -274,6 +286,29 @@ mod tests {
         let app = build_share_router(temp.path().to_path_buf());
         let (status, _, _) = get(app, "/share/snap_ggg/tok-ggg/clean.png").await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn serve_share_sets_bound_after_successful_bind() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let temp = tempfile::TempDir::new().unwrap();
+        let bound = Arc::new(AtomicBool::new(false));
+        let bound_clone = bound.clone();
+
+        // port=0 → OS picks a free ephemeral port; we only assert the flag flips.
+        let task = tokio::spawn(async move {
+            serve_share(temp.path().to_path_buf(), 0, bound_clone).await;
+        });
+
+        for _ in 0..50 {
+            if bound.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
+        assert!(bound.load(Ordering::SeqCst), "bound should be set after successful bind");
+        task.abort();
     }
 
     #[tokio::test]

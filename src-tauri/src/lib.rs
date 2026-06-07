@@ -40,6 +40,10 @@ pub struct AppState {
     /// avoids the TCP-connect false positive when another process happens to
     /// own the configured port.
     pub mcp_bound: Arc<AtomicBool>,
+    /// Set to true by `share::router::serve_share` once the 7821 listener is
+    /// bound, cleared if/when serve returns. Tray reads this for the Share
+    /// Server health row — mirrors `mcp_bound`.
+    pub share_bound: Arc<AtomicBool>,
     pub picker_state: Arc<picker_session::PickerStateHolder>,
     /// Bumped whenever a frozen overlay session starts or is dismissed. A frozen
     /// capture records the value at trigger time and only publishes its frame if
@@ -205,6 +209,7 @@ async fn save_snapshot(
         &os_version,
         &base,
         crop_origin,
+        state.settings.current_redaction_style(),
     )
     .map_err(|e| e.to_string())?;
 
@@ -304,7 +309,7 @@ pub(crate) async fn do_share_latest(
             settings::ProviderKind::Tailscale   => Arc::new(share::tunnel::tailscale::Tailscale),
         };
 
-    let tunnel_url = Arc::clone(&state.tunnel).start_tunnel(provider, 7821).await
+    let tunnel_url = Arc::clone(&state.tunnel).start_tunnel(provider, share::router::SHARE_PORT).await
         .map_err(|e| e.to_string())?;
 
     let token = share::token::generate();
@@ -347,6 +352,17 @@ pub(crate) fn do_set_tray_appearance(
     state
         .settings
         .save_tray_appearance(&state.config_dir, animated, coloured)
+        .map_err(|e| e.to_string())
+}
+
+/// Persists the redaction style. Shared by the Tauri command and the tray menu
+/// handler.
+pub(crate) fn do_set_redaction_style(state: &AppState, key: String) -> Result<(), String> {
+    let style = settings::RedactionStyle::from_name(&key)
+        .ok_or_else(|| format!("unknown redaction style: {key}"))?;
+    state
+        .settings
+        .save_redaction_style(&state.config_dir, style)
         .map_err(|e| e.to_string())
 }
 
@@ -809,6 +825,19 @@ fn set_clipboard_format(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_redaction_style(state: tauri::State<'_, AppState>) -> String {
+    state.settings.current_redaction_style().as_str().to_string()
+}
+
+#[tauri::command]
+fn set_redaction_style(
+    state: tauri::State<'_, AppState>,
+    style: String,
+) -> Result<(), String> {
+    do_set_redaction_style(&state, style)
+}
+
 pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if let Some(state) = app.try_state::<AppState>() {
         state.picker_state.try_enter_live().map_err(anyhow::Error::msg)?;
@@ -985,6 +1014,7 @@ mod tests {
             ),
             config_dir: temp.path().to_path_buf(),
             mcp_bound: Arc::new(AtomicBool::new(false)),
+            share_bound: Arc::new(AtomicBool::new(false)),
             picker_state: Arc::new(picker_session::PickerStateHolder::new()),
             freeze_generation: Arc::new(AtomicU64::new(0)),
             live_generation: Arc::new(AtomicU64::new(0)),
@@ -1046,10 +1076,12 @@ pub fn run() {
         mcp::server::serve(store_for_mcp, mcp_port, mcp_bound_for_serve).await;
     });
 
+    let share_bound = Arc::new(AtomicBool::new(false));
     let share_base = snapshot::persist::snapshots_dir().ok();
     if let Some(base) = share_base.clone() {
+        let share_bound_for_serve = share_bound.clone();
         tauri::async_runtime::spawn(async move {
-            share::router::serve_share(base).await;
+            share::router::serve_share(base, share::router::SHARE_PORT, share_bound_for_serve).await;
         });
     } else {
         eprintln!("[glitch-spot] share server NOT started — could not resolve snapshots dir");
@@ -1076,6 +1108,7 @@ pub fn run() {
             settings: settings.clone(),
             config_dir: config_dir.clone(),
             mcp_bound: mcp_bound.clone(),
+            share_bound: share_bound.clone(),
             picker_state: Arc::new(picker_session::PickerStateHolder::new()),
             freeze_generation: Arc::new(AtomicU64::new(0)),
             live_generation: Arc::new(AtomicU64::new(0)),
@@ -1147,6 +1180,8 @@ pub fn run() {
             set_tray_appearance,
             get_clipboard_format,
             set_clipboard_format,
+            get_redaction_style,
+            set_redaction_style,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

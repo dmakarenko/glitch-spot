@@ -6,7 +6,8 @@ import type { AnnotationsAction, AnnotationsState, Handle } from "./types";
 import { MIN_RECT_DIMENSION } from "./state";
 import { PICKER_CURSOR_CSS } from "../../picker/cursor";
 import { RectangleNote } from "./RectangleNote";
-import { formatLabel } from "./label";
+import { annotationLabels } from "./label";
+import type { RedactionStyle } from "../bridge";
 
 const RECT_BORDER = "1.5px solid rgba(238, 102, 51, 0.9)";
 const RECT_FILL = "rgba(238, 102, 51, 0.05)";
@@ -26,7 +27,24 @@ type Props = {
   // outside the window rect), so a click on the dimmed area outside clipRect
   // must be forwarded here rather than silently swallowed.
   onOutsideClick?: () => void;
+  redactMode?: boolean;
+  redactionStyle?: RedactionStyle;
 };
+
+function redactionPreviewBg(style: RedactionStyle): string {
+  if (style === "solid") return "#241f1b"; // warm dark grey — matches annotate.ts SOLID_COVER
+  // A small mosaic pattern stands in for the baked cover (no live-screen pixels
+  // in the DOM). Branded uses the accent palette; pixelated greys.
+  const a = style === "branded" ? "%23ee6633" : "%23777777";
+  const b = style === "branded" ? "%2378341a" : "%23444444";
+  return (
+    "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12'>" +
+    `<rect width='12' height='12' fill='${a}'/>` +
+    `<rect width='6' height='6' fill='${b}'/>` +
+    `<rect x='6' y='6' width='6' height='6' fill='${b}'/>` +
+    "</svg>\")"
+  );
+}
 
 const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
@@ -91,7 +109,7 @@ function ResizeHandle({
   );
 }
 
-export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Props) {
+export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick, redactMode = false, redactionStyle = 'branded' }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   const [containerHeight, setContainerHeight] = useState<number>(
@@ -142,9 +160,9 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Prop
         onOutsideClick?.();
         return;
       }
-      dispatch({ type: "BEGIN_CREATE", id: nextRectId(), x: startInside.x, y: startInside.y });
+      dispatch({ type: "BEGIN_CREATE", id: nextRectId(), x: startInside.x, y: startInside.y, kind: redactMode ? "redaction" : "annotation" });
     },
-    [dispatch, eventCoords, clipRect, onOutsideClick]
+    [dispatch, eventCoords, clipRect, onOutsideClick, redactMode]
   );
 
   const onMouseMove = useCallback(
@@ -172,6 +190,8 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Prop
     dispatch({ type: "END_GESTURE" });
   }, [dispatch, state.active]);
 
+  const labels = annotationLabels(state.rects);
+
   return (
     <div
       ref={ref}
@@ -187,119 +207,128 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick }: Prop
         WebkitUserSelect: "none",
       }}
     >
-      {state.rects.map((r, idx) => (
-        <div
-          key={r.id}
-          data-rect-id={r.id}
-          onMouseEnter={() => setHoveredId(r.id)}
-          onMouseLeave={() => setHoveredId((prev) => (prev === r.id ? null : prev))}
-          onMouseDown={(e) => {
-            // Only respond if the mousedown originated on the rect body itself, not on
-            // a child (handle, delete-X, badge, note textarea). Children stopPropagation
-            // on their own mousedowns.
-            if (e.target !== e.currentTarget) return;
-            if (e.button !== 0) return;
-            e.preventDefault();
-            e.stopPropagation();
-            const { x: pointerX, y: pointerY } = eventCoords(e);
-            dispatch({
-              type: "BEGIN_MOVE",
-              id: r.id,
-              pointerX,
-              pointerY,
-              viewportW: window.innerWidth,
-              viewportH: window.innerHeight,
-            });
-          }}
-          style={{
-            position: "absolute",
-            left: r.x,
-            top: r.y,
-            width: r.w,
-            height: r.h,
-            border: RECT_BORDER,
-            background: RECT_FILL,
-            boxSizing: "border-box",
-            pointerEvents: "auto",
-            cursor: "move",
-            boxShadow: "-2px 0 0 rgba(255, 0, 60, 0.4), 2px 0 0 rgba(0, 245, 255, 0.4)",
-          }}
-        >
-          {r.w >= MIN_RECT_DIMENSION && r.h >= MIN_RECT_DIMENSION && (
-            <>
-              <div
-                aria-hidden
-                style={{
-                  position: "absolute",
-                  width: 22,
-                  height: 14,
-                  borderRadius: 7,
-                  background: "#ee6633",
-                  color: "#ffffff",
-                  font: "bold 10px sans-serif",
-                  lineHeight: 1,
-                  fontVariantNumeric: "tabular-nums",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  pointerEvents: "none",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                  top: 4,
-                  left: 4,
-                }}
-              >
-                {formatLabel(idx)}
-              </div>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  dispatch({ type: "DELETE_RECT", id: r.id });
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                aria-label="Delete rectangle"
-                style={{
-                  position: "absolute",
-                  width: 20,
-                  height: 20,
-                  padding: 0,
-                  border: "none",
-                  background: "transparent",
-                  color: "#ee6633",
-                  font: "bold 20px sans-serif",
-                  lineHeight: "20px",
-                  textAlign: "center",
-                  cursor: "pointer",
-                  pointerEvents: "auto",
-                  textShadow: "0 0 3px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.5)",
-                  top: 2,
-                  right: 2,
-                }}
-              >
-                ×
-              </button>
-              {hoveredId === r.id && HANDLES.map((handle) => (
-                <ResizeHandle
-                  key={handle}
-                  handle={handle}
-                  rectId={r.id}
-                  dispatch={dispatch}
-                  eventCoords={eventCoords}
-                />
-              ))}
-            </>
-          )}
-        </div>
-      ))}
-      {state.rects.map((r) => (
-        <RectangleNote
-          key={`${r.id}-note`}
-          rect={r}
-          containerHeight={containerHeight}
-          autoFocus={!state.active && r.id === state.lastCreatedId}
-          onChange={(note) => dispatch({ type: "SET_NOTE", id: r.id, note })}
-        />
-      ))}
+      {state.rects.map((r, idx) => {
+        const isRedaction = r.kind === "redaction";
+        const label = labels[idx];
+        return (
+          <div
+            key={r.id}
+            data-rect-id={r.id}
+            onMouseEnter={() => setHoveredId(r.id)}
+            onMouseLeave={() => setHoveredId((prev) => (prev === r.id ? null : prev))}
+            onMouseDown={(e) => {
+              // Only respond if the mousedown originated on the rect body itself, not on
+              // a child (handle, delete-X, badge, note textarea). Children stopPropagation
+              // on their own mousedowns.
+              if (e.target !== e.currentTarget) return;
+              if (e.button !== 0) return;
+              e.preventDefault();
+              e.stopPropagation();
+              const { x: pointerX, y: pointerY } = eventCoords(e);
+              dispatch({
+                type: "BEGIN_MOVE",
+                id: r.id,
+                pointerX,
+                pointerY,
+                viewportW: window.innerWidth,
+                viewportH: window.innerHeight,
+              });
+            }}
+            style={{
+              position: "absolute",
+              left: r.x,
+              top: r.y,
+              width: r.w,
+              height: r.h,
+              border: isRedaction ? "1.5px solid rgba(238, 102, 51, 0.5)" : RECT_BORDER,
+              background: isRedaction ? redactionPreviewBg(redactionStyle) : RECT_FILL,
+              backgroundSize: isRedaction && redactionStyle !== "solid" ? "12px 12px" : undefined,
+              boxSizing: "border-box",
+              pointerEvents: "auto",
+              cursor: "move",
+              boxShadow: isRedaction ? "none" : "-2px 0 0 rgba(255, 0, 60, 0.4), 2px 0 0 rgba(0, 245, 255, 0.4)",
+            }}
+          >
+            {r.w >= MIN_RECT_DIMENSION && r.h >= MIN_RECT_DIMENSION && (
+              <>
+                {!isRedaction && (
+                  <div
+                    aria-hidden
+                    style={{
+                      position: "absolute",
+                      width: 22,
+                      height: 14,
+                      borderRadius: 7,
+                      background: "#ee6633",
+                      color: "#ffffff",
+                      font: "bold 10px sans-serif",
+                      lineHeight: 1,
+                      fontVariantNumeric: "tabular-nums",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      pointerEvents: "none",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                      top: 4,
+                      left: 4,
+                    }}
+                  >
+                    {label}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dispatch({ type: "DELETE_RECT", id: r.id });
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  aria-label="Delete rectangle"
+                  style={{
+                    position: "absolute",
+                    width: 20,
+                    height: 20,
+                    padding: 0,
+                    border: "none",
+                    background: "transparent",
+                    color: "#ee6633",
+                    font: "bold 20px sans-serif",
+                    lineHeight: "20px",
+                    textAlign: "center",
+                    cursor: "pointer",
+                    pointerEvents: "auto",
+                    textShadow: "0 0 3px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.5)",
+                    top: 2,
+                    right: 2,
+                  }}
+                >
+                  ×
+                </button>
+                {hoveredId === r.id && HANDLES.map((handle) => (
+                  <ResizeHandle
+                    key={handle}
+                    handle={handle}
+                    rectId={r.id}
+                    dispatch={dispatch}
+                    eventCoords={eventCoords}
+                  />
+                ))}
+              </>
+            )}
+          </div>
+        )
+      })}
+      {state.rects.map((r) =>
+        r.kind === "redaction" ? null : (
+          <RectangleNote
+            key={`${r.id}-note`}
+            rect={r}
+            containerHeight={containerHeight}
+            autoFocus={!state.active && r.id === state.lastCreatedId}
+            onChange={(note) => dispatch({ type: "SET_NOTE", id: r.id, note })}
+          />
+        ),
+      )}
     </div>
   );
 }

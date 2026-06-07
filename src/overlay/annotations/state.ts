@@ -35,6 +35,7 @@ export function reducer(
         w: 0,
         h: 0,
         note: "",
+        kind: action.kind,
       };
       const active: ActiveGesture = {
         kind: "create",

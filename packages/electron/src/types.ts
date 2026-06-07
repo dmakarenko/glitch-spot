@@ -36,6 +36,7 @@ export interface AnnotationPayload {
   w: number
   h: number
   note: string
+  kind: 'annotation' | 'redaction'
 }
 
 export interface GlitchSpotConfig {

@@ -19,6 +19,7 @@ fn sample_snapshot() -> Snapshot {
             note: "make this smaller".into(),
             label: "01".into(),
         }],
+        redactions: vec![],
         context: Context {
             screen: ScreenInfo {
                 width: 2560,
@@ -144,11 +145,13 @@ fn build_scales_annotation_coords_by_scale_factor() {
             w: 30.0,
             h: 40.0,
             note: "hi".into(),
+            kind: "annotation".into(),
         }],
         "macos",
         "26.0",
         temp.path(),
         None,
+        crate::settings::RedactionStyle::Branded,
     )
     .unwrap();
     assert_eq!(built.snapshot.annotations.len(), 1);
@@ -170,9 +173,10 @@ fn build_assigns_zero_padded_labels_from_array_position() {
             w: 1.0,
             h: 1.0,
             note: String::new(),
+            kind: "annotation".into(),
         })
         .collect();
-    let (built, _) = build(&fake_frame(), "frozen", incoming, "macos", "26.0", temp.path(), None).unwrap();
+    let (built, _) = build(&fake_frame(), "frozen", incoming, "macos", "26.0", temp.path(), None, crate::settings::RedactionStyle::Branded).unwrap();
     let labels: Vec<String> = built
         .snapshot
         .annotations
@@ -201,7 +205,7 @@ fn format_label_zero_pads_and_expands() {
 fn build_returns_paths_under_base_dir_and_bytes_match_frame() {
     let temp = tempfile::TempDir::new().unwrap();
     let frame = fake_frame();
-    let (built, _) = build(&frame, "live", vec![], "macos", "26.0", temp.path(), None).unwrap();
+    let (built, _) = build(&frame, "live", vec![], "macos", "26.0", temp.path(), None, crate::settings::RedactionStyle::Branded).unwrap();
 
     // Embedded paths point under `temp/{id}/...`
     let id = &built.snapshot.id;
@@ -367,6 +371,7 @@ fn build_crop_origin_translates_annotation_coords_into_window_local() {
         w: 80.0,
         h: 40.0,
         note: "n".into(),
+        kind: "annotation".into(),
     }];
 
     let temp = TempDir::new().unwrap();
@@ -379,6 +384,7 @@ fn build_crop_origin_translates_annotation_coords_into_window_local() {
         "26.0",
         temp.path(),
         Some((60.0, 30.0)),
+        crate::settings::RedactionStyle::Branded,
     )
     .expect("build with crop_origin should succeed");
     let a = &built.snapshot.annotations[0];
@@ -397,6 +403,7 @@ fn context_window_round_trips() {
         created_at: "2026-05-27T10:00:00Z".into(),
         mode: "window".into(),
         annotations: vec![],
+        redactions: vec![],
         context: Context {
             screen: ScreenInfo {
                 width: 1440,
@@ -499,4 +506,20 @@ fn context_window_omitted_when_none() {
     s.context.window = None;
     let json = serde_json::to_string(&s).unwrap();
     assert!(!json.contains("\"window\""), "expected `window` key omitted, got: {json}");
+}
+
+#[test]
+fn snapshot_without_redactions_field_deserializes_to_empty() {
+    // Older snapshots have no `redactions` key; serde(default) must fill it.
+    let json = r#"{
+        "id": "x", "created_at": "t", "mode": "frozen",
+        "annotations": [],
+        "context": {
+            "screen": {"width": 1, "height": 1, "scale_factor": 1.0, "display_index": 0},
+            "os": {"platform": "macos", "version": "14"}
+        },
+        "images": {"clean": "c", "annotated": "a"}
+    }"#;
+    let snap: crate::snapshot::Snapshot = serde_json::from_str(json).unwrap();
+    assert!(snap.redactions.is_empty());
 }

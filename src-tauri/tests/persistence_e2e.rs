@@ -42,9 +42,10 @@ fn build_then_persist_writes_files_at_paths_in_snapshot_images() {
         w: 1.0,
         h: 1.0,
         note: "e2e".into(),
+        kind: "annotation".into(),
     }];
 
-    let (built, _) = build(&frame, "frozen", annotations, "macos", "26.0", temp.path(), None).unwrap();
+    let (built, _) = build(&frame, "frozen", annotations, "macos", "26.0", temp.path(), None, glitch_spot::settings::RedactionStyle::Branded).unwrap();
     persist::write(temp.path(), &built).unwrap();
 
     // The paths embedded in the snapshot must actually point to the files on disk.
@@ -84,7 +85,7 @@ fn build_then_persist_writes_files_at_paths_in_snapshot_images() {
 fn cleanup_removes_a_persisted_snapshot_dir_after_24h() {
     let temp = TempDir::new().unwrap();
     let frame = fake_frame();
-    let (built, _) = build(&frame, "frozen", vec![], "macos", "26.0", temp.path(), None).unwrap();
+    let (built, _) = build(&frame, "frozen", vec![], "macos", "26.0", temp.path(), None, glitch_spot::settings::RedactionStyle::Branded).unwrap();
     persist::write(temp.path(), &built).unwrap();
 
     let snap_dir = temp.path().join(&built.snapshot.id);

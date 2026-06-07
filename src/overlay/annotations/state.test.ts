@@ -25,6 +25,7 @@ describe("annotations reducer", () => {
       id: "r1",
       x: 100,
       y: 50,
+      kind: "annotation",
     });
     expect(s.rects).toHaveLength(1);
     expect(s.rects[0]).toMatchObject({
@@ -45,19 +46,19 @@ describe("annotations reducer", () => {
   });
 
   it("POINTER_TO updates the dragging rect's bottom-right while create is active", () => {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 50 });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 50, kind: "annotation" });
     s = reducer(s, pointerTo(200, 100));
     expect(s.rects[0]).toMatchObject({ x: 100, y: 50, w: 100, h: 50 });
   });
 
   it("POINTER_TO handles drags up and to the left by flipping origin", () => {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 200, y: 100 });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 200, y: 100, kind: "annotation" });
     s = reducer(s, pointerTo(100, 50));
     expect(s.rects[0]).toMatchObject({ x: 100, y: 50, w: 100, h: 50 });
   });
 
   it("END_GESTURE clears active without removing the rect", () => {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 50 });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 50, kind: "annotation" });
     s = reducer(s, pointerTo(200, 100));
     s = reducer(s, { type: "END_GESTURE" });
     expect(s.active).toBeNull();
@@ -70,14 +71,14 @@ describe("annotations reducer", () => {
   });
 
   it("BEGIN_CREATE sets lastCreatedId so the new rect's note can auto-focus", () => {
-    const s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0 });
+    const s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0, kind: "annotation" });
     expect(s.lastCreatedId).toBe("r1");
   });
 });
 
 describe("notes and deletion", () => {
   function drawn(id: string): import("./types").AnnotationsState {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id, x: 0, y: 0 });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id, x: 0, y: 0, kind: "annotation" });
     s = reducer(s, pointerTo(100, 50));
     return reducer(s, { type: "END_GESTURE" });
   }
@@ -100,7 +101,7 @@ describe("notes and deletion", () => {
 
   it("DELETE_RECT removes the rect and records it in history with its original index", () => {
     let s = drawn("r1");
-    s = reducer(s, { type: "BEGIN_CREATE", id: "r2", x: 200, y: 0 });
+    s = reducer(s, { type: "BEGIN_CREATE", id: "r2", x: 200, y: 0, kind: "annotation" });
     s = reducer(s, pointerTo(300, 80));
     s = reducer(s, { type: "END_GESTURE" });
     s = reducer(s, { type: "DELETE_RECT", id: "r1" });
@@ -123,7 +124,7 @@ describe("notes and deletion", () => {
 
 describe("undo", () => {
   function drawn(id: string, state = initialState): import("./types").AnnotationsState {
-    let s = reducer(state, { type: "BEGIN_CREATE", id, x: 0, y: 0 });
+    let s = reducer(state, { type: "BEGIN_CREATE", id, x: 0, y: 0, kind: "annotation" });
     s = reducer(s, pointerTo(100, 50));
     return reducer(s, { type: "END_GESTURE" });
   }
@@ -157,7 +158,7 @@ describe("undo", () => {
   });
 
   it("UNDO of a create clears lastCreatedId when undoing the most recent create", () => {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0 });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0, kind: "annotation" });
     s = reducer(s, pointerTo(100, 50));
     s = reducer(s, { type: "END_GESTURE" });
     s = reducer(s, { type: "UNDO" });
@@ -165,7 +166,7 @@ describe("undo", () => {
   });
 
   it("UNDO of a move restores the previous position", () => {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 100 });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 100, kind: "annotation" });
     s = reducer(s, pointerTo(150, 150));
     s = reducer(s, { type: "END_GESTURE" });
     s = reducer(s, {
@@ -184,7 +185,7 @@ describe("undo", () => {
   });
 
   it("UNDO of a resize restores the full previous geometry", () => {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 100 });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 100, kind: "annotation" });
     s = reducer(s, pointerTo(300, 250));
     s = reducer(s, { type: "END_GESTURE" });
     s = reducer(s, {
@@ -204,7 +205,7 @@ describe("undo", () => {
   });
 
   it("UNDO walks back through move → resize in reverse order", () => {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 100 });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 100, kind: "annotation" });
     s = reducer(s, pointerTo(200, 200));
     s = reducer(s, { type: "END_GESTURE" });
     // first move (100,100) -> (150,150)
@@ -246,7 +247,7 @@ describe("min-size guard on END_GESTURE", () => {
   });
 
   it("END_GESTURE after a pure click (no drag) discards the zero-size rect entirely", () => {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 50 });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 50, kind: "annotation" });
     s = reducer(s, { type: "END_GESTURE" });
     expect(s.rects).toEqual([]);
     expect(s.history).toEqual([]);
@@ -255,7 +256,7 @@ describe("min-size guard on END_GESTURE", () => {
   });
 
   it("END_GESTURE discards a sub-MIN_RECT_DIMENSION drag (10x10)", () => {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 50 });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 100, y: 50, kind: "annotation" });
     s = reducer(s, pointerTo(110, 60));
     s = reducer(s, { type: "END_GESTURE" });
     expect(s.rects).toEqual([]);
@@ -263,7 +264,7 @@ describe("min-size guard on END_GESTURE", () => {
   });
 
   it("END_GESTURE keeps a rect that meets the threshold (25x25)", () => {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0 });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0, kind: "annotation" });
     s = reducer(s, pointerTo(25, 25));
     s = reducer(s, { type: "END_GESTURE" });
     expect(s.rects).toHaveLength(1);
@@ -271,17 +272,17 @@ describe("min-size guard on END_GESTURE", () => {
   });
 
   it("END_GESTURE discards a wide-but-flat rect (60x10) because height is below the threshold", () => {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0 });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0, kind: "annotation" });
     s = reducer(s, pointerTo(60, 10));
     s = reducer(s, { type: "END_GESTURE" });
     expect(s.rects).toEqual([]);
   });
 
   it("discarding a too-small rect leaves any previously committed rectangles untouched", () => {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0 });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id: "r1", x: 0, y: 0, kind: "annotation" });
     s = reducer(s, pointerTo(100, 80));
     s = reducer(s, { type: "END_GESTURE" });
-    s = reducer(s, { type: "BEGIN_CREATE", id: "r2", x: 200, y: 200 });
+    s = reducer(s, { type: "BEGIN_CREATE", id: "r2", x: 200, y: 200, kind: "annotation" });
     s = reducer(s, { type: "END_GESTURE" });
     expect(s.rects.map((r) => r.id)).toEqual(["r1"]);
     expect(s.history).toEqual([{ kind: "create", id: "r1" }]);
@@ -290,7 +291,7 @@ describe("min-size guard on END_GESTURE", () => {
 
 describe("move gesture", () => {
   function drawn(id: string, x: number, y: number, w: number, h: number): import("./types").AnnotationsState {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id, x, y });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id, x, y, kind: "annotation" });
     s = reducer(s, pointerTo(x + w, y + h));
     return reducer(s, { type: "END_GESTURE" });
   }
@@ -394,7 +395,7 @@ describe("move gesture", () => {
 
 describe("resize gesture", () => {
   function drawn(id: string, x: number, y: number, w: number, h: number): import("./types").AnnotationsState {
-    let s = reducer(initialState, { type: "BEGIN_CREATE", id, x, y });
+    let s = reducer(initialState, { type: "BEGIN_CREATE", id, x, y, kind: "annotation" });
     s = reducer(s, pointerTo(x + w, y + h));
     return reducer(s, { type: "END_GESTURE" });
   }
