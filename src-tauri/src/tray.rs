@@ -192,14 +192,20 @@ pub(crate) fn mcp_status_label(healthy: bool, port: u16) -> String {
     format!("{indicator} MCP Server :{port}")
 }
 
+pub(crate) fn share_status_label(healthy: bool, port: u16) -> String {
+    let indicator = if healthy { "🟢" } else { "🔴" };
+    format!("{indicator} Share Server :{port}")
+}
+
 pub(crate) fn release_version_label() -> String {
     format!("Version: {} ({})", env!("CARGO_PKG_VERSION"), env!("GIT_SHA"))
 }
 
-/// Read the shared `bound` flag that the MCP server toggles around its
-/// bind+serve loop. True ⇒ *this* process owns the listener (not just "some
-/// process is on the port"), which is what we want to communicate to the user.
-fn mcp_is_healthy(bound: &std::sync::atomic::AtomicBool) -> bool {
+/// Read a server's shared `bound` flag, toggled around its bind+serve loop.
+/// True ⇒ *this* process owns the listener (not just "some process is on the
+/// port"), which is what we want to communicate to the user. Used for both the
+/// MCP and share servers.
+fn is_healthy(bound: &std::sync::atomic::AtomicBool) -> bool {
     bound.load(std::sync::atomic::Ordering::SeqCst)
 }
 
@@ -267,8 +273,16 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .build(app)?;
 
     let port = state.settings.mcp_port();
-    let mcp_status = MenuItemBuilder::new(mcp_status_label(mcp_is_healthy(&state.mcp_bound), port))
+    let mcp_status = MenuItemBuilder::new(mcp_status_label(is_healthy(&state.mcp_bound), port))
         .id("mcp_status")
+        .enabled(false)
+        .build(app)?;
+
+    let share_status = MenuItemBuilder::new(share_status_label(
+        is_healthy(&state.share_bound),
+        crate::share::router::SHARE_PORT,
+    ))
+        .id("share_status")
         .enabled(false)
         .build(app)?;
 
@@ -426,6 +440,7 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&capture_window)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&mcp_status)
+        .item(&share_status)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&latest_snapshot)
         .item(&share_latest_item)
@@ -511,7 +526,7 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
             state.settings.tray_coloured_flag(),
         )
     };
-    let menu_built_healthy = mcp_is_healthy(&mcp_bound);
+    let menu_built_healthy = is_healthy(&mcp_bound);
     let menu = build_menu(app)?;
 
     // Initial icon matches the first frame the animation loop will draw at
@@ -837,7 +852,7 @@ async fn run_tray_animation(
         Instant::now() + Duration::from_secs(3),
         Duration::from_secs(3),
     );
-    let mut healthy = mcp_is_healthy(&mcp_bound);
+    let mut healthy = is_healthy(&mcp_bound);
     // Tracks whether we've done the one-time startup menu sync. Deferred to
     // the first health_tick (≥3s) so set_menu is never called at task-start
     // while the OS menu system is still initialising (which caused a first-
@@ -976,7 +991,7 @@ async fn run_tray_animation(
                 counter = counter.wrapping_add(1);
             }
             _ = health_tick.tick() => {
-                let new_healthy = mcp_is_healthy(&mcp_bound);
+                let new_healthy = is_healthy(&mcp_bound);
                 if !initial_sync_done {
                     initial_sync_done = true;
                     // Only refresh if health changed since the menu was built.
@@ -1068,6 +1083,16 @@ mod tests {
     #[test]
     fn mcp_status_renders_custom_port() {
         assert_eq!(mcp_status_label(true, 9090), "🟢 MCP Server :9090");
+    }
+
+    #[test]
+    fn share_status_healthy_renders_green() {
+        assert_eq!(share_status_label(true, 7821), "🟢 Share Server :7821");
+    }
+
+    #[test]
+    fn share_status_unhealthy_renders_red() {
+        assert_eq!(share_status_label(false, 7821), "🔴 Share Server :7821");
     }
 
     #[test]

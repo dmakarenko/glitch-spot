@@ -40,6 +40,10 @@ pub struct AppState {
     /// avoids the TCP-connect false positive when another process happens to
     /// own the configured port.
     pub mcp_bound: Arc<AtomicBool>,
+    /// Set to true by `share::router::serve_share` once the 7821 listener is
+    /// bound, cleared if/when serve returns. Tray reads this for the Share
+    /// Server health row — mirrors `mcp_bound`.
+    pub share_bound: Arc<AtomicBool>,
     pub picker_state: Arc<picker_session::PickerStateHolder>,
     /// Bumped whenever a frozen overlay session starts or is dismissed. A frozen
     /// capture records the value at trigger time and only publishes its frame if
@@ -305,7 +309,7 @@ pub(crate) async fn do_share_latest(
             settings::ProviderKind::Tailscale   => Arc::new(share::tunnel::tailscale::Tailscale),
         };
 
-    let tunnel_url = Arc::clone(&state.tunnel).start_tunnel(provider, 7821).await
+    let tunnel_url = Arc::clone(&state.tunnel).start_tunnel(provider, share::router::SHARE_PORT).await
         .map_err(|e| e.to_string())?;
 
     let token = share::token::generate();
@@ -1010,6 +1014,7 @@ mod tests {
             ),
             config_dir: temp.path().to_path_buf(),
             mcp_bound: Arc::new(AtomicBool::new(false)),
+            share_bound: Arc::new(AtomicBool::new(false)),
             picker_state: Arc::new(picker_session::PickerStateHolder::new()),
             freeze_generation: Arc::new(AtomicU64::new(0)),
             live_generation: Arc::new(AtomicU64::new(0)),
@@ -1071,10 +1076,12 @@ pub fn run() {
         mcp::server::serve(store_for_mcp, mcp_port, mcp_bound_for_serve).await;
     });
 
+    let share_bound = Arc::new(AtomicBool::new(false));
     let share_base = snapshot::persist::snapshots_dir().ok();
     if let Some(base) = share_base.clone() {
+        let share_bound_for_serve = share_bound.clone();
         tauri::async_runtime::spawn(async move {
-            share::router::serve_share(base).await;
+            share::router::serve_share(base, share::router::SHARE_PORT, share_bound_for_serve).await;
         });
     } else {
         eprintln!("[glitch-spot] share server NOT started — could not resolve snapshots dir");
@@ -1101,6 +1108,7 @@ pub fn run() {
             settings: settings.clone(),
             config_dir: config_dir.clone(),
             mcp_bound: mcp_bound.clone(),
+            share_bound: share_bound.clone(),
             picker_state: Arc::new(picker_session::PickerStateHolder::new()),
             freeze_generation: Arc::new(AtomicU64::new(0)),
             live_generation: Arc::new(AtomicU64::new(0)),
