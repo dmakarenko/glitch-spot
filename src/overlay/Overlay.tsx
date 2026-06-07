@@ -3,7 +3,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { createBridge } from './bridge'
-import type { ClipboardFormat } from './bridge'
+import type { ClipboardFormat, RedactionStyle } from './bridge'
 import { DrawingLayer, nextRectId } from './annotations/DrawingLayer'
 import { MIN_RECT_DIMENSION } from './annotations/state'
 import { DiscardModal } from './annotations/DiscardModal'
@@ -196,6 +196,8 @@ export function Overlay() {
   const [annotations, dispatch] = useReducer(reducer, initialState)
   const [showDiscardModal, setShowDiscardModal] = useState(false)
   const [clipboardFormat, setClipboardFormat] = useState<ClipboardFormat>('json')
+  const [redactMode, setRedactMode] = useState(false)
+  const [redactionStyle, setRedactionStyle] = useState<RedactionStyle>('branded')
   // Bumped each time Rust presents the overlay; drives the post-paint cursor
   // refresh below.
   const [presentationId, setPresentationId] = useState(0)
@@ -208,6 +210,7 @@ export function Overlay() {
       w: r.w,
       h: r.h,
       note: r.note,
+      kind: r.kind,
     }))
     try {
       await bridge.saveSnapshot(mode, payload)
@@ -227,6 +230,17 @@ export function Overlay() {
       console.error('setClipboardFormat failed', err)
     }
   }
+
+  const handleRedactionStyleChange = async (style: RedactionStyle) => {
+    try {
+      await bridge.setRedactionStyle(style)
+      setRedactionStyle(style)
+    } catch (err) {
+      console.error('setRedactionStyle failed', err)
+    }
+  }
+
+  const handleToggleRedact = () => setRedactMode((m) => !m)
 
   useEffect(() => {
     // Clear the screenshot back to the bare veil (e.g. on a new present).
@@ -253,6 +267,7 @@ export function Overlay() {
       setMode(newMode);
       dispatch({ type: "CLEAR" });
       setShowDiscardModal(false);
+      setRedactMode(false);
       setWindowPayload(newMode === 'window' && payload ? payload : null);
       setPresentationId((n) => n + 1);
       if (newMode === 'window' && payload?.initial_rect_css) {
@@ -265,7 +280,7 @@ export function Overlay() {
         const h = Math.min(clip.y + clip.h, r.y + r.h) - y;
         if (w >= MIN_RECT_DIMENSION && h >= MIN_RECT_DIMENSION) {
           const id = nextRectId();
-          dispatch({ type: 'BEGIN_CREATE', id, x, y });
+          dispatch({ type: 'BEGIN_CREATE', id, x, y, kind: 'annotation' });
           dispatch({ type: 'POINTER_TO', x: x + w, y: y + h, viewportW: window.innerWidth, viewportH: window.innerHeight });
           dispatch({ type: 'END_GESTURE' });
         }
@@ -273,6 +288,7 @@ export function Overlay() {
     };
 
     bridge.getClipboardFormat().then(setClipboardFormat).catch(console.error)
+    bridge.getRedactionStyle().then(setRedactionStyle).catch(console.error)
 
     let unlistenFrame: (() => void) | null = null;
     let cancelled = false;
@@ -430,8 +446,19 @@ export function Overlay() {
               setShowDiscardModal(true)
             }
           }}
+          redactMode={redactMode}
+          redactionStyle={redactionStyle}
         />
-        <Toolbar rectCount={annotations.rects.length} clipboardFormat={clipboardFormat} onSave={handleSave} onChangeFormat={handleFormatChange} />
+        <Toolbar
+          rectCount={annotations.rects.length}
+          clipboardFormat={clipboardFormat}
+          onSave={handleSave}
+          onChangeFormat={handleFormatChange}
+          redactMode={redactMode}
+          redactionStyle={redactionStyle}
+          onToggleRedact={handleToggleRedact}
+          onChangeRedactionStyle={handleRedactionStyleChange}
+        />
         {showDiscardModal && (
           <DiscardModal
             onDiscard={() => {
@@ -469,8 +496,22 @@ export function Overlay() {
           pointerEvents: 'none',
         }}
       />
-      <DrawingLayer state={annotations} dispatch={dispatch} />
-      <Toolbar rectCount={annotations.rects.length} clipboardFormat={clipboardFormat} onSave={handleSave} onChangeFormat={handleFormatChange} />
+      <DrawingLayer
+        state={annotations}
+        dispatch={dispatch}
+        redactMode={redactMode}
+        redactionStyle={redactionStyle}
+      />
+      <Toolbar
+        rectCount={annotations.rects.length}
+        clipboardFormat={clipboardFormat}
+        onSave={handleSave}
+        onChangeFormat={handleFormatChange}
+        redactMode={redactMode}
+        redactionStyle={redactionStyle}
+        onToggleRedact={() => setRedactMode((m) => !m)}
+        onChangeRedactionStyle={handleRedactionStyleChange}
+      />
       {showDiscardModal && (
         <DiscardModal
           onDiscard={() => {
