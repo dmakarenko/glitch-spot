@@ -333,6 +333,10 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .build(app)?;
 
     let has_snapshot = state.snapshot_store.get_latest().is_some();
+
+    let show_in_finder = MenuItemBuilder::new("Show in Finder")
+        .id("show_in_finder")
+        .build(app)?;
     let tunnel_state = state.tunnel.current_state();
     let tunnel_state_label = tunnel_status_label(&tunnel_state);
     let tunnel_is_error =
@@ -485,8 +489,16 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&mcp_status)
         .item(&share_status)
         .item(&PredefinedMenuItem::separator(app)?)
-        .item(&latest_snapshot)
-        .item(&share_latest_item);
+        .item(&latest_snapshot);
+
+    // "Show in Finder" only appears once a snapshot exists to reveal.
+    let menu_builder = if has_snapshot {
+        menu_builder.item(&show_in_finder)
+    } else {
+        menu_builder
+    };
+
+    let menu_builder = menu_builder.item(&share_latest_item);
 
     let menu_builder = if show_status_line {
         menu_builder.item(&tunnel_status_item)
@@ -651,6 +663,19 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                         .title("Glitch Spot")
                         .body(body)
                         .show();
+                }
+                "show_in_finder" => {
+                    let state = app.state::<crate::AppState>();
+                    if let Some(snap) = state.snapshot_store.get_latest() {
+                        // `open -R` selects the file in its containing folder.
+                        if let Err(e) = std::process::Command::new("open")
+                            .arg("-R")
+                            .arg(snap.reveal_target())
+                            .spawn()
+                        {
+                            eprintln!("tray: show_in_finder failed: {e}");
+                        }
+                    }
                 }
                 "share_latest" => {
                     let app2 = app.clone();

@@ -92,6 +92,22 @@ fn annotated_serializes_as_null_when_none() {
 }
 
 #[test]
+fn reveal_target_prefers_annotated_image() {
+    let mut s = sample_snapshot();
+    s.images.annotated = Some("/tmp/glitch-spot-snap_test123_annotated.png".into());
+    assert_eq!(
+        s.reveal_target(),
+        "/tmp/glitch-spot-snap_test123_annotated.png"
+    );
+}
+
+#[test]
+fn reveal_target_falls_back_to_clean_when_no_annotated() {
+    let s = sample_snapshot(); // annotated is None
+    assert_eq!(s.reveal_target(), "/tmp/glitch-spot-snap_test123.png");
+}
+
+#[test]
 fn new_id_is_sortable_timestamp_with_uuid_suffix() {
     let id = new_id();
     // `YYYY-MM-DD_HH-MM-SS_<12-char uuid>` = 19 + 1 + 12 = 32 chars.
