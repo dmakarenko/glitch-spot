@@ -470,6 +470,7 @@ export function Overlay() {
           redactionStyle={redactionStyle}
           onSetRedactMode={setRedactMode}
           onChangeRedactionStyle={handleRedactionStyleChange}
+          topInset={Math.max(0, ((window.screen as Screen & { availTop?: number }).availTop ?? 0) - window.screenY)}
         />
         {showDiscardModal && (
           <DiscardModal

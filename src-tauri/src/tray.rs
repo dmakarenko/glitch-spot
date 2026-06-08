@@ -202,9 +202,9 @@ pub(crate) fn share_status_label(healthy: bool, port: u16) -> String {
 pub(crate) fn clipboard_action_label(format: crate::settings::ClipboardFormat) -> &'static str {
     use crate::settings::ClipboardFormat;
     match format {
-        ClipboardFormat::Json => "copy JSON",
-        ClipboardFormat::Image => "copy Image",
-        ClipboardFormat::Prompt => "copy Prompt",
+        ClipboardFormat::Json => "copy as JSON",
+        ClipboardFormat::Image => "copy Annotated Image",
+        ClipboardFormat::Prompt => "copy as a Prompt",
     }
 }
 
@@ -367,20 +367,20 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
 
     let show_in_finder = MenuItemBuilder::new("Show in Finder")
         .id("show_in_finder")
+        .enabled(has_snapshot)
         .build(app)?;
     let tunnel_state = state.tunnel.current_state();
     let tunnel_state_label = tunnel_status_label(&tunnel_state);
     let tunnel_is_error =
         matches!(tunnel_state, crate::share::tunnel::TunnelState::Error { .. });
-    // The status line only surfaces on error (rendered with a ⚠️ marker); when
-    // the tunnel is idle or working normally the provider submenu title
-    // ("Tunnel: <provider>") already conveys everything.
-    let share_disabled = !has_snapshot
-        || matches!(tunnel_state, crate::share::tunnel::TunnelState::Starting);
-
-    let share_latest_item = MenuItemBuilder::new("Share latest snapshot (copy link)")
+    let (share_label, share_enabled) = match &*state.share_menu_state.lock().unwrap() {
+        crate::ShareMenuState::Idle => ("Share latest snapshot via Tunnel", has_snapshot),
+        crate::ShareMenuState::Sharing => ("Sharing latest snapshot…", false),
+        crate::ShareMenuState::Ready(_) => ("Copy latest snapshot link", true),
+    };
+    let share_latest_item = MenuItemBuilder::new(share_label)
         .id("share_latest")
-        .enabled(!share_disabled)
+        .enabled(share_enabled)
         .build(app)?;
 
     // The status line is a passive label except in Error state, where it
@@ -519,17 +519,12 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&mcp_status)
         .item(&share_status)
-        .item(&PredefinedMenuItem::separator(app)?)
-        .item(&latest_snapshot);
+        .item(&PredefinedMenuItem::separator(app)?);
 
-    // "Show in Finder" only appears once a snapshot exists to reveal.
-    let menu_builder = if has_snapshot {
-        menu_builder.item(&show_in_finder)
-    } else {
-        menu_builder
-    };
-
-    let menu_builder = menu_builder.item(&share_latest_item);
+    let menu_builder = menu_builder
+        .item(&show_in_finder)
+        .item(&latest_snapshot)
+        .item(&share_latest_item);
 
     // Tunnel error surfaces inline in the sharing section; normal/idle states
     // are conveyed by the provider submenu title down in settings.
@@ -541,10 +536,10 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
 
     let menu_builder = menu_builder
         .item(&PredefinedMenuItem::separator(app)?)
-        .item(&tray_submenu)
         .item(&retention_submenu)
         .item(&redaction_submenu)
         .item(&provider_submenu)
+        .item(&tray_submenu)
         .item(&launch_at_login)
         .item(&PredefinedMenuItem::separator(app)?);
 
@@ -746,12 +741,39 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                     }
                 }
                 "share_latest" => {
+                    // If a URL is already ready, just re-copy it.
+                    {
+                        let state = app.state::<crate::AppState>();
+                        if let crate::ShareMenuState::Ready(url) =
+                            state.share_menu_state.lock().unwrap().clone()
+                        {
+                            let _ = app.clipboard().write_text(url);
+                            let _ = app
+                                .notification()
+                                .builder()
+                                .title("Glitch Spot")
+                                .body("Share URL copied to clipboard")
+                                .show();
+                            return;
+                        }
+                        *state.share_menu_state.lock().unwrap() = crate::ShareMenuState::Sharing;
+                    }
+                    refresh_menu(&app);
                     let app2 = app.clone();
                     tauri::async_runtime::spawn(async move {
                         let state = app2.state::<crate::AppState>();
-                        if let Err(e) = crate::do_share_latest(&app2, &state).await {
-                            eprintln!("tray: share_latest failed: {e}");
+                        match crate::do_share_latest(&app2, &state).await {
+                            Ok(url) => {
+                                *state.share_menu_state.lock().unwrap() =
+                                    crate::ShareMenuState::Ready(url);
+                            }
+                            Err(e) => {
+                                eprintln!("tray: share_latest failed: {e}");
+                                *state.share_menu_state.lock().unwrap() =
+                                    crate::ShareMenuState::Idle;
+                            }
                         }
+                        refresh_menu(&app2);
                     });
                 }
                 "tunnel_status" => {
@@ -867,6 +889,16 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                         .title("Glitch Spot — tunnel error")
                         .body(reason.as_str())
                         .show();
+                }
+            }
+            // Cached share URL is unreachable once the tunnel leaves Live.
+            if matches!(last_state, crate::share::tunnel::TunnelState::Live { .. })
+                && !matches!(new_state, crate::share::tunnel::TunnelState::Live { .. })
+            {
+                if let Ok(mut s) = state.share_menu_state.lock() {
+                    if matches!(*s, crate::ShareMenuState::Ready(_)) {
+                        *s = crate::ShareMenuState::Idle;
+                    }
                 }
             }
             last_state = new_state;
@@ -1249,9 +1281,9 @@ mod tests {
     #[test]
     fn clipboard_action_label_names_each_format() {
         use crate::settings::ClipboardFormat;
-        assert_eq!(clipboard_action_label(ClipboardFormat::Json), "copy JSON");
-        assert_eq!(clipboard_action_label(ClipboardFormat::Image), "copy Image");
-        assert_eq!(clipboard_action_label(ClipboardFormat::Prompt), "copy Prompt");
+        assert_eq!(clipboard_action_label(ClipboardFormat::Json), "copy as JSON");
+        assert_eq!(clipboard_action_label(ClipboardFormat::Image), "copy Annotated Image");
+        assert_eq!(clipboard_action_label(ClipboardFormat::Prompt), "copy as a Prompt");
     }
 
     #[test]
