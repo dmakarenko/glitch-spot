@@ -208,8 +208,20 @@ pub(crate) fn clipboard_action_label(format: crate::settings::ClipboardFormat) -
     }
 }
 
+/// Formats the production "Version: <v> (<sha>)" row. The build script appends
+/// a " (dirty)" marker to GIT_SHA for uncommitted trees — useful in the debug
+/// commit row, but noise in a shipped build, so it's stripped here.
+// Release-only: the version row exists solely in non-debug builds; debug builds
+// reference it only from tests, so suppress the dead-code lint there.
+#[cfg_attr(debug_assertions, allow(dead_code))]
+fn format_version_label(version: &str, sha: &str) -> String {
+    let sha = sha.trim_end_matches(" (dirty)");
+    format!("Version: {version} ({sha})")
+}
+
+#[cfg_attr(debug_assertions, allow(dead_code))]
 pub(crate) fn release_version_label() -> String {
-    format!("Version: {} ({})", env!("CARGO_PKG_VERSION"), env!("GIT_SHA"))
+    format_version_label(env!("CARGO_PKG_VERSION"), env!("GIT_SHA"))
 }
 
 /// Read a server's shared `bound` flag, toggled around its bind+serve loop.
@@ -1202,6 +1214,20 @@ mod tests {
         assert_eq!(format_snapshot_age(ts, now), "1 day ago");
         let (ts, now) = at(172800);
         assert_eq!(format_snapshot_age(ts, now), "2 days ago");
+    }
+
+    #[test]
+    fn version_label_strips_dirty_suffix() {
+        assert_eq!(
+            format_version_label("0.8.0", "abc1234 (dirty)"),
+            "Version: 0.8.0 (abc1234)",
+            "production version label must not show the dirty marker"
+        );
+        assert_eq!(
+            format_version_label("0.8.0", "abc1234"),
+            "Version: 0.8.0 (abc1234)",
+            "clean sha is unchanged"
+        );
     }
 
     #[test]
