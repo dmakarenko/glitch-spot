@@ -410,11 +410,11 @@ export function Overlay() {
     return (
       <div style={{ position: 'fixed', inset: 0, background: 'transparent' }}>
         <WindowDim rect={framedRect} />
-        {/* frozen isolated capture of the selected window. While the capture is
-            in flight the box stays transparent so the live window shows through
-            (selecting a window must not dim it) — a scanline shimmer plays over
-            it as a capture cue; when the frame arrives the chromatic shake
-            resolves the screenshot in. overflow:hidden clips the ~18px shake. */}
+        {/* The framed capture — a selected-window screenshot (window mode) or an
+            opened image (image mode) — clipped to framedRect. While no frame has
+            arrived the box stays transparent so nothing flashes; a scanline
+            shimmer plays as a loading cue, then the chromatic shake resolves the
+            image in. overflow:hidden clips the ~18px shake. */}
         <div
           data-testid="window-frozen-frame"
           style={{
