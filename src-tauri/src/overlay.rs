@@ -311,6 +311,40 @@ pub fn show_window_mode(
     Ok(())
 }
 
+/// Payload sent to the overlay React tree when presenting an opened image.
+/// `image_rect_css` is where the letterboxed image is drawn, in overlay CSS px.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ImageModePayload {
+    pub image_rect_css: CssRect,
+}
+
+/// Present the overlay over the cursor monitor's work area in `image` mode. The
+/// decoded image frame is pushed separately via `push_frame` after this returns
+/// (see `present_image`), arriving through the same `glitch-spot://frame` event
+/// the frozen/window paths use.
+pub fn show_image_mode(
+    app: &tauri::AppHandle,
+    payload: &ImageModePayload,
+) -> Result<(), OverlayError> {
+    let window = position_over_active_monitor(app)?;
+
+    // Show invisible, then reveal once the frame has painted — same alpha-0
+    // dance as the live/frozen/window presents (avoids compositing a stale
+    // backing buffer when the overlay was last shown on another display).
+    set_window_alpha(&window, 0.0);
+
+    let json = serde_json::to_string(payload)?;
+    let js = format!(
+        "if (window.__glitchSpotPresent) window.__glitchSpotPresent('image', {});",
+        json
+    );
+    let _ = window.eval(&js);
+    window.show()?;
+    window.set_focus()?;
+    reassert_screen_frame(&window, ScreenRect::Visible);
+    Ok(())
+}
+
 /// Fade the overlay in to full opacity after a window-mode present (see
 /// `show_window_mode`). Idempotent — the frontend signals this one rAF after its
 /// window-mode frame paints, and picker_select schedules a fallback call in case

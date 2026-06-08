@@ -167,6 +167,7 @@ fn build_scales_annotation_coords_by_scale_factor() {
         "26.0",
         temp.path(),
         None,
+        2.0,
         crate::settings::RedactionStyle::Branded,
     )
     .unwrap();
@@ -192,7 +193,7 @@ fn build_assigns_zero_padded_labels_from_array_position() {
             kind: "annotation".into(),
         })
         .collect();
-    let (built, _) = build(&fake_frame(), "frozen", incoming, "macos", "26.0", temp.path(), None, crate::settings::RedactionStyle::Branded).unwrap();
+    let (built, _) = build(&fake_frame(), "frozen", incoming, "macos", "26.0", temp.path(), None, 2.0, crate::settings::RedactionStyle::Branded).unwrap();
     let labels: Vec<String> = built
         .snapshot
         .annotations
@@ -221,7 +222,7 @@ fn format_label_zero_pads_and_expands() {
 fn build_returns_paths_under_base_dir_and_bytes_match_frame() {
     let temp = tempfile::TempDir::new().unwrap();
     let frame = fake_frame();
-    let (built, _) = build(&frame, "live", vec![], "macos", "26.0", temp.path(), None, crate::settings::RedactionStyle::Branded).unwrap();
+    let (built, _) = build(&frame, "live", vec![], "macos", "26.0", temp.path(), None, 2.0, crate::settings::RedactionStyle::Branded).unwrap();
 
     // Embedded paths point under `temp/{id}/...`
     let id = &built.snapshot.id;
@@ -400,6 +401,7 @@ fn build_crop_origin_translates_annotation_coords_into_window_local() {
         "26.0",
         temp.path(),
         Some((60.0, 30.0)),
+        2.0,
         crate::settings::RedactionStyle::Branded,
     )
     .expect("build with crop_origin should succeed");

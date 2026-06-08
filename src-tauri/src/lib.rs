@@ -3,6 +3,7 @@
 mod capture;
 mod hotkey;
 pub mod mcp;
+mod open_image;
 mod overlay;
 mod picker_session;
 mod window_picker;
@@ -54,6 +55,9 @@ pub struct AppState {
     /// captures this value and skips the reveal if it has since changed, so a
     /// cancel-and-reopen within 300ms doesn't reveal the new alpha-0 session early.
     pub live_generation: Arc<AtomicU64>,
+    /// Set at image-open time, consumed by `save_snapshot("image")`. Holds the
+    /// decoded file frame and the overlay-CSS→image-px mapping.
+    pub pending_image: Mutex<Option<open_image::ImageSession>>,
 }
 
 #[tauri::command]
@@ -81,6 +85,9 @@ async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
     // tasks from the dismissed session don't affect the next presentation.
     state.freeze_generation.fetch_add(1, Ordering::SeqCst);
     state.live_generation.fetch_add(1, Ordering::SeqCst);
+    if let Ok(mut slot) = state.pending_image.lock() {
+        *slot = None;
+    }
     overlay::hide(&app).map_err(|e| e.to_string())
 }
 
@@ -156,7 +163,7 @@ async fn save_snapshot(
     mode: String,
     annotations: Vec<IncomingAnnotation>,
 ) -> Result<snapshot::Snapshot, String> {
-    let (frame, crop_origin) = match mode.as_str() {
+    let (frame, crop_origin, coord_scale) = match mode.as_str() {
         "frozen" => {
             // Dismiss the overlay immediately — the saved image comes from the
             // cached frame, not a re-capture, so hiding first doesn't affect the
@@ -169,7 +176,8 @@ async fn save_snapshot(
                 .ok()
                 .and_then(|g| g.clone())
                 .ok_or_else(|| "no cached frame for frozen mode".to_string())?;
-            (frame, None)
+            let sf = frame.scale_factor;
+            (frame, None, sf)
         }
         "live" => {
             // Hide the overlay BEFORE capturing so the saved screenshot doesn't
@@ -179,7 +187,8 @@ async fn save_snapshot(
             overlay::hide(&app).map_err(|e| e.to_string())?;
             std::thread::sleep(std::time::Duration::from_millis(120));
             let frame = capture::capture_active_monitor(&app).map_err(|e| e.to_string())?;
-            (frame, None)
+            let sf = frame.scale_factor;
+            (frame, None, sf)
         }
         "window" => {
             // Dismiss the overlay immediately (see the `frozen` arm) — window mode
@@ -192,7 +201,18 @@ async fn save_snapshot(
             };
             let cached = state.latest_frame.lock().ok().and_then(|g| g.clone());
             let (frame, crop) = resolve_window_save_frame(&session, cached)?;
-            (frame, Some(crop))
+            let sf = frame.scale_factor;
+            (frame, Some(crop), sf)
+        }
+        "image" => {
+            overlay::hide(&app).map_err(|e| e.to_string())?;
+            let session = state
+                .pending_image
+                .lock()
+                .ok()
+                .and_then(|mut g| g.take())
+                .ok_or_else(|| "no pending image for image mode".to_string())?;
+            (session.frame, Some(session.crop_origin), session.coord_scale)
         }
         other => return Err(format!("unknown mode: {other}")),
     };
@@ -209,6 +229,7 @@ async fn save_snapshot(
         &os_version,
         &base,
         crop_origin,
+        coord_scale,
         state.settings.current_redaction_style(),
     )
     .map_err(|e| e.to_string())?;
@@ -949,6 +970,131 @@ pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Re
     result
 }
 
+/// The work area (CSS px) and display index of the monitor under the cursor.
+/// CSS px = physical work-area size / the monitor's scale factor — the same
+/// space the overlay renders annotations in.
+fn cursor_monitor_work_css(app: &tauri::AppHandle) -> anyhow::Result<(usize, (f32, f32))> {
+    let cursor = app.cursor_position()?;
+    let monitors = app.available_monitors()?;
+    let (idx, monitor) = monitors
+        .iter()
+        .enumerate()
+        .find(|(_, m)| {
+            let p = m.position();
+            let s = m.size();
+            let (x0, y0) = (p.x as f64, p.y as f64);
+            cursor.x >= x0
+                && cursor.x < x0 + s.width as f64
+                && cursor.y >= y0
+                && cursor.y < y0 + s.height as f64
+        })
+        .ok_or_else(|| anyhow::anyhow!("no monitor at cursor"))?;
+    let wa = monitor.work_area();
+    let scale = monitor.scale_factor() as f32;
+    Ok((idx, (wa.size.width as f32 / scale, wa.size.height as f32 / scale)))
+}
+
+/// Decode the chosen file, compute its letterbox fit, cache the session, and
+/// present the overlay in image mode. Errors bubble to the caller, which
+/// notifies the user.
+async fn present_image(app: &tauri::AppHandle, path: std::path::PathBuf) -> anyhow::Result<()> {
+    let bytes = std::fs::read(&path)?;
+    let (display_index, work_css) = cursor_monitor_work_css(app)?;
+    let frame = open_image::load_image_frame(&bytes, display_index)?;
+    let fit = open_image::fit_image_rect(work_css, (frame.width, frame.height));
+
+    if let Some(state) = app.try_state::<AppState>() {
+        // Defensive reset: opening an image supersedes any in-flight session.
+        // Bump the capture generations too — otherwise a Capture + Freeze whose
+        // screen capture is still running could pass its generation check and
+        // push the screen frame into this image overlay (user would annotate the
+        // wrong pixels). Mirrors hide_overlay.
+        state.picker_state.reset_to_idle();
+        state.freeze_generation.fetch_add(1, Ordering::SeqCst);
+        state.live_generation.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut slot) = state.pending_image.lock() {
+            *slot = Some(open_image::ImageSession {
+                frame: frame.clone(),
+                crop_origin: fit.crop_origin,
+                coord_scale: fit.coord_scale,
+            });
+        }
+        if let Ok(mut f) = state.latest_frame.lock() {
+            *f = Some(frame.clone());
+        }
+    }
+
+    let (x, y, w, h) = fit.css_rect;
+    let payload = overlay::ImageModePayload {
+        image_rect_css: overlay::CssRect { x, y, w, h },
+    };
+
+    // Roll back to Idle, clear the cached session, and hide the overlay on any
+    // failure: because we show the overlay before pushing its frame, a show/push
+    // error would otherwise leave the image overlay stuck at alpha 0 with no
+    // frame and a stale pending_image. Mirrors trigger_overlay_frozen.
+    let result = (|| -> anyhow::Result<()> {
+        overlay::show_image_mode(app, &payload)?;
+
+        // Fallback reveal in case the frontend's double-rAF revealOverlay()
+        // signal is lost — reveal is idempotent, so a redundant call is harmless.
+        {
+            let app_fb = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                let _ = overlay::reveal(&app_fb);
+            });
+        }
+
+        overlay::push_frame(app, &frame)?;
+        Ok(())
+    })();
+
+    if result.is_err() {
+        if let Some(state) = app.try_state::<AppState>() {
+            state.picker_state.reset_to_idle();
+            if let Ok(mut slot) = state.pending_image.lock() {
+                *slot = None;
+            }
+        }
+        let _ = overlay::hide(app);
+    }
+    result
+}
+
+/// Open a native file picker for an image, then present it for annotation.
+/// Called from the tray. The picker is non-blocking (callback form); on a pick
+/// we spawn `present_image` on the async runtime.
+pub(crate) fn trigger_open_image(app: &tauri::AppHandle) {
+    use tauri_plugin_dialog::DialogExt;
+    use tauri_plugin_notification::NotificationExt;
+
+    // Bring the accessory (LSUIElement) app forward so the open panel takes
+    // focus instead of opening behind other windows.
+    activate_application();
+
+    let app = app.clone();
+    app.dialog()
+        .file()
+        .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "bmp"])
+        .pick_file(move |maybe_path| {
+            let Some(file_path) = maybe_path else { return };
+            let Ok(path) = file_path.into_path() else { return };
+            let app2 = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = present_image(&app2, path).await {
+                    eprintln!("open image failed: {e}");
+                    let _ = app2
+                        .notification()
+                        .builder()
+                        .title("Glitch Spot")
+                        .body(format!("Couldn't open image: {e}"))
+                        .show();
+                }
+            });
+        });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1018,6 +1164,7 @@ mod tests {
             picker_state: Arc::new(picker_session::PickerStateHolder::new()),
             freeze_generation: Arc::new(AtomicU64::new(0)),
             live_generation: Arc::new(AtomicU64::new(0)),
+            pending_image: Mutex::new(None),
         };
         assert!(state.latest_snapshot_at.lock().unwrap().is_none());
     }
@@ -1099,6 +1246,7 @@ pub fn run() {
             None::<Vec<&str>>,
         ))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             latest_frame: Mutex::new(None),
             snapshot_store,
@@ -1112,6 +1260,7 @@ pub fn run() {
             picker_state: Arc::new(picker_session::PickerStateHolder::new()),
             freeze_generation: Arc::new(AtomicU64::new(0)),
             live_generation: Arc::new(AtomicU64::new(0)),
+            pending_image: Mutex::new(None),
         })
         .setup(|app| {
             #[cfg(target_os = "macos")]

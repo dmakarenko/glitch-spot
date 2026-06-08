@@ -8,8 +8,12 @@ import { render, act, cleanup, findByText, waitFor } from "@testing-library/reac
 import { Overlay } from "./Overlay";
 import type { WindowModePayload } from "../picker/types";
 
-const { invokeMock } = vi.hoisted(() => ({
+const { invokeMock, frameHandlers } = vi.hoisted(() => ({
   invokeMock: vi.fn((..._args: unknown[]) => Promise.resolve(null)),
+  // Captures the 'glitch-spot://frame' listener (the bridge's onFrame wrapper)
+  // so a test can deliver a frame through the real frame path. The bridge calls
+  // listen(name, handler); the image-frame test invokes the captured handler.
+  frameHandlers: [] as Array<(e: { payload: unknown }) => void>,
 }));
 
 beforeAll(() => {
@@ -27,7 +31,10 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock,
 }));
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: () => Promise.resolve(() => {}),
+  listen: (name: string, handler: (e: { payload: unknown }) => void) => {
+    if (name === "glitch-spot://frame") frameHandlers.push(handler);
+    return Promise.resolve(() => {});
+  },
 }));
 
 function makeWindowPayload(): WindowModePayload {
@@ -65,19 +72,19 @@ describe("<Overlay/> window mode", () => {
     // Four solid panels frame the clear window rect (top / bottom / left /
     // right). Solid fills rasterise immediately; a 100vmax box-shadow spread
     // rasterised late and flashed undimmed for a frame on show.
-    const top = getByTestId("window-dim-top");
+    const top = getByTestId("framed-dim-top");
     expect(top.style.top).toBe("0px");
     expect(top.style.height).toBe(`${r.y}px`);
 
-    const bottom = getByTestId("window-dim-bottom");
+    const bottom = getByTestId("framed-dim-bottom");
     expect(bottom.style.top).toBe(`${r.y + r.h}px`);
 
-    const left = getByTestId("window-dim-left");
+    const left = getByTestId("framed-dim-left");
     expect(left.style.top).toBe(`${r.y}px`);
     expect(left.style.width).toBe(`${r.x}px`);
     expect(left.style.height).toBe(`${r.h}px`);
 
-    const right = getByTestId("window-dim-right");
+    const right = getByTestId("framed-dim-right");
     expect(right.style.top).toBe(`${r.y}px`);
     expect(right.style.left).toBe(`${r.x + r.w}px`);
     expect(right.style.height).toBe(`${r.h}px`);
@@ -216,6 +223,169 @@ describe("Overlay handleFormatChange", () => {
   });
 });
 
+describe("<Overlay/> image mode", () => {
+  afterEach(() => {
+    cleanup();
+    frameHandlers.length = 0;
+  });
+
+  it("image mode renders the dimmed framed branch at the image rect", async () => {
+    const { getByTestId } = render(<Overlay />);
+    await act(async () => {
+      (
+        window as unknown as {
+          __glitchSpotPresent: (mode: string, payload: unknown) => void;
+        }
+      ).__glitchSpotPresent("image", {
+        image_rect_css: { x: 100, y: 50, w: 400, h: 300 },
+      });
+    });
+    // The window-mode dim panels are reused for image mode; their presence
+    // proves the framed branch (not the live/frozen branch) rendered.
+    const top = getByTestId("framed-dim-top");
+    expect(top).toBeTruthy();
+    const frame = getByTestId("framed-frozen-frame");
+    expect(frame.style.left).toBe("100px");
+    expect(frame.style.top).toBe("50px");
+    expect(frame.style.width).toBe("400px");
+    expect(frame.style.height).toBe("300px");
+  });
+
+  it("frozen mode does not render the framed (window/image) branch", async () => {
+    const { queryByTestId } = render(<Overlay />);
+    await act(async () => {
+      (
+        window as unknown as { __glitchSpotPresent: (mode: string) => void }
+      ).__glitchSpotPresent("frozen");
+    });
+    expect(queryByTestId("framed-dim-top")).toBeNull();
+    expect(queryByTestId("framed-frozen-frame")).toBeNull();
+  });
+
+  it("renders a pushed frame into the framed box without flipping out of image mode", async () => {
+    // No prior test drives a frame: the listen mock is a no-op and jsdom lacks
+    // URL.createObjectURL + a loading Image. Stub the I/O boundary so a frame
+    // can flow through the real onFrame → showBlob → pushFrame → GlitchImage
+    // path. The blob token is opaque; what's verified is that it reaches the
+    // DOM and that showBlob's guard keeps mode 'image' (no flip to frozen).
+    const BLOB_TOKEN = "blob:test-frame";
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+    const origCreate = URL.createObjectURL;
+    URL.createObjectURL = vi.fn(() => BLOB_TOKEN);
+    // showBlob constructs `new window.Image()` and pushes the frame only on
+    // onload; jsdom never fires it for a blob URL, so fire it on src assignment.
+    const origImage = window.Image;
+    class StubImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_v: string) {
+        this.onload?.();
+      }
+    }
+    (window as unknown as { Image: unknown }).Image = StubImage;
+
+    try {
+      const { getByTestId, container } = render(<Overlay />);
+      await act(async () => {
+        (
+          window as unknown as {
+            __glitchSpotPresent: (mode: string, payload: unknown) => void;
+          }
+        ).__glitchSpotPresent("image", {
+          image_rect_css: { x: 100, y: 50, w: 400, h: 300 },
+        });
+      });
+
+      // Deliver a frame through the captured 'glitch-spot://frame' handler.
+      expect(frameHandlers.length).toBeGreaterThan(0);
+      await act(async () => {
+        frameHandlers.forEach((h) =>
+          h({
+            payload: {
+              width: 4,
+              height: 4,
+              scale_factor: 2,
+              png: [1, 2, 3, 4],
+              display_index: 0,
+            },
+          }),
+        );
+        await Promise.resolve();
+      });
+
+      // The framed box is still present at the image rect — the showBlob guard
+      // held (a regression flipping to frozen would drop this testid).
+      const frame = getByTestId("framed-frozen-frame");
+      expect(frame.style.left).toBe("100px");
+      // The decoded frame's blob URL reached the DOM (GlitchImage's channel
+      // layers), not the GlitchShimmer placeholder.
+      expect(container.innerHTML).toContain(BLOB_TOKEN);
+    } finally {
+      URL.createObjectURL = origCreate;
+      (window as unknown as { Image: unknown }).Image = origImage;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps image mode when the pushed frame arrives in the same tick as the present (small-image race)", async () => {
+    // A small image's frame event arrives almost immediately — before React has
+    // committed the present's setMode('image') and run the modeRef effect. If
+    // showBlob reads a stale modeRef it flips to 'frozen' and the image renders
+    // full-screen-stretched instead of letterboxed. Reproduce by delivering the
+    // frame in the SAME act() block as the present, so the effect hasn't flushed.
+    const BLOB_TOKEN = "blob:test-race";
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+    const origCreate = URL.createObjectURL;
+    URL.createObjectURL = vi.fn(() => BLOB_TOKEN);
+    const origImage = window.Image;
+    class StubImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_v: string) {
+        this.onload?.();
+      }
+    }
+    (window as unknown as { Image: unknown }).Image = StubImage;
+
+    try {
+      const { getByTestId } = render(<Overlay />);
+      expect(frameHandlers.length).toBeGreaterThan(0);
+      await act(async () => {
+        (
+          window as unknown as {
+            __glitchSpotPresent: (mode: string, payload: unknown) => void;
+          }
+        ).__glitchSpotPresent("image", {
+          image_rect_css: { x: 100, y: 50, w: 400, h: 300 },
+        });
+        // Frame arrives before the act flush — same-tick as the present.
+        frameHandlers.forEach((h) =>
+          h({
+            payload: {
+              width: 4,
+              height: 4,
+              scale_factor: 2,
+              png: [1, 2, 3, 4],
+              display_index: 0,
+            },
+          }),
+        );
+        await Promise.resolve();
+      });
+
+      // Mode stayed 'image': the framed box renders at the image rect rather
+      // than the full-screen frozen branch (which has no framed-frozen-frame).
+      const frame = getByTestId("framed-frozen-frame");
+      expect(frame.style.left).toBe("100px");
+      expect(frame.style.width).toBe("400px");
+    } finally {
+      URL.createObjectURL = origCreate;
+      (window as unknown as { Image: unknown }).Image = origImage;
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("<Overlay/> post-paint signals", () => {
   beforeEach(() => {
     // Run rAF synchronously so the post-paint signals are observable here.
@@ -253,7 +423,7 @@ describe("<Overlay/> post-paint signals", () => {
     const payload = makeWindowPayload();
     presentWindowMode(payload);
 
-    const frame = getByTestId("window-frozen-frame");
+    const frame = getByTestId("framed-frozen-frame");
     const { window_rect_css } = payload;
     expect(frame.style.left).toBe(`${window_rect_css.x}px`);
     expect(frame.style.top).toBe(`${window_rect_css.y}px`);
