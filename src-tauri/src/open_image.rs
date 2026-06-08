@@ -65,6 +65,13 @@ pub fn load_image_frame(
         .with_guessed_format()?
         .into_decoder()?;
     let orientation = decoder.orientation()?;
+    // Enforce the default 512 MiB allocation cap before decoding. ImageReader::decode
+    // does this via limits.reserve(total_bytes); DynamicImage::from_decoder does NOT,
+    // so going through into_decoder/from_decoder (needed to read orientation) would
+    // otherwise let a huge or crafted image allocate its full decoded size and OOM.
+    let mut limits = image::Limits::default();
+    limits.reserve(decoder.total_bytes())?;
+    decoder.set_limits(limits)?;
     let mut img = DynamicImage::from_decoder(decoder)?;
     img.apply_orientation(orientation);
     let img = img.to_rgba8();
