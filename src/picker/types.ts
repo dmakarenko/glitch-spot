@@ -44,3 +44,7 @@ export type WindowModePayload = {
    *  CSS px. When present, pre-populated as a committed rect in the overlay. */
   initial_rect_css?: { x: number; y: number; w: number; h: number };
 };
+
+export type ImageModePayload = {
+  image_rect_css: { x: number; y: number; w: number; h: number };
+};

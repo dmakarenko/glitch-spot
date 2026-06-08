@@ -216,6 +216,34 @@ describe("Overlay handleFormatChange", () => {
   });
 });
 
+describe("<Overlay/> image mode", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("image mode renders the dimmed framed branch at the image rect", async () => {
+    const { getByTestId } = render(<Overlay />);
+    await act(async () => {
+      (
+        window as unknown as {
+          __glitchSpotPresent: (mode: string, payload: unknown) => void;
+        }
+      ).__glitchSpotPresent("image", {
+        image_rect_css: { x: 100, y: 50, w: 400, h: 300 },
+      });
+    });
+    // The window-mode dim panels are reused for image mode; their presence
+    // proves the framed branch (not the live/frozen branch) rendered.
+    const top = getByTestId("window-dim-top");
+    expect(top).toBeTruthy();
+    const frame = getByTestId("window-frozen-frame");
+    expect(frame.style.left).toBe("100px");
+    expect(frame.style.top).toBe("50px");
+    expect(frame.style.width).toBe("400px");
+    expect(frame.style.height).toBe("300px");
+  });
+});
+
 describe("<Overlay/> post-paint signals", () => {
   beforeEach(() => {
     // Run rAF synchronously so the post-paint signals are observable here.

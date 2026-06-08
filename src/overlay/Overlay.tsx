@@ -10,9 +10,9 @@ import { DiscardModal } from './annotations/DiscardModal'
 import { initialState, reducer } from './annotations/state'
 import { Toolbar } from './Toolbar'
 import type { AnnotationPayload } from '../../packages/electron/src/types'
-import type { WindowModePayload } from '../picker/types'
+import type { WindowModePayload, ImageModePayload } from '../picker/types'
 
-type Mode = 'live' | 'frozen' | 'window'
+type Mode = 'live' | 'frozen' | 'window' | 'image'
 
 const CHECKER_BG =
   "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'>" +
@@ -191,6 +191,7 @@ export function Overlay() {
   const modeRef = useRef<Mode>('live')
   useEffect(() => { modeRef.current = mode }, [mode])
   const [windowPayload, setWindowPayload] = useState<WindowModePayload | null>(null)
+  const [imagePayload, setImagePayload] = useState<ImageModePayload | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const imageUrlRef = useRef<string | null>(null)
   const [annotations, dispatch] = useReducer(reducer, initialState)
@@ -257,7 +258,7 @@ export function Overlay() {
     // The Rust side calls __glitchSpotPresent via WebviewWindow::eval before
     // showing the window so the mode/state is reset synchronously before first
     // paint. In the Electron path this is not called — the bridge handles reset.
-    ;(window as unknown as { __glitchSpotPresent?: (mode: Mode, payload?: WindowModePayload) => void }).__glitchSpotPresent = (
+    ;(window as unknown as { __glitchSpotPresent?: (mode: Mode, payload?: WindowModePayload | ImageModePayload) => void }).__glitchSpotPresent = (
       newMode,
       payload,
     ) => {
@@ -266,9 +267,10 @@ export function Overlay() {
       dispatch({ type: "CLEAR" });
       setShowDiscardModal(false);
       setRedactMode(false);
-      setWindowPayload(newMode === 'window' && payload ? payload : null);
+      setWindowPayload(newMode === 'window' && payload ? (payload as WindowModePayload) : null);
+      setImagePayload(newMode === 'image' && payload ? (payload as ImageModePayload) : null);
       setPresentationId((n) => n + 1);
-      if (newMode === 'window' && payload?.initial_rect_css) {
+      if (newMode === 'window' && payload && 'window_rect_css' in payload && payload.initial_rect_css) {
         const r = payload.initial_rect_css;
         const clip = payload.window_rect_css;
         // Clamp to the selected window's bounds.
@@ -301,7 +303,7 @@ export function Overlay() {
       // A pushed frame in window mode is the frozen window capture — keep mode
       // 'window' and let it render into the window rect. Otherwise it's a monitor
       // freeze and we switch to frozen full-screen.
-      if (modeRef.current !== 'window') setMode("frozen");
+      if (modeRef.current !== 'window' && modeRef.current !== 'image') setMode("frozen");
       const img = new window.Image();
       img.onload = () => pushFrame(blobUrl);
       img.onerror = () => URL.revokeObjectURL(blobUrl);
@@ -335,7 +337,7 @@ export function Overlay() {
       cancelled = true;
       unlistenFrame?.();
       resetFrames();
-      delete (window as unknown as { __glitchSpotPresent?: (mode: Mode, payload?: WindowModePayload) => void })
+      delete (window as unknown as { __glitchSpotPresent?: (mode: Mode, payload?: WindowModePayload | ImageModePayload) => void })
         .__glitchSpotPresent;
     };
   }, [])
@@ -397,11 +399,17 @@ export function Overlay() {
     }
   }, [presentationId])
 
-  if (mode === 'window' && windowPayload) {
-    const { window_rect_css } = windowPayload
+  const framedRect =
+    mode === 'window'
+      ? windowPayload?.window_rect_css ?? null
+      : mode === 'image'
+        ? imagePayload?.image_rect_css ?? null
+        : null
+
+  if (framedRect) {
     return (
       <div style={{ position: 'fixed', inset: 0, background: 'transparent' }}>
-        <WindowDim rect={window_rect_css} />
+        <WindowDim rect={framedRect} />
         {/* frozen isolated capture of the selected window. While the capture is
             in flight the box stays transparent so the live window shows through
             (selecting a window must not dim it) — a scanline shimmer plays over
@@ -411,10 +419,10 @@ export function Overlay() {
           data-testid="window-frozen-frame"
           style={{
             position: 'absolute',
-            left: window_rect_css.x,
-            top: window_rect_css.y,
-            width: window_rect_css.w,
-            height: window_rect_css.h,
+            left: framedRect.x,
+            top: framedRect.y,
+            width: framedRect.w,
+            height: framedRect.h,
             overflow: 'hidden',
             pointerEvents: 'none',
           }}
@@ -432,11 +440,11 @@ export function Overlay() {
             }}
           />
         </div>
-        {/* drawing layer constrained to window rect */}
+        {/* drawing layer constrained to framed rect */}
         <DrawingLayer
           state={annotations}
           dispatch={dispatch}
-          clipRect={window_rect_css}
+          clipRect={framedRect}
           onOutsideClick={() => {
             if (annotations.rects.length === 0) {
               bridge.cancel()
