@@ -21,6 +21,14 @@ pub struct Snapshot {
     pub agent_prompt: String,
 }
 
+impl Snapshot {
+    /// Absolute path to reveal in Finder: the annotated image when present,
+    /// otherwise the clean screenshot.
+    pub fn reveal_target(&self) -> &str {
+        self.images.annotated.as_deref().unwrap_or(&self.images.clean)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Annotation {
     pub id: String,
