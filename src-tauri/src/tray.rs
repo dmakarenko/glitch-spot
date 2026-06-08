@@ -263,7 +263,7 @@ pub(crate) fn tunnel_status_label(state: &crate::share::tunnel::TunnelState) -> 
         TunnelState::Error { reason } => {
             let one_line = reason.split_whitespace().collect::<Vec<_>>().join(" ");
             let short = truncate_chars(&one_line, MAX_ERROR_REASON_CHARS);
-            format!("Tunnel: error — {short} (click to copy)")
+            format!("⚠️ Tunnel: error — {short} (click to copy)")
         }
     }
 }
@@ -341,10 +341,9 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
     let tunnel_state_label = tunnel_status_label(&tunnel_state);
     let tunnel_is_error =
         matches!(tunnel_state, crate::share::tunnel::TunnelState::Error { .. });
-    // The status line only appears when the tunnel is active; when idle, the
-    // provider submenu ("Tunnel: <provider>") already conveys everything.
-    let show_status_line =
-        !matches!(tunnel_state, crate::share::tunnel::TunnelState::Idle);
+    // The status line only surfaces on error (rendered with a ⚠️ marker); when
+    // the tunnel is idle or working normally the provider submenu title
+    // ("Tunnel: <provider>") already conveys everything.
     let share_disabled = !has_snapshot
         || matches!(tunnel_state, crate::share::tunnel::TunnelState::Starting);
 
@@ -500,18 +499,20 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
 
     let menu_builder = menu_builder.item(&share_latest_item);
 
-    let menu_builder = if show_status_line {
+    // Tunnel error surfaces inline in the sharing section; normal/idle states
+    // are conveyed by the provider submenu title down in settings.
+    let menu_builder = if tunnel_is_error {
         menu_builder.item(&tunnel_status_item)
     } else {
         menu_builder
     };
 
     let menu_builder = menu_builder
-        .item(&provider_submenu)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&tray_submenu)
         .item(&retention_submenu)
         .item(&redaction_submenu)
+        .item(&provider_submenu)
         .item(&launch_at_login)
         .item(&PredefinedMenuItem::separator(app)?);
 
@@ -1189,7 +1190,7 @@ mod tests {
     fn tunnel_label_short_error_keeps_full_reason_and_adds_hint() {
         use crate::share::tunnel::TunnelState;
         let label = tunnel_status_label(&TunnelState::Error { reason: "boom".into() });
-        assert_eq!(label, "Tunnel: error — boom (click to copy)");
+        assert_eq!(label, "⚠️ Tunnel: error — boom (click to copy)");
     }
 
     #[test]
