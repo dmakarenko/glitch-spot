@@ -264,6 +264,12 @@ export function Overlay() {
     ) => {
       resetFrames();
       setMode(newMode);
+      // Update modeRef synchronously here, not just via the post-commit effect:
+      // a pushed frame can reach showBlob before React commits this present (a
+      // small image's frame event arrives almost instantly). If showBlob read a
+      // stale modeRef it would flip 'image'/'window' to 'frozen' and render the
+      // capture full-screen-stretched instead of clipped to its rect.
+      modeRef.current = newMode;
       dispatch({ type: "CLEAR" });
       setShowDiscardModal(false);
       setRedactMode(false);

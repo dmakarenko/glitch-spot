@@ -326,6 +326,64 @@ describe("<Overlay/> image mode", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("keeps image mode when the pushed frame arrives in the same tick as the present (small-image race)", async () => {
+    // A small image's frame event arrives almost immediately — before React has
+    // committed the present's setMode('image') and run the modeRef effect. If
+    // showBlob reads a stale modeRef it flips to 'frozen' and the image renders
+    // full-screen-stretched instead of letterboxed. Reproduce by delivering the
+    // frame in the SAME act() block as the present, so the effect hasn't flushed.
+    const BLOB_TOKEN = "blob:test-race";
+    vi.stubGlobal("requestAnimationFrame", (_cb: FrameRequestCallback) => 0);
+    const origCreate = URL.createObjectURL;
+    URL.createObjectURL = vi.fn(() => BLOB_TOKEN);
+    const origImage = window.Image;
+    class StubImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_v: string) {
+        this.onload?.();
+      }
+    }
+    (window as unknown as { Image: unknown }).Image = StubImage;
+
+    try {
+      const { getByTestId } = render(<Overlay />);
+      expect(frameHandlers.length).toBeGreaterThan(0);
+      await act(async () => {
+        (
+          window as unknown as {
+            __glitchSpotPresent: (mode: string, payload: unknown) => void;
+          }
+        ).__glitchSpotPresent("image", {
+          image_rect_css: { x: 100, y: 50, w: 400, h: 300 },
+        });
+        // Frame arrives before the act flush — same-tick as the present.
+        frameHandlers.forEach((h) =>
+          h({
+            payload: {
+              width: 4,
+              height: 4,
+              scale_factor: 2,
+              png: [1, 2, 3, 4],
+              display_index: 0,
+            },
+          }),
+        );
+        await Promise.resolve();
+      });
+
+      // Mode stayed 'image': the framed box renders at the image rect rather
+      // than the full-screen frozen branch (which has no framed-frozen-frame).
+      const frame = getByTestId("framed-frozen-frame");
+      expect(frame.style.left).toBe("100px");
+      expect(frame.style.width).toBe("400px");
+    } finally {
+      URL.createObjectURL = origCreate;
+      (window as unknown as { Image: unknown }).Image = origImage;
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe("<Overlay/> post-paint signals", () => {
