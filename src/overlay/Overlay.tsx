@@ -461,7 +461,7 @@ export function Overlay() {
           redactMode={redactMode}
           redactionStyle={redactionStyle}
           sourceImageUrl={imageUrl ?? undefined}
-          imageRect={window_rect_css}
+          imageRect={framedRect}
         />
         <Toolbar
           rectCount={annotations.rects.length}
