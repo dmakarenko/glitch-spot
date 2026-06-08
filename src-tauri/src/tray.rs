@@ -202,9 +202,9 @@ pub(crate) fn share_status_label(healthy: bool, port: u16) -> String {
 pub(crate) fn clipboard_action_label(format: crate::settings::ClipboardFormat) -> &'static str {
     use crate::settings::ClipboardFormat;
     match format {
-        ClipboardFormat::Json => "copy JSON",
-        ClipboardFormat::Image => "copy Image",
-        ClipboardFormat::Prompt => "copy Prompt",
+        ClipboardFormat::Json => "copy as JSON",
+        ClipboardFormat::Image => "copy Annotated Image",
+        ClipboardFormat::Prompt => "copy as a Prompt",
     }
 }
 
@@ -1271,9 +1271,9 @@ mod tests {
     #[test]
     fn clipboard_action_label_names_each_format() {
         use crate::settings::ClipboardFormat;
-        assert_eq!(clipboard_action_label(ClipboardFormat::Json), "copy JSON");
-        assert_eq!(clipboard_action_label(ClipboardFormat::Image), "copy Image");
-        assert_eq!(clipboard_action_label(ClipboardFormat::Prompt), "copy Prompt");
+        assert_eq!(clipboard_action_label(ClipboardFormat::Json), "copy as JSON");
+        assert_eq!(clipboard_action_label(ClipboardFormat::Image), "copy Annotated Image");
+        assert_eq!(clipboard_action_label(ClipboardFormat::Prompt), "copy as a Prompt");
     }
 
     #[test]
