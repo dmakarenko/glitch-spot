@@ -25,9 +25,10 @@ type Props = {
   redactionStyle: RedactionStyle
   onSetRedactMode: (redact: boolean) => void
   onChangeRedactionStyle: (style: RedactionStyle) => void
+  topInset?: number
 }
 
-export function Toolbar({ rectCount, clipboardFormat, onSave, onChangeFormat, redactMode, redactionStyle, onSetRedactMode, onChangeRedactionStyle }: Props) {
+export function Toolbar({ rectCount, clipboardFormat, onSave, onChangeFormat, redactMode, redactionStyle, onSetRedactMode, onChangeRedactionStyle, topInset = 0 }: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -73,7 +74,7 @@ export function Toolbar({ rectCount, clipboardFormat, onSave, onChangeFormat, re
       className="glitch-frame"
       style={{
         position: 'fixed',
-        top: 12,
+        top: topInset + 12,
         left: '50%',
         transform: 'translateX(-50%)',
         borderRadius: 9,
