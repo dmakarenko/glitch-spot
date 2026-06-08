@@ -55,6 +55,9 @@ pub struct AppState {
     /// captures this value and skips the reveal if it has since changed, so a
     /// cancel-and-reopen within 300ms doesn't reveal the new alpha-0 session early.
     pub live_generation: Arc<AtomicU64>,
+    /// Set at image-open time, consumed by `save_snapshot("image")`. Holds the
+    /// decoded file frame and the overlay-CSS→image-px mapping.
+    pub pending_image: Mutex<Option<open_image::ImageSession>>,
 }
 
 #[tauri::command]
@@ -1019,6 +1022,7 @@ mod tests {
             picker_state: Arc::new(picker_session::PickerStateHolder::new()),
             freeze_generation: Arc::new(AtomicU64::new(0)),
             live_generation: Arc::new(AtomicU64::new(0)),
+            pending_image: Mutex::new(None),
         };
         assert!(state.latest_snapshot_at.lock().unwrap().is_none());
     }
@@ -1114,6 +1118,7 @@ pub fn run() {
             picker_state: Arc::new(picker_session::PickerStateHolder::new()),
             freeze_generation: Arc::new(AtomicU64::new(0)),
             live_generation: Arc::new(AtomicU64::new(0)),
+            pending_image: Mutex::new(None),
         })
         .setup(|app| {
             #[cfg(target_os = "macos")]

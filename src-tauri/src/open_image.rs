@@ -60,6 +60,14 @@ pub fn load_image_frame(
     Ok(CapturedFrame { width, height, scale_factor: 1.0, png, display_index })
 }
 
+/// What `save_snapshot("image")` needs at save time: the decoded frame plus the
+/// coordinate mapping computed at open time by `fit_image_rect`.
+pub struct ImageSession {
+    pub frame: CapturedFrame,
+    pub crop_origin: (f32, f32),
+    pub coord_scale: f32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
