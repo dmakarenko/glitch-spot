@@ -88,6 +88,7 @@ pub fn build(
     os_version: &str,
     base_dir: &Path,
     crop_origin: Option<(f32, f32)>,
+    coord_scale: f32,
     redaction_style: RedactionStyle,
 ) -> Result<(BuiltSnapshot, RgbaImage), BuildError> {
     let id = new_id();
@@ -95,7 +96,7 @@ pub fn build(
     let clean_path = dir.join(clean_png_filename(&id));
     let annotated_path = dir.join(annotated_png_filename(&id));
 
-    let scale = frame.scale_factor;
+    let scale = coord_scale;
     let (crop_x, crop_y) = crop_origin.unwrap_or((0.0, 0.0));
 
     // Fail closed: an unrecognized kind (contract drift / frontend typo) must
@@ -229,7 +230,7 @@ mod tests {
         let f = frame(40, 40);
         let base = std::path::PathBuf::from("/tmp/gs-test-fast");
         let (built, _img) = build(&f, "frozen", vec![incoming("a", "annotation", 4.0, 4.0, 10.0, 10.0)],
-            "macos", "14", &base, None, RedactionStyle::Branded).unwrap();
+            "macos", "14", &base, None, 1.0, RedactionStyle::Branded).unwrap();
         assert_eq!(built.clean_bytes, f.png, "fast path must clone the original frame");
         assert!(built.snapshot.redactions.is_empty());
         assert_eq!(built.snapshot.annotations.len(), 1);
@@ -240,7 +241,7 @@ mod tests {
         let f = frame(40, 40);
         let base = std::path::PathBuf::from("/tmp/gs-test-redact");
         let (built, _img) = build(&f, "frozen", vec![incoming("r", "redaction", 5.0, 5.0, 20.0, 20.0)],
-            "macos", "14", &base, None, RedactionStyle::Solid).unwrap();
+            "macos", "14", &base, None, 1.0, RedactionStyle::Solid).unwrap();
         assert_ne!(built.clean_bytes, f.png, "clean image must be redacted, not the raw frame");
         let clean = image::load_from_memory(&built.clean_bytes).unwrap().to_rgba8();
         assert_ne!(clean.get_pixel(10, 10), &Rgba([255, 0, 0, 255]), "region pixels covered");
@@ -262,7 +263,7 @@ mod tests {
             incoming("a1", "annotation", 2.0, 2.0, 8.0, 8.0),
             incoming("r1", "redaction", 12.0, 2.0, 8.0, 8.0),
             incoming("a2", "annotation", 22.0, 2.0, 8.0, 8.0),
-        ], "macos", "14", &base, None, RedactionStyle::Branded).unwrap();
+        ], "macos", "14", &base, None, 1.0, RedactionStyle::Branded).unwrap();
         let labels: Vec<&str> = built.snapshot.annotations.iter().map(|a| a.label.as_str()).collect();
         assert_eq!(labels, vec!["01", "02"]);
     }
@@ -272,7 +273,20 @@ mod tests {
         let f = frame(40, 40);
         let base = std::path::PathBuf::from("/tmp/gs-test-unknown");
         let err = build(&f, "frozen", vec![incoming("x", "redacton", 5.0, 5.0, 10.0, 10.0)],
-            "macos", "14", &base, None, RedactionStyle::Solid).unwrap_err();
+            "macos", "14", &base, None, 1.0, RedactionStyle::Solid).unwrap_err();
         assert!(matches!(err, BuildError::UnknownKind(_)), "expected UnknownKind, got: {err:?}");
+    }
+
+    #[test]
+    fn coord_scale_overrides_frame_scale_for_mapping() {
+        // Frame metadata scale is 1.0 (an opened image), but coord_scale=2.0
+        // maps an annotation at CSS (10,10,5,5) to image px (20,20,10,10).
+        let f = frame(100, 100);
+        let base = std::path::PathBuf::from("/tmp/gs-test-coordscale");
+        let (built, _img) = build(&f, "image",
+            vec![incoming("a", "annotation", 10.0, 10.0, 5.0, 5.0)],
+            "macos", "14", &base, None, 2.0, RedactionStyle::Branded).unwrap();
+        let c = &built.snapshot.annotations[0].coords;
+        assert_eq!((c.x, c.y, c.w, c.h), (20.0, 20.0, 10.0, 10.0));
     }
 }

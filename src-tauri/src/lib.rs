@@ -213,6 +213,7 @@ async fn save_snapshot(
         &os_version,
         &base,
         crop_origin,
+        frame.scale_factor,
         state.settings.current_redaction_style(),
     )
     .map_err(|e| e.to_string())?;
