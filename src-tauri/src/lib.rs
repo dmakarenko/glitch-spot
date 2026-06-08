@@ -735,6 +735,15 @@ async fn picker_select(
     hide_all_pickers(&app);
 
     let scale = display.scale_factor;
+    // Window mode covers the full display (incl. the menu bar), so the toolbar
+    // needs the menu-bar height to sit below it. Read it from the monitor the
+    // window lives on — the webview's own screenY is unreliable here.
+    let top_inset_css = app
+        .available_monitors()
+        .ok()
+        .and_then(|ms| ms.into_iter().nth(window.display_index))
+        .map(|m| overlay::menu_bar_inset_css(m.position().y, m.work_area().position.y, m.scale_factor() as f32))
+        .unwrap_or(0.0);
     let payload = overlay::WindowModePayload {
         app_name: window.app_name.clone(),
         title: window.title.clone(),
@@ -752,6 +761,7 @@ async fn picker_select(
             h: window.bounds.h,
         },
         display_scale_factor: scale,
+        top_inset_css,
         initial_rect_css: match (initial_rect_x, initial_rect_y, initial_rect_w, initial_rect_h) {
             (Some(rx), Some(ry), Some(rw), Some(rh)) => Some(overlay::CssRect {
                 x: (rx - display.x) as f32 / scale,

@@ -152,12 +152,15 @@ function RedactionHarness({ style }: { style: "pixelated" | "branded" | "solid" 
 }
 
 describe("DrawingLayer pixelated redaction preview", () => {
-  it("does not paint the mosaic background for pixelated rects", () => {
+  it("falls back to the grey checker mosaic for pixelated rects with no live source", () => {
+    // Pure live capture has no decoded backdrop to sample, so the live canvas
+    // can't render — fall back to the grey checker so the rect still reads as
+    // redacted rather than showing only a border.
     const { container } = render(<RedactionHarness style="pixelated" />);
     const rect = container.querySelector('[data-rect-id]') as HTMLDivElement;
-    // No grey-checker mosaic and no 12px tiling — the live canvas owns the fill.
-    expect(rect.style.background).not.toContain("svg");
-    expect(rect.style.backgroundSize).toBe("");
+    expect(rect.style.background).toContain("svg");
+    expect(rect.style.background).toContain("777777");
+    expect(rect.style.backgroundSize).toBe("12px 12px");
   });
 
   it("still paints the mosaic background for branded rects", () => {

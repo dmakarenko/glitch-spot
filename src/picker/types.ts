@@ -40,6 +40,9 @@ export type WindowModePayload = {
   window_rect_css: { x: number; y: number; w: number; h: number };
   window_rect_physical: { x: number; y: number; w: number; h: number };
   display_scale_factor: number;
+  /** Menu-bar/notch height in CSS px. Window mode covers the full display, so
+   *  the toolbar offsets by this to clear the menu bar. */
+  top_inset_css: number;
   /** First annotation drawn in the picker (drag-to-draw), in overlay-relative
    *  CSS px. When present, pre-populated as a committed rect in the overlay. */
   initial_rect_css?: { x: number; y: number; w: number; h: number };

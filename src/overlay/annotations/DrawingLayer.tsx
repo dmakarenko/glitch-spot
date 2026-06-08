@@ -40,9 +40,9 @@ type Props = {
 function redactionPreviewBg(style: RedactionStyle): string {
   if (style === "solid") return "#241f1b"; // warm dark grey — matches annotate.ts SOLID_COVER
   // Branded's cover is a deterministic palette pattern independent of the source,
-  // so a small accent-palette mosaic stands in for it during editing. (Pixelated
-  // draws a live source-sampled canvas instead and never reaches here; solid
-  // returns above.)
+  // so a small accent-palette mosaic stands in for it during editing. Pixelated
+  // normally draws a live source-sampled canvas, but with no decoded backdrop
+  // (pure live capture) it falls back to the grey checker mosaic below.
   const a = style === "branded" ? "%23ee6633" : "%23777777";
   const b = style === "branded" ? "%2378341a" : "%23444444";
   return (
@@ -296,6 +296,10 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick, redact
     >
       {state.rects.map((r, idx) => {
         const isRedaction = r.kind === "redaction";
+        // Pixelated paints a live source-sampled canvas, but only when a decoded
+        // backdrop exists (frozen/window/image). Pure live capture has none, so
+        // fall back to the grey checker mosaic rather than showing a bare border.
+        const hasLivePixelFill = redactionStyle === "pixelated" && !!source && !!imageRect;
         const label = labels[idx];
         return (
           <div
@@ -329,10 +333,10 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick, redact
               height: r.h,
               border: isRedaction ? "1.5px solid rgba(238, 102, 51, 0.5)" : RECT_BORDER,
               background: isRedaction
-                ? (redactionStyle === "pixelated" ? "transparent" : redactionPreviewBg(redactionStyle))
+                ? (hasLivePixelFill ? "transparent" : redactionPreviewBg(redactionStyle))
                 : RECT_FILL,
               backgroundSize:
-                isRedaction && redactionStyle !== "solid" && redactionStyle !== "pixelated"
+                isRedaction && redactionStyle !== "solid" && !hasLivePixelFill
                   ? "12px 12px"
                   : undefined,
               boxSizing: "border-box",

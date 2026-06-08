@@ -257,6 +257,9 @@ pub struct WindowModePayload {
     /// Same window rect in physical pixels; used by the backend at save time.
     pub window_rect_physical: WindowRectPhysical,
     pub display_scale_factor: f32,
+    /// Menu-bar/notch height in CSS px. Window mode covers the full display, so
+    /// the toolbar offsets by this to clear the menu bar (see `menu_bar_inset_css`).
+    pub top_inset_css: f32,
     /// First annotation drawn in the picker (drag-to-draw), in overlay-relative
     /// CSS px. When present, the overlay pre-populates it as a committed rect.
     pub initial_rect_css: Option<CssRect>,
@@ -267,6 +270,17 @@ pub struct CssRect { pub x: f32, pub y: f32, pub w: f32, pub h: f32 }
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct WindowRectPhysical { pub x: i32, pub y: i32, pub w: u32, pub h: u32 }
+
+/// Height of the menu bar / notch on a monitor, in CSS pixels — the gap between
+/// the monitor's full frame top and its work area top. Window mode covers the
+/// full frame, so the toolbar offsets by this much to clear the menu bar. The
+/// webview's own `window.screenY` is unreliable for a borderless full-screen
+/// overlay (it reports Cocoa bottom-left coords), so the inset is computed here
+/// from the monitor geometry instead. `monitor_top`/`work_area_top` are physical
+/// pixels; the result is divided by `scale` into the CSS space the overlay draws in.
+pub fn menu_bar_inset_css(monitor_top: i32, work_area_top: i32, scale: f32) -> f32 {
+    ((work_area_top - monitor_top) as f32 / scale).max(0.0)
+}
 
 pub fn show_window_mode(
     app: &tauri::AppHandle,
@@ -355,4 +369,29 @@ pub fn reveal(app: &tauri::AppHandle) -> Result<(), OverlayError> {
         .ok_or(OverlayError::WindowMissing)?;
     set_window_alpha(&window, 1.0);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn menu_bar_inset_is_work_area_offset_in_css_px() {
+        // Retina display (scale 2): full frame top at physical y=0, work area
+        // pushed down by a 66px menu bar → 33 CSS px of inset.
+        assert_eq!(menu_bar_inset_css(0, 66, 2.0), 33.0);
+    }
+
+    #[test]
+    fn menu_bar_inset_is_zero_when_work_area_meets_frame_top() {
+        // Secondary display with no menu bar: work area starts at the frame top.
+        assert_eq!(menu_bar_inset_css(-1080, -1080, 1.0), 0.0);
+    }
+
+    #[test]
+    fn menu_bar_inset_never_negative() {
+        // A work-area top above the frame top would imply a negative inset;
+        // clamp to 0 so the toolbar never floats above the viewport.
+        assert_eq!(menu_bar_inset_css(100, 50, 1.0), 0.0);
+    }
 }

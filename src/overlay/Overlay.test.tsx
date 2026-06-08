@@ -45,6 +45,7 @@ function makeWindowPayload(): WindowModePayload {
     window_rect_css: { x: 120, y: 80, w: 400, h: 300 },
     window_rect_physical: { x: 240, y: 160, w: 800, h: 600 },
     display_scale_factor: 2,
+    top_inset_css: 33,
   };
 }
 
@@ -95,6 +96,18 @@ describe("<Overlay/> window mode", () => {
       expect(panel.style.background).toContain("rgba(0, 0, 0");
       expect(panel.style.pointerEvents).toBe("none");
     }
+  });
+
+  it("offsets the toolbar below the menu bar by the backend-provided inset", () => {
+    const { getByTestId } = render(<Overlay />);
+    // Window mode covers the full display (incl. the menu bar), so the toolbar
+    // must sit top_inset_css below the viewport top to clear it. initial_rect_css
+    // seeds a committed rect so the toolbar renders (it hides at zero rects).
+    presentWindowMode({ ...makeWindowPayload(), initial_rect_css: { x: 130, y: 90, w: 200, h: 100 } });
+
+    const toolbar = getByTestId("toolbar-save-btn").closest(".glitch-frame") as HTMLElement;
+    // 33px menu-bar inset + the toolbar's own 12px top margin.
+    expect(toolbar.style.top).toBe("45px");
   });
 });
 
