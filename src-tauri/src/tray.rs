@@ -891,6 +891,16 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                         .show();
                 }
             }
+            // Cached share URL is unreachable once the tunnel leaves Live.
+            if matches!(last_state, crate::share::tunnel::TunnelState::Live { .. })
+                && !matches!(new_state, crate::share::tunnel::TunnelState::Live { .. })
+            {
+                if let Ok(mut s) = state.share_menu_state.lock() {
+                    if matches!(*s, crate::ShareMenuState::Ready(_)) {
+                        *s = crate::ShareMenuState::Idle;
+                    }
+                }
+            }
             last_state = new_state;
             if let Ok(menu) = build_menu(&app_handle) {
                 let _ = tray_for_watch.set_menu(Some(menu));
