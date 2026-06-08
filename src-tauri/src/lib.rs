@@ -1099,6 +1099,7 @@ pub fn run() {
             None::<Vec<&str>>,
         ))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             latest_frame: Mutex::new(None),
             snapshot_store,
