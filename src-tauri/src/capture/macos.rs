@@ -9,7 +9,9 @@ use screencapturekit::stream::content_filter::SCContentFilter;
 
 use super::{CaptureError, CapturedFrame};
 
-pub(super) fn capture_active_monitor(app: &tauri::AppHandle) -> Result<CapturedFrame, CaptureError> {
+pub(super) fn capture_active_monitor(
+    app: &tauri::AppHandle,
+) -> Result<CapturedFrame, CaptureError> {
     let cursor = app
         .cursor_position()
         .map_err(|e| CaptureError::Platform(format!("cursor position: {e}")))?;

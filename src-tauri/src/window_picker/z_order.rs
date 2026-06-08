@@ -36,7 +36,12 @@ mod tests {
             window_id: id,
             app_name: format!("App{id}"),
             title: format!("Window {id}"),
-            bounds: WindowBounds { x: 0, y: 0, w: 100, h: 100 },
+            bounds: WindowBounds {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 100,
+            },
             display_index: 0,
             layer: 0,
             visible_regions: vec![],

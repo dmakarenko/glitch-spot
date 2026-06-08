@@ -9,15 +9,17 @@ pub enum ProviderKind {
 }
 
 impl Default for ProviderKind {
-    fn default() -> Self { ProviderKind::Cloudflared }
+    fn default() -> Self {
+        ProviderKind::Cloudflared
+    }
 }
 
 impl ProviderKind {
     pub fn from_name(s: &str) -> Option<Self> {
         match s {
             "cloudflared" => Some(ProviderKind::Cloudflared),
-            "ngrok"       => Some(ProviderKind::Ngrok),
-            "tailscale"   => Some(ProviderKind::Tailscale),
+            "ngrok" => Some(ProviderKind::Ngrok),
+            "tailscale" => Some(ProviderKind::Tailscale),
             _ => None,
         }
     }
@@ -25,8 +27,8 @@ impl ProviderKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             ProviderKind::Cloudflared => "cloudflared",
-            ProviderKind::Ngrok       => "ngrok",
-            ProviderKind::Tailscale   => "tailscale",
+            ProviderKind::Ngrok => "ngrok",
+            ProviderKind::Tailscale => "tailscale",
         }
     }
 
@@ -35,8 +37,8 @@ impl ProviderKind {
     pub fn display_name(&self) -> &'static str {
         match self {
             ProviderKind::Cloudflared => "Cloudflare",
-            ProviderKind::Ngrok       => "ngrok",
-            ProviderKind::Tailscale   => "Tailscale",
+            ProviderKind::Ngrok => "ngrok",
+            ProviderKind::Tailscale => "Tailscale",
         }
     }
 }
@@ -48,9 +50,15 @@ use tokio::process::Child;
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
     #[error("{provider} binary not installed (looked for `{binary}` on PATH or standard install locations)")]
-    BinaryNotFound { provider: &'static str, binary: &'static str },
+    BinaryNotFound {
+        provider: &'static str,
+        binary: &'static str,
+    },
     #[error("{provider}: {reason}")]
-    Spawn { provider: &'static str, reason: String },
+    Spawn {
+        provider: &'static str,
+        reason: String,
+    },
 }
 
 /// One-shot URL discovery result. The future is awaited under a deadline by
@@ -91,7 +99,11 @@ mod tests {
         // as_str() is the on-disk config value and the tray menu id suffix.
         // Changing it would break round-tripping and provider selection, so
         // it must stay distinct from the human-facing display_name().
-        for kind in [ProviderKind::Cloudflared, ProviderKind::Ngrok, ProviderKind::Tailscale] {
+        for kind in [
+            ProviderKind::Cloudflared,
+            ProviderKind::Ngrok,
+            ProviderKind::Tailscale,
+        ] {
             assert_eq!(ProviderKind::from_name(kind.as_str()), Some(kind));
         }
         assert_eq!(ProviderKind::Cloudflared.as_str(), "cloudflared");

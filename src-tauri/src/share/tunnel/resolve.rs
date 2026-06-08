@@ -80,10 +80,15 @@ fn login_shell_path_dirs() -> Vec<PathBuf> {
 }
 
 fn standard_install_dirs() -> Vec<PathBuf> {
-    ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin"]
-        .iter()
-        .map(PathBuf::from)
-        .collect()
+    [
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+    ]
+    .iter()
+    .map(PathBuf::from)
+    .collect()
 }
 
 #[cfg(unix)]

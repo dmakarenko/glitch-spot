@@ -3,7 +3,9 @@
 
 use chrono::{DateTime, Utc};
 use tauri::{
-    menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
+    menu::{
+        CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
+    },
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
@@ -40,8 +42,12 @@ pub(crate) const GLITCH_SHIFT_MAX: i8 = 3;
 pub(crate) fn tint_frame(source_rgba: &[u8], rgb: (u8, u8, u8), alpha_factor: f32) -> Vec<u8> {
     let mut out = source_rgba.to_vec();
     for chunk in out.chunks_mut(4) {
-        if chunk.len() != 4 { continue; }
-        if chunk[3] == 0 { continue; }
+        if chunk.len() != 4 {
+            continue;
+        }
+        if chunk[3] == 0 {
+            continue;
+        }
         chunk[0] = rgb.0;
         chunk[1] = rgb.1;
         chunk[2] = rgb.2;
@@ -60,11 +66,13 @@ pub(crate) const PULSE_FRAME_COUNT: usize = 24;
 pub(crate) fn build_pulse_frames(source: &[u8], rgb: (u8, u8, u8)) -> Vec<Vec<u8>> {
     const BASE: f32 = 0.65;
     const AMP: f32 = 0.35;
-    (0..PULSE_FRAME_COUNT).map(|i| {
-        let t = i as f32 / PULSE_FRAME_COUNT as f32;
-        let alpha = BASE + AMP * (2.0 * std::f32::consts::PI * t).cos();
-        tint_frame(source, rgb, alpha)
-    }).collect()
+    (0..PULSE_FRAME_COUNT)
+        .map(|i| {
+            let t = i as f32 / PULSE_FRAME_COUNT as f32;
+            let alpha = BASE + AMP * (2.0 * std::f32::consts::PI * t).cos();
+            tint_frame(source, rgb, alpha)
+        })
+        .collect()
 }
 
 /// One of the two icon tints the user can pick from the tray menu.
@@ -173,18 +181,33 @@ pub(crate) fn random_scanline_sequence<R: rand::Rng>(
 ) -> Vec<ScanlineStep> {
     let n = rng.gen_range(6..=10usize);
     let h = height as u8;
-    (0..n).map(|_| {
-        let num_bands = rng.gen_range(2..=3usize);
-        let bands = (0..num_bands).map(|_| {
-            let band_h = rng.gen_range((h / 7).max(2)..=(h / 4).max(3));
-            let max_y = h.saturating_sub(band_h);
-            let y0 = if max_y > 0 { rng.gen_range(0..max_y) } else { 0 };
-            let dx_mag = rng.gen_range(1i8..=GLITCH_SHIFT_MAX);
-            let dx = if rng.gen_bool(0.5) { dx_mag } else { -dx_mag };
-            ScanlineBand { y0, height: band_h, dx }
-        }).collect();
-        ScanlineStep { bands, ticks: rng.gen_range(1..=2) }
-    }).collect()
+    (0..n)
+        .map(|_| {
+            let num_bands = rng.gen_range(2..=3usize);
+            let bands = (0..num_bands)
+                .map(|_| {
+                    let band_h = rng.gen_range((h / 7).max(2)..=(h / 4).max(3));
+                    let max_y = h.saturating_sub(band_h);
+                    let y0 = if max_y > 0 {
+                        rng.gen_range(0..max_y)
+                    } else {
+                        0
+                    };
+                    let dx_mag = rng.gen_range(1i8..=GLITCH_SHIFT_MAX);
+                    let dx = if rng.gen_bool(0.5) { dx_mag } else { -dx_mag };
+                    ScanlineBand {
+                        y0,
+                        height: band_h,
+                        dx,
+                    }
+                })
+                .collect();
+            ScanlineStep {
+                bands,
+                ticks: rng.gen_range(1..=2),
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn mcp_status_label(healthy: bool, port: u16) -> String {
@@ -280,7 +303,9 @@ pub(crate) fn tunnel_status_label(state: &crate::share::tunnel::TunnelState) -> 
         TunnelState::Idle => "Tunnel: idle".to_string(),
         TunnelState::Starting => "Tunnel: starting…".to_string(),
         TunnelState::Live { url } => {
-            let host = url.trim_start_matches("https://").trim_start_matches("http://");
+            let host = url
+                .trim_start_matches("https://")
+                .trim_start_matches("http://");
             format!("Tunnel: {host}")
         }
         TunnelState::Error { reason } => {
@@ -355,9 +380,9 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         is_healthy(&state.share_bound),
         crate::share::router::SHARE_PORT,
     ))
-        .id("share_status")
-        .enabled(false)
-        .build(app)?;
+    .id("share_status")
+    .enabled(false)
+    .build(app)?;
 
     let latest_snapshot = MenuItemBuilder::new(&snapshot_label)
         .id("latest_snapshot")
@@ -371,8 +396,10 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .build(app)?;
     let tunnel_state = state.tunnel.current_state();
     let tunnel_state_label = tunnel_status_label(&tunnel_state);
-    let tunnel_is_error =
-        matches!(tunnel_state, crate::share::tunnel::TunnelState::Error { .. });
+    let tunnel_is_error = matches!(
+        tunnel_state,
+        crate::share::tunnel::TunnelState::Error { .. }
+    );
     let (share_label, share_enabled) = match &*state.share_menu_state.lock().unwrap() {
         crate::ShareMenuState::Idle => ("Share latest snapshot via Tunnel", has_snapshot),
         crate::ShareMenuState::Sharing => ("Sharing latest snapshot…", false),
@@ -391,18 +418,24 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .build(app)?;
 
     let current = state.settings.current_provider();
-    let provider_cf = CheckMenuItemBuilder::new(crate::settings::ProviderKind::Cloudflared.display_name())
-        .id("provider:cloudflared")
-        .checked(matches!(current, crate::settings::ProviderKind::Cloudflared))
-        .build(app)?;
-    let provider_ng = CheckMenuItemBuilder::new(crate::settings::ProviderKind::Ngrok.display_name())
-        .id("provider:ngrok")
-        .checked(matches!(current, crate::settings::ProviderKind::Ngrok))
-        .build(app)?;
-    let provider_ts = CheckMenuItemBuilder::new(crate::settings::ProviderKind::Tailscale.display_name())
-        .id("provider:tailscale")
-        .checked(matches!(current, crate::settings::ProviderKind::Tailscale))
-        .build(app)?;
+    let provider_cf =
+        CheckMenuItemBuilder::new(crate::settings::ProviderKind::Cloudflared.display_name())
+            .id("provider:cloudflared")
+            .checked(matches!(
+                current,
+                crate::settings::ProviderKind::Cloudflared
+            ))
+            .build(app)?;
+    let provider_ng =
+        CheckMenuItemBuilder::new(crate::settings::ProviderKind::Ngrok.display_name())
+            .id("provider:ngrok")
+            .checked(matches!(current, crate::settings::ProviderKind::Ngrok))
+            .build(app)?;
+    let provider_ts =
+        CheckMenuItemBuilder::new(crate::settings::ProviderKind::Tailscale.display_name())
+            .id("provider:tailscale")
+            .checked(matches!(current, crate::settings::ProviderKind::Tailscale))
+            .build(app)?;
     let provider_submenu = SubmenuBuilder::new(app, tunnel_provider_label(current))
         .item(&provider_cf)
         .item(&provider_ng)
@@ -436,19 +469,31 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
     let current_retention = state.settings.current_retention();
     let ret_24h = CheckMenuItemBuilder::new("Keep 24 hours")
         .id("retention:24h")
-        .checked(matches!(current_retention, crate::settings::SnapshotRetention::Hours24))
+        .checked(matches!(
+            current_retention,
+            crate::settings::SnapshotRetention::Hours24
+        ))
         .build(app)?;
     let ret_7d = CheckMenuItemBuilder::new("Keep 7 days")
         .id("retention:7d")
-        .checked(matches!(current_retention, crate::settings::SnapshotRetention::Days7))
+        .checked(matches!(
+            current_retention,
+            crate::settings::SnapshotRetention::Days7
+        ))
         .build(app)?;
     let ret_30d = CheckMenuItemBuilder::new("Keep 30 days")
         .id("retention:30d")
-        .checked(matches!(current_retention, crate::settings::SnapshotRetention::Days30))
+        .checked(matches!(
+            current_retention,
+            crate::settings::SnapshotRetention::Days30
+        ))
         .build(app)?;
     let ret_never = CheckMenuItemBuilder::new("Never auto-delete")
         .id("retention:never")
-        .checked(matches!(current_retention, crate::settings::SnapshotRetention::Never))
+        .checked(matches!(
+            current_retention,
+            crate::settings::SnapshotRetention::Never
+        ))
         .build(app)?;
     let retention_submenu = SubmenuBuilder::new(app, "Auto-delete snapshots")
         .item(&ret_24h)
@@ -460,15 +505,24 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
     let current_redaction = state.settings.current_redaction_style();
     let redact_solid = CheckMenuItemBuilder::new("Solid fill")
         .id("redaction:solid")
-        .checked(matches!(current_redaction, crate::settings::RedactionStyle::Solid))
+        .checked(matches!(
+            current_redaction,
+            crate::settings::RedactionStyle::Solid
+        ))
         .build(app)?;
     let redact_pixelated = CheckMenuItemBuilder::new("Pixelated")
         .id("redaction:pixelated")
-        .checked(matches!(current_redaction, crate::settings::RedactionStyle::Pixelated))
+        .checked(matches!(
+            current_redaction,
+            crate::settings::RedactionStyle::Pixelated
+        ))
         .build(app)?;
     let redact_branded = CheckMenuItemBuilder::new("Mosaic")
         .id("redaction:branded")
-        .checked(matches!(current_redaction, crate::settings::RedactionStyle::Branded))
+        .checked(matches!(
+            current_redaction,
+            crate::settings::RedactionStyle::Branded
+        ))
         .build(app)?;
     let redaction_submenu = SubmenuBuilder::new(app, "Redaction style")
         .item(&redact_solid)
@@ -498,9 +552,13 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .build(app)?;
 
     #[cfg(debug_assertions)]
-    let build_built_at = MenuItemBuilder::new(
-        format!("started: {}", state.started_at.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S %Z"))
-    )
+    let build_built_at = MenuItemBuilder::new(format!(
+        "started: {}",
+        state
+            .started_at
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M:%S %Z")
+    ))
     .id("build_built_at")
     .enabled(false)
     .build(app)?;
@@ -598,7 +656,12 @@ fn build_animation_frames() -> Option<AnimationFrames> {
         static_unhealthy: source.clone(),
     };
 
-    Some(AnimationFrames { coloured, mono, width, height })
+    Some(AnimationFrames {
+        coloured,
+        mono,
+        width,
+        height,
+    })
 }
 
 pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon> {
@@ -626,11 +689,19 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
         let state = app.state::<crate::AppState>();
         state.settings.current_tray()
     };
-    let initial_tint = if initial_coloured { Tint::Coloured } else { Tint::Mono };
+    let initial_tint = if initial_coloured {
+        Tint::Coloured
+    } else {
+        Tint::Mono
+    };
     let initial_icon: Image<'_> = match &frames {
         Some(f) => {
             let assets = f.assets(initial_tint);
-            let bytes = if initial_animated { &assets.pulse[0] } else { &assets.static_healthy };
+            let bytes = if initial_animated {
+                &assets.pulse[0]
+            } else {
+                &assets.static_healthy
+            };
             Image::new(bytes, f.width, f.height)
         }
         None => Image::from_bytes(include_bytes!("../icons/tray.png"))?,
@@ -690,7 +761,9 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                             crate::settings::ClipboardFormat::Json => {
                                 match serde_json::to_string_pretty(&snap) {
                                     Ok(json) => match app2.clipboard().write_text(json) {
-                                        Ok(()) => format!("Copied JSON for {} to clipboard.", snap.id),
+                                        Ok(()) => {
+                                            format!("Copied JSON for {} to clipboard.", snap.id)
+                                        }
                                         Err(e) => format!("Couldn't copy to clipboard: {e}"),
                                     },
                                     Err(e) => format!("Couldn't serialize snapshot: {e}"),
@@ -699,7 +772,9 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                             crate::settings::ClipboardFormat::Prompt => {
                                 let prompt = crate::snapshot::render_as_prompt(&snap);
                                 match app2.clipboard().write_text(prompt) {
-                                    Ok(()) => format!("Copied prompt for {} to clipboard.", snap.id),
+                                    Ok(()) => {
+                                        format!("Copied prompt for {} to clipboard.", snap.id)
+                                    }
                                     Err(e) => format!("Couldn't copy to clipboard: {e}"),
                                 }
                             }
@@ -711,8 +786,13 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                                         let tauri_img =
                                             tauri::image::Image::new_owned(rgba.into_raw(), w, h);
                                         match app2.clipboard().write_image(&tauri_img) {
-                                            Ok(()) => format!("Copied image for {} to clipboard.", snap.id),
-                                            Err(e) => format!("Couldn't copy image to clipboard: {e}"),
+                                            Ok(()) => format!(
+                                                "Copied image for {} to clipboard.",
+                                                snap.id
+                                            ),
+                                            Err(e) => {
+                                                format!("Couldn't copy image to clipboard: {e}")
+                                            }
                                         }
                                     }
                                     Err(e) => format!("Couldn't load snapshot image: {e}"),
@@ -796,7 +876,13 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                     }
                 }
                 "provider:cloudflared" | "provider:ngrok" | "provider:tailscale" => {
-                    let kind = event.id.as_ref().split(':').nth(1).unwrap_or("cloudflared").to_string();
+                    let kind = event
+                        .id
+                        .as_ref()
+                        .split(':')
+                        .nth(1)
+                        .unwrap_or("cloudflared")
+                        .to_string();
                     let app2 = app.clone();
                     tauri::async_runtime::spawn(async move {
                         let state = app2.state::<crate::AppState>();
@@ -819,11 +905,14 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                     }
                     refresh_menu(&app);
                 }
-                "retention:24h"
-                | "retention:7d"
-                | "retention:30d"
-                | "retention:never" => {
-                    let key = event.id.as_ref().split(':').nth(1).unwrap_or("24h").to_string();
+                "retention:24h" | "retention:7d" | "retention:30d" | "retention:never" => {
+                    let key = event
+                        .id
+                        .as_ref()
+                        .split(':')
+                        .nth(1)
+                        .unwrap_or("24h")
+                        .to_string();
                     let app2 = app.clone();
                     tauri::async_runtime::spawn(async move {
                         let state = app2.state::<crate::AppState>();
@@ -833,10 +922,14 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                         refresh_menu(&app2);
                     });
                 }
-                "redaction:solid"
-                | "redaction:pixelated"
-                | "redaction:branded" => {
-                    let key = event.id.as_ref().split(':').nth(1).unwrap_or("branded").to_string();
+                "redaction:solid" | "redaction:pixelated" | "redaction:branded" => {
+                    let key = event
+                        .id
+                        .as_ref()
+                        .split(':')
+                        .nth(1)
+                        .unwrap_or("branded")
+                        .to_string();
                     let state = app.state::<crate::AppState>();
                     if let Err(e) = crate::do_set_redaction_style(&state, key) {
                         eprintln!("tray: set redaction style failed: {e}");
@@ -884,7 +977,8 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
             // Fire notification on transition INTO Error from any non-Error state.
             if let crate::share::tunnel::TunnelState::Error { reason } = &new_state {
                 if !matches!(last_state, crate::share::tunnel::TunnelState::Error { .. }) {
-                    let _ = app_handle.notification()
+                    let _ = app_handle
+                        .notification()
                         .builder()
                         .title("Glitch Spot — tunnel error")
                         .body(reason.as_str())
@@ -1273,7 +1367,10 @@ mod tests {
     #[test]
     fn release_version_label_has_expected_format() {
         let label = release_version_label();
-        assert!(label.starts_with("Version: "), "expected 'Version: ' prefix, got: {label}");
+        assert!(
+            label.starts_with("Version: "),
+            "expected 'Version: ' prefix, got: {label}"
+        );
         assert!(label.contains('('), "expected '(' in label, got: {label}");
         assert!(label.ends_with(')'), "expected ')' suffix, got: {label}");
     }
@@ -1281,24 +1378,42 @@ mod tests {
     #[test]
     fn clipboard_action_label_names_each_format() {
         use crate::settings::ClipboardFormat;
-        assert_eq!(clipboard_action_label(ClipboardFormat::Json), "copy as JSON");
-        assert_eq!(clipboard_action_label(ClipboardFormat::Image), "copy Annotated Image");
-        assert_eq!(clipboard_action_label(ClipboardFormat::Prompt), "copy as a Prompt");
+        assert_eq!(
+            clipboard_action_label(ClipboardFormat::Json),
+            "copy as JSON"
+        );
+        assert_eq!(
+            clipboard_action_label(ClipboardFormat::Image),
+            "copy Annotated Image"
+        );
+        assert_eq!(
+            clipboard_action_label(ClipboardFormat::Prompt),
+            "copy as a Prompt"
+        );
     }
 
     #[test]
     fn tunnel_provider_label_shows_human_name() {
         use crate::settings::ProviderKind;
-        assert_eq!(tunnel_provider_label(ProviderKind::Cloudflared), "Tunnel: Cloudflare");
+        assert_eq!(
+            tunnel_provider_label(ProviderKind::Cloudflared),
+            "Tunnel: Cloudflare"
+        );
         assert_eq!(tunnel_provider_label(ProviderKind::Ngrok), "Tunnel: ngrok");
-        assert_eq!(tunnel_provider_label(ProviderKind::Tailscale), "Tunnel: Tailscale");
+        assert_eq!(
+            tunnel_provider_label(ProviderKind::Tailscale),
+            "Tunnel: Tailscale"
+        );
     }
 
     #[test]
     fn tunnel_label_idle_starting_live() {
         use crate::share::tunnel::TunnelState;
         assert_eq!(tunnel_status_label(&TunnelState::Idle), "Tunnel: idle");
-        assert_eq!(tunnel_status_label(&TunnelState::Starting), "Tunnel: starting…");
+        assert_eq!(
+            tunnel_status_label(&TunnelState::Starting),
+            "Tunnel: starting…"
+        );
         assert_eq!(
             tunnel_status_label(&TunnelState::Live {
                 url: "https://abc.trycloudflare.com".into()
@@ -1310,7 +1425,9 @@ mod tests {
     #[test]
     fn tunnel_label_short_error_keeps_full_reason_and_adds_hint() {
         use crate::share::tunnel::TunnelState;
-        let label = tunnel_status_label(&TunnelState::Error { reason: "boom".into() });
+        let label = tunnel_status_label(&TunnelState::Error {
+            reason: "boom".into(),
+        });
         assert_eq!(label, "⚠️ Tunnel: error — boom (click to copy)");
     }
 
@@ -1334,8 +1451,14 @@ mod tests {
         let label = tunnel_status_label(&TunnelState::Error {
             reason: "line one\n\tline two".into(),
         });
-        assert!(!label.contains('\n'), "label should be single-line: {label}");
-        assert!(label.contains("line one line two"), "whitespace not collapsed: {label}");
+        assert!(
+            !label.contains('\n'),
+            "label should be single-line: {label}"
+        );
+        assert!(
+            label.contains("line one line two"),
+            "whitespace not collapsed: {label}"
+        );
     }
 
     #[test]
@@ -1366,13 +1489,17 @@ mod tests {
     #[test]
     fn tint_frame_replaces_rgb_on_opaque_pixels_only() {
         let source = vec![
-            0, 0, 0, 255,  // opaque black → should be tinted
-            0, 0, 0, 128,  // half-alpha black → tinted, alpha scaled
-            0, 0, 0, 0,    // fully transparent → untouched
+            0, 0, 0, 255, // opaque black → should be tinted
+            0, 0, 0, 128, // half-alpha black → tinted, alpha scaled
+            0, 0, 0, 0, // fully transparent → untouched
         ];
         let out = tint_frame(&source, (255, 0, 60), 1.0);
         assert_eq!(&out[0..4], &[255, 0, 60, 255], "opaque pixel tinted");
-        assert_eq!(&out[4..8], &[255, 0, 60, 128], "half-alpha pixel tinted, alpha preserved at factor 1.0");
+        assert_eq!(
+            &out[4..8],
+            &[255, 0, 60, 128],
+            "half-alpha pixel tinted, alpha preserved at factor 1.0"
+        );
         assert_eq!(&out[8..12], &[0, 0, 0, 0], "transparent pixel untouched");
     }
 
@@ -1421,9 +1548,13 @@ mod tests {
     fn apply_scanline_shift_leaves_non_band_rows_unchanged() {
         // 4×3 image, all opaque white
         let source: Vec<u8> = vec![255u8; 4 * 3 * 4];
-        let band = ScanlineBand { y0: 1, height: 1, dx: 2 };
+        let band = ScanlineBand {
+            y0: 1,
+            height: 1,
+            dx: 2,
+        };
         let out = apply_scanline_shift(&source, 4, 3, &[band]);
-        assert_eq!(&out[0..16],  &source[0..16],  "row 0 before band unchanged");
+        assert_eq!(&out[0..16], &source[0..16], "row 0 before band unchanged");
         assert_eq!(&out[32..48], &source[32..48], "row 2 after band unchanged");
     }
 
@@ -1431,12 +1562,24 @@ mod tests {
     fn apply_scanline_shift_moves_band_pixels_right() {
         // 4×2, all white opaque. Shift row 0 right by 2.
         let source: Vec<u8> = vec![255u8; 4 * 2 * 4];
-        let band = ScanlineBand { y0: 0, height: 1, dx: 2 };
+        let band = ScanlineBand {
+            y0: 0,
+            height: 1,
+            dx: 2,
+        };
         let out = apply_scanline_shift(&source, 4, 2, &[band]);
         assert_eq!(out[0 * 4 + 3], 0, "x=0 clipped → transparent");
         assert_eq!(out[1 * 4 + 3], 0, "x=1 clipped → transparent");
-        assert_eq!(&out[2 * 4..3 * 4], &source[0 * 4..1 * 4], "x=2 gets source x=0");
-        assert_eq!(&out[3 * 4..4 * 4], &source[1 * 4..2 * 4], "x=3 gets source x=1");
+        assert_eq!(
+            &out[2 * 4..3 * 4],
+            &source[0 * 4..1 * 4],
+            "x=2 gets source x=0"
+        );
+        assert_eq!(
+            &out[3 * 4..4 * 4],
+            &source[1 * 4..2 * 4],
+            "x=3 gets source x=1"
+        );
         assert_eq!(&out[16..32], &source[16..32], "row 1 unchanged");
     }
 
@@ -1444,10 +1587,22 @@ mod tests {
     fn apply_scanline_shift_moves_band_pixels_left() {
         // 4×1, all white opaque. Shift row 0 left by 2 (dx = -2).
         let source: Vec<u8> = vec![255u8; 4 * 4];
-        let band = ScanlineBand { y0: 0, height: 1, dx: -2 };
+        let band = ScanlineBand {
+            y0: 0,
+            height: 1,
+            dx: -2,
+        };
         let out = apply_scanline_shift(&source, 4, 1, &[band]);
-        assert_eq!(&out[0 * 4..1 * 4], &source[2 * 4..3 * 4], "x=0 gets source x=2");
-        assert_eq!(&out[1 * 4..2 * 4], &source[3 * 4..4 * 4], "x=1 gets source x=3");
+        assert_eq!(
+            &out[0 * 4..1 * 4],
+            &source[2 * 4..3 * 4],
+            "x=0 gets source x=2"
+        );
+        assert_eq!(
+            &out[1 * 4..2 * 4],
+            &source[3 * 4..4 * 4],
+            "x=1 gets source x=3"
+        );
         assert_eq!(out[2 * 4 + 3], 0, "x=2 clipped → transparent");
         assert_eq!(out[3 * 4 + 3], 0, "x=3 clipped → transparent");
     }
@@ -1460,11 +1615,15 @@ mod tests {
             let seq = random_scanline_sequence(&mut rng, 44);
             assert!(
                 seq.len() >= 6 && seq.len() <= 10,
-                "seed {seed} produced {} steps", seq.len()
+                "seed {seed} produced {} steps",
+                seq.len()
             );
             for (i, step) in seq.iter().enumerate() {
-                assert!(step.ticks >= 1 && step.ticks <= 2,
-                    "seed {seed} step {i}: ticks={}", step.ticks);
+                assert!(
+                    step.ticks >= 1 && step.ticks <= 2,
+                    "seed {seed} step {i}: ticks={}",
+                    step.ticks
+                );
             }
         }
     }
@@ -1476,25 +1635,43 @@ mod tests {
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
             let seq = random_scanline_sequence(&mut rng, 44);
             for (si, step) in seq.iter().enumerate() {
-                assert!(step.bands.len() >= 2 && step.bands.len() <= 3,
-                    "seed {seed} step {si}: {} bands", step.bands.len());
+                assert!(
+                    step.bands.len() >= 2 && step.bands.len() <= 3,
+                    "seed {seed} step {si}: {} bands",
+                    step.bands.len()
+                );
                 for band in &step.bands {
                     let end = band.y0 as u32 + band.height as u32;
-                    assert!(end <= 44,
-                        "seed {seed}: band y0={} h={} extends past height", band.y0, band.height);
+                    assert!(
+                        end <= 44,
+                        "seed {seed}: band y0={} h={} extends past height",
+                        band.y0,
+                        band.height
+                    );
                     let abs_dx = band.dx.unsigned_abs();
-                    assert!(abs_dx >= 1 && abs_dx <= GLITCH_SHIFT_MAX as u8,
-                        "seed {seed}: dx={} outside ±{GLITCH_SHIFT_MAX}", band.dx);
+                    assert!(
+                        abs_dx >= 1 && abs_dx <= GLITCH_SHIFT_MAX as u8,
+                        "seed {seed}: dx={} outside ±{GLITCH_SHIFT_MAX}",
+                        band.dx
+                    );
                 }
             }
         }
     }
 
-    fn pulsing() -> AnimState { AnimState::Pulsing }
-    fn glitching_at(step_idx: usize) -> AnimState {
-        AnimState::Glitching { sequence: vec![], step_idx, ticks_in_step: 0 }
+    fn pulsing() -> AnimState {
+        AnimState::Pulsing
     }
-    fn key(tint: Tint, phase: Phase) -> DrawKey { DrawKey { tint, phase } }
+    fn glitching_at(step_idx: usize) -> AnimState {
+        AnimState::Glitching {
+            sequence: vec![],
+            step_idx,
+            ticks_in_step: 0,
+        }
+    }
+    fn key(tint: Tint, phase: Phase) -> DrawKey {
+        DrawKey { tint, phase }
+    }
 
     #[test]
     fn select_draw_key_coloured_animated_healthy_advances_each_tick() {
@@ -1537,13 +1714,25 @@ mod tests {
         let r = pulsing();
         assert_eq!(
             select_draw_key(true, true, true, &glitching_at(3), &r, 0, 24),
-            key(Tint::Coloured, Phase::Burst { side: BurstSide::Healthy, step_idx: 3 }),
+            key(
+                Tint::Coloured,
+                Phase::Burst {
+                    side: BurstSide::Healthy,
+                    step_idx: 3
+                }
+            ),
         );
         // Unhealthy burst — only `red_state` matters, and the side flips.
         let s = pulsing();
         assert_eq!(
             select_draw_key(true, true, false, &s, &glitching_at(2), 0, 24),
-            key(Tint::Coloured, Phase::Burst { side: BurstSide::Unhealthy, step_idx: 2 }),
+            key(
+                Tint::Coloured,
+                Phase::Burst {
+                    side: BurstSide::Unhealthy,
+                    step_idx: 2
+                }
+            ),
         );
     }
 
@@ -1563,9 +1752,9 @@ mod tests {
         // and unhealthy must map to distinct keys (cyan vs red static frame).
         let s = pulsing();
         let r = pulsing();
-        let healthy = select_draw_key(false, true, true,  &s, &r, 0, 24);
+        let healthy = select_draw_key(false, true, true, &s, &r, 0, 24);
         let unhealthy = select_draw_key(false, true, false, &s, &r, 0, 24);
-        assert_eq!(healthy,   key(Tint::Coloured, Phase::Static(true)));
+        assert_eq!(healthy, key(Tint::Coloured, Phase::Static(true)));
         assert_eq!(unhealthy, key(Tint::Coloured, Phase::Static(false)));
         assert_ne!(healthy, unhealthy);
     }
@@ -1577,7 +1766,7 @@ mod tests {
         // redraw the same image on every health flip.
         let s = pulsing();
         let r = pulsing();
-        let healthy = select_draw_key(false, false, true,  &s, &r, 0, 24);
+        let healthy = select_draw_key(false, false, true, &s, &r, 0, 24);
         let unhealthy = select_draw_key(false, false, false, &s, &r, 0, 24);
         assert_eq!(healthy, unhealthy);
         assert_eq!(healthy, key(Tint::Mono, Phase::Static(true)));
@@ -1599,7 +1788,13 @@ mod tests {
         );
         assert_eq!(
             select_draw_key(true, false, true, &glitching_at(4), &r, 0, 24),
-            key(Tint::Mono, Phase::Burst { side: BurstSide::Healthy, step_idx: 4 }),
+            key(
+                Tint::Mono,
+                Phase::Burst {
+                    side: BurstSide::Healthy,
+                    step_idx: 4
+                }
+            ),
         );
     }
 }

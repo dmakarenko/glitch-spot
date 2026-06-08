@@ -6,17 +6,17 @@ pub mod mcp;
 mod open_image;
 mod overlay;
 mod picker_session;
-mod window_picker;
+pub mod settings;
+pub mod share;
 pub mod snapshot;
 mod spike_capture;
 mod tray;
-pub mod settings;
-pub mod share;
+mod window_picker;
 
 pub use capture::CapturedFrame;
 
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -126,9 +126,12 @@ fn refresh_cursor() {
         return;
     };
     let location = here.location();
-    if let Ok(moved) =
-        CGEvent::new_mouse_event(source, CGEventType::MouseMoved, location, CGMouseButton::Left)
-    {
+    if let Ok(moved) = CGEvent::new_mouse_event(
+        source,
+        CGEventType::MouseMoved,
+        location,
+        CGMouseButton::Left,
+    ) {
         moved.post(CGEventTapLocation::HID);
     }
 }
@@ -225,7 +228,11 @@ async fn save_snapshot(
                 .ok()
                 .and_then(|mut g| g.take())
                 .ok_or_else(|| "no pending image for image mode".to_string())?;
-            (session.frame, Some(session.crop_origin), session.coord_scale)
+            (
+                session.frame,
+                Some(session.crop_origin),
+                session.coord_scale,
+            )
         }
         other => return Err(format!("unknown mode: {other}")),
     };
@@ -277,15 +284,13 @@ async fn save_snapshot(
         tokio::task::spawn_blocking(move || snapshot::persist::write(&base_for_write, &built));
 
     let clipboard_result: Result<(), String> = match state.settings.current_clipboard_format() {
-        settings::ClipboardFormat::Json => {
-            serde_json::to_string_pretty(&snap)
-                .map_err(|e| e.to_string())
-                .and_then(|json| {
-                    app.clipboard()
-                        .write_text(json)
-                        .map_err(|e| format!("clipboard: {e}"))
-                })
-        }
+        settings::ClipboardFormat::Json => serde_json::to_string_pretty(&snap)
+            .map_err(|e| e.to_string())
+            .and_then(|json| {
+                app.clipboard()
+                    .write_text(json)
+                    .map_err(|e| format!("clipboard: {e}"))
+            }),
         settings::ClipboardFormat::Prompt => {
             let prompt = snapshot::render_as_prompt(&snap);
             app.clipboard()
@@ -340,25 +345,34 @@ pub(crate) async fn do_share_latest(
         .ok_or_else(|| "no snapshot to share".to_string())?;
     let snap_id = snap.id.clone();
 
-    let provider: Arc<dyn share::tunnel::provider::TunnelProvider> =
-        match state.settings.current_provider() {
-            settings::ProviderKind::Cloudflared => Arc::new(share::tunnel::cloudflared::Cloudflared),
-            settings::ProviderKind::Ngrok       => Arc::new(share::tunnel::ngrok::Ngrok),
-            settings::ProviderKind::Tailscale   => Arc::new(share::tunnel::tailscale::Tailscale),
-        };
+    let provider: Arc<dyn share::tunnel::provider::TunnelProvider> = match state
+        .settings
+        .current_provider()
+    {
+        settings::ProviderKind::Cloudflared => Arc::new(share::tunnel::cloudflared::Cloudflared),
+        settings::ProviderKind::Ngrok => Arc::new(share::tunnel::ngrok::Ngrok),
+        settings::ProviderKind::Tailscale => Arc::new(share::tunnel::tailscale::Tailscale),
+    };
 
-    let tunnel_url = Arc::clone(&state.tunnel).start_tunnel(provider, share::router::SHARE_PORT).await
+    let tunnel_url = Arc::clone(&state.tunnel)
+        .start_tunnel(provider, share::router::SHARE_PORT)
+        .await
         .map_err(|e| e.to_string())?;
 
     let token = share::token::generate();
-    let snap_dir = snapshot::persist::snapshots_dir().map_err(|e| e.to_string())?.join(&snap_id);
+    let snap_dir = snapshot::persist::snapshots_dir()
+        .map_err(|e| e.to_string())?
+        .join(&snap_id);
     share::token::write_for(&snap_dir, &token).map_err(|e| e.to_string())?;
 
     let share_url = format!("{tunnel_url}/share/{snap_id}/{token}/");
-    app.clipboard().write_text(share_url.clone()).map_err(|e| e.to_string())?;
+    app.clipboard()
+        .write_text(share_url.clone())
+        .map_err(|e| e.to_string())?;
 
     use tauri_plugin_notification::NotificationExt;
-    let _ = app.notification()
+    let _ = app
+        .notification()
         .builder()
         .title("Glitch Spot")
         .body("Share URL copied to clipboard")
@@ -369,14 +383,14 @@ pub(crate) async fn do_share_latest(
 
 /// Sets the tunnel provider: shuts down any running tunnel and persists the new choice.
 /// Called by both the Tauri command and the tray menu handler.
-pub(crate) async fn do_set_tunnel_provider(
-    state: &AppState,
-    kind: String,
-) -> Result<(), String> {
+pub(crate) async fn do_set_tunnel_provider(state: &AppState, kind: String) -> Result<(), String> {
     let parsed = settings::ProviderKind::from_name(&kind)
         .ok_or_else(|| format!("unknown provider: {kind}"))?;
     state.tunnel.shutdown().await;
-    state.settings.save_provider(&state.config_dir, parsed).map_err(|e| e.to_string())
+    state
+        .settings
+        .save_provider(&state.config_dir, parsed)
+        .map_err(|e| e.to_string())
 }
 
 /// Persists the tray icon appearance. The animation loop reads the same
@@ -407,10 +421,7 @@ pub(crate) fn do_set_redaction_style(state: &AppState, key: String) -> Result<()
 /// Persists the snapshot retention setting and immediately sweeps snapshots
 /// that now exceed the new threshold. Expires in-memory state for any
 /// snapshot whose directory was deleted.
-pub(crate) async fn do_set_snapshot_retention(
-    state: &AppState,
-    key: String,
-) -> Result<(), String> {
+pub(crate) async fn do_set_snapshot_retention(state: &AppState, key: String) -> Result<(), String> {
     let retention = settings::SnapshotRetention::from_name(&key)
         .ok_or_else(|| format!("unknown retention key: {key}"))?;
     state
@@ -452,7 +463,10 @@ pub(crate) fn run_cleanup_sweep(state: &AppState) -> bool {
     }
     state.snapshot_store.expire_if_deleted(&base);
     let latest_expired = state.snapshot_store.get_latest().is_none()
-        && state.latest_snapshot_at.lock().map_or(false, |ts| ts.is_some());
+        && state
+            .latest_snapshot_at
+            .lock()
+            .map_or(false, |ts| ts.is_some());
     if latest_expired {
         if let Ok(mut ts) = state.latest_snapshot_at.lock() {
             *ts = None;
@@ -494,8 +508,8 @@ const PICKER_POOL_SIZE: usize = 8;
 pub(crate) async fn trigger_window_picker(app: &tauri::AppHandle) -> anyhow::Result<()> {
     let state = app.state::<AppState>();
 
-    let (windows, displays) = window_picker::macos::enumerate(app)
-        .map_err(|e| anyhow::anyhow!("enumerate: {e}"))?;
+    let (windows, displays) =
+        window_picker::macos::enumerate(app).map_err(|e| anyhow::anyhow!("enumerate: {e}"))?;
 
     if displays.is_empty() {
         return Err(anyhow::anyhow!("no displays detected"));
@@ -595,8 +609,13 @@ fn show_picker(
             .map_err(|e| anyhow::anyhow!("{label} outer_position: {e}"))?;
         eprintln!(
             "[picker] {label} requested=({},{}) {}x{} ; actual=({},{}) ; display_index={}",
-            display.x, display.y, display.w, display.h,
-            actual_pos.x, actual_pos.y, display.display_index,
+            display.x,
+            display.y,
+            display.w,
+            display.h,
+            actual_pos.x,
+            actual_pos.y,
+            display.display_index,
         );
     }
 
@@ -664,10 +683,7 @@ async fn poll_hover(app: tauri::AppHandle) {
             let cy = cursor.y as i32;
 
             let id = window_picker::hit_test::hit_test(&session.windows, cx, cy);
-            let _ = app.emit(
-                "picker://hover",
-                serde_json::json!({ "window_id": id }),
-            );
+            let _ = app.emit("picker://hover", serde_json::json!({ "window_id": id }));
 
             // The CSS picker cursor only activates on the key window. Move
             // key-ness to whichever picker the cursor is currently over so
@@ -742,7 +758,13 @@ async fn picker_select(
         .available_monitors()
         .ok()
         .and_then(|ms| ms.into_iter().nth(window.display_index))
-        .map(|m| overlay::menu_bar_inset_css(m.position().y, m.work_area().position.y, m.scale_factor() as f32))
+        .map(|m| {
+            overlay::menu_bar_inset_css(
+                m.position().y,
+                m.work_area().position.y,
+                m.scale_factor() as f32,
+            )
+        })
         .unwrap_or(0.0);
     let payload = overlay::WindowModePayload {
         app_name: window.app_name.clone(),
@@ -762,7 +784,12 @@ async fn picker_select(
         },
         display_scale_factor: scale,
         top_inset_css,
-        initial_rect_css: match (initial_rect_x, initial_rect_y, initial_rect_w, initial_rect_h) {
+        initial_rect_css: match (
+            initial_rect_x,
+            initial_rect_y,
+            initial_rect_w,
+            initial_rect_h,
+        ) {
             (Some(rx), Some(ry), Some(rw), Some(rh)) => Some(overlay::CssRect {
                 x: (rx - display.x) as f32 / scale,
                 y: (ry - display.y) as f32 / scale,
@@ -857,14 +884,15 @@ fn set_tray_appearance(
 
 #[tauri::command]
 fn get_clipboard_format(state: tauri::State<'_, AppState>) -> String {
-    state.settings.current_clipboard_format().as_str().to_string()
+    state
+        .settings
+        .current_clipboard_format()
+        .as_str()
+        .to_string()
 }
 
 #[tauri::command]
-fn set_clipboard_format(
-    state: tauri::State<'_, AppState>,
-    format: String,
-) -> Result<(), String> {
+fn set_clipboard_format(state: tauri::State<'_, AppState>, format: String) -> Result<(), String> {
     let fmt = settings::ClipboardFormat::from_name(&format)
         .ok_or_else(|| format!("unknown clipboard format: {format}"))?;
     state
@@ -875,20 +903,24 @@ fn set_clipboard_format(
 
 #[tauri::command]
 fn get_redaction_style(state: tauri::State<'_, AppState>) -> String {
-    state.settings.current_redaction_style().as_str().to_string()
+    state
+        .settings
+        .current_redaction_style()
+        .as_str()
+        .to_string()
 }
 
 #[tauri::command]
-fn set_redaction_style(
-    state: tauri::State<'_, AppState>,
-    style: String,
-) -> Result<(), String> {
+fn set_redaction_style(state: tauri::State<'_, AppState>, style: String) -> Result<(), String> {
     do_set_redaction_style(&state, style)
 }
 
 pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if let Some(state) = app.try_state::<AppState>() {
-        state.picker_state.try_enter_live().map_err(anyhow::Error::msg)?;
+        state
+            .picker_state
+            .try_enter_live()
+            .map_err(anyhow::Error::msg)?;
     }
     let my_gen = app
         .try_state::<AppState>()
@@ -923,7 +955,10 @@ pub(crate) async fn trigger_overlay_live(app: &tauri::AppHandle) -> anyhow::Resu
 
 pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if let Some(state) = app.try_state::<AppState>() {
-        state.picker_state.try_enter_frozen().map_err(anyhow::Error::msg)?;
+        state
+            .picker_state
+            .try_enter_frozen()
+            .map_err(anyhow::Error::msg)?;
     }
     // Tag this frozen session. A cancel (hide_overlay) or a superseding session
     // bumps the generation; a capture that finishes afterwards is dropped rather
@@ -960,7 +995,9 @@ pub(crate) async fn trigger_overlay_frozen(app: &tauri::AppHandle) -> anyhow::Re
                 let still_current = app_fallback
                     .try_state::<AppState>()
                     .zip(my_gen)
-                    .map_or(true, |(s, g)| s.freeze_generation.load(Ordering::SeqCst) == g);
+                    .map_or(true, |(s, g)| {
+                        s.freeze_generation.load(Ordering::SeqCst) == g
+                    });
                 if still_current {
                     let _ = overlay::reveal(&app_fallback);
                 }
@@ -1018,7 +1055,10 @@ fn cursor_monitor_work_css(app: &tauri::AppHandle) -> anyhow::Result<(usize, (f3
         .ok_or_else(|| anyhow::anyhow!("no monitor at cursor"))?;
     let wa = monitor.work_area();
     let scale = monitor.scale_factor() as f32;
-    Ok((idx, (wa.size.width as f32 / scale, wa.size.height as f32 / scale)))
+    Ok((
+        idx,
+        (wa.size.width as f32 / scale, wa.size.height as f32 / scale),
+    ))
 }
 
 /// Decode the chosen file, compute its letterbox fit, cache the session, and
@@ -1106,7 +1146,9 @@ pub(crate) fn trigger_open_image(app: &tauri::AppHandle) {
         .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "bmp"])
         .pick_file(move |maybe_path| {
             let Some(file_path) = maybe_path else { return };
-            let Ok(path) = file_path.into_path() else { return };
+            let Ok(path) = file_path.into_path() else {
+                return;
+            };
             let app2 = app.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = present_image(&app2, path).await {
@@ -1125,8 +1167,8 @@ pub(crate) fn trigger_open_image(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
     use crate::window_picker::{DisplayBounds, PickableWindow, WindowBounds};
+    use std::sync::{Arc, Mutex};
 
     fn annotating_session() -> picker_session::AnnotatingSession {
         picker_session::AnnotatingSession {
@@ -1135,20 +1177,34 @@ mod tests {
                 window_id: 7,
                 app_name: "Safari".into(),
                 title: "Reader".into(),
-                bounds: WindowBounds { x: 240, y: 160, w: 800, h: 600 },
+                bounds: WindowBounds {
+                    x: 240,
+                    y: 160,
+                    w: 800,
+                    h: 600,
+                },
                 display_index: 1,
                 layer: 0,
                 visible_regions: vec![],
             },
             display: DisplayBounds {
-                display_index: 1, x: 200, y: 100, w: 2560, h: 1414, scale_factor: 2.0,
+                display_index: 1,
+                x: 200,
+                y: 100,
+                w: 2560,
+                h: 1414,
+                scale_factor: 2.0,
             },
         }
     }
 
     fn sample_frame() -> capture::CapturedFrame {
         capture::CapturedFrame {
-            width: 800, height: 600, scale_factor: 2.0, png: vec![1, 2, 3], display_index: 0,
+            width: 800,
+            height: 600,
+            scale_factor: 2.0,
+            png: vec![1, 2, 3],
+            display_index: 0,
         }
     }
 
@@ -1156,8 +1212,7 @@ mod tests {
     fn window_save_reuses_cached_frame_and_computes_crop() {
         let session = annotating_session();
         let cached = sample_frame();
-        let (frame, crop) =
-            resolve_window_save_frame(&session, Some(cached.clone())).unwrap();
+        let (frame, crop) = resolve_window_save_frame(&session, Some(cached.clone())).unwrap();
         // Same pixels — no recapture.
         assert_eq!(frame.png, cached.png);
         // display_index tracks the window's display.
@@ -1182,9 +1237,7 @@ mod tests {
             latest_snapshot_at: Mutex::new(None),
             started_at: chrono::Utc::now(),
             tunnel: Arc::new(share::tunnel::TunnelManager::new()),
-            settings: Arc::new(
-                settings::Settings::load_from(temp.path()).unwrap(),
-            ),
+            settings: Arc::new(settings::Settings::load_from(temp.path()).unwrap()),
             config_dir: temp.path().to_path_buf(),
             mcp_bound: Arc::new(AtomicBool::new(false)),
             share_bound: Arc::new(AtomicBool::new(false)),
@@ -1223,10 +1276,9 @@ fn autostart_on_launch() -> bool {
 }
 
 pub fn run() {
-    let config_dir = std::path::PathBuf::from(
-        std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
-    )
-    .join(".glitch-spot");
+    let config_dir =
+        std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()))
+            .join(".glitch-spot");
 
     let settings = match settings::Settings::load_from(&config_dir) {
         Ok(s) => Arc::new(s),
@@ -1256,7 +1308,8 @@ pub fn run() {
     if let Some(base) = share_base.clone() {
         let share_bound_for_serve = share_bound.clone();
         tauri::async_runtime::spawn(async move {
-            share::router::serve_share(base, share::router::SHARE_PORT, share_bound_for_serve).await;
+            share::router::serve_share(base, share::router::SHARE_PORT, share_bound_for_serve)
+                .await;
         });
     } else {
         eprintln!("[glitch-spot] share server NOT started — could not resolve snapshots dir");

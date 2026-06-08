@@ -25,7 +25,10 @@ impl Snapshot {
     /// Absolute path to reveal in Finder: the annotated image when present,
     /// otherwise the clean screenshot.
     pub fn reveal_target(&self) -> &str {
-        self.images.annotated.as_deref().unwrap_or(&self.images.clean)
+        self.images
+            .annotated
+            .as_deref()
+            .unwrap_or(&self.images.clean)
     }
 }
 
@@ -108,7 +111,9 @@ pub struct Images {
 pub fn render_as_prompt(snap: &Snapshot) -> String {
     let mut out = String::new();
 
-    out.push_str("The user annotated a screenshot with Glitch Spot. Review the following feedback:\n\n");
+    out.push_str(
+        "The user annotated a screenshot with Glitch Spot. Review the following feedback:\n\n",
+    );
 
     // Context line
     if let Some(w) = &snap.context.window {
@@ -133,7 +138,11 @@ pub fn render_as_prompt(snap: &Snapshot) -> String {
     } else {
         out.push_str(&format!("Annotations ({count}):\n"));
         for a in &snap.annotations {
-            let note = if a.note.trim().is_empty() { "(no note)" } else { a.note.trim() };
+            let note = if a.note.trim().is_empty() {
+                "(no note)"
+            } else {
+                a.note.trim()
+            };
             out.push_str(&format!(
                 "  [{}] {}\n       coords: x={} y={} w={} h={} (physical px)\n",
                 a.label,

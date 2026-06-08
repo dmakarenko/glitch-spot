@@ -14,8 +14,8 @@ use crate::snapshot::{annotated_png_filename, clean_png_filename, snapshot_json_
 /// Resolves `$HOME` directly (macOS-only product). Returns `io::Error::NotFound`
 /// equivalent (kind = `NotFound`) if `HOME` is unset.
 pub fn snapshots_dir() -> io::Result<PathBuf> {
-    let home = env::var("HOME")
-        .map_err(|_| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))?;
+    let home =
+        env::var("HOME").map_err(|_| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))?;
     let dir = PathBuf::from(home).join(".glitch-spot").join("snapshots");
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
@@ -33,8 +33,7 @@ pub fn write(base: &Path, built: &BuiltSnapshot) -> io::Result<()> {
     let attempt = || -> io::Result<()> {
         std::fs::write(dir.join(clean_png_filename(id)), &built.clean_bytes)?;
         std::fs::write(dir.join(annotated_png_filename(id)), &built.annotated_bytes)?;
-        let json = serde_json::to_vec_pretty(&built.snapshot)
-            .map_err(io::Error::other)?;
+        let json = serde_json::to_vec_pretty(&built.snapshot).map_err(io::Error::other)?;
         std::fs::write(dir.join(snapshot_json_filename(id)), json)?;
         Ok(())
     };
@@ -124,19 +123,39 @@ mod tests {
             annotations: vec![Annotation {
                 id: "anno_1".to_string(),
                 shape: "rect".to_string(),
-                coords: Coords { x: 0.0, y: 0.0, w: 10.0, h: 10.0 },
+                coords: Coords {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 10.0,
+                    h: 10.0,
+                },
                 note: "fix this".to_string(),
                 label: "01".to_string(),
             }],
             redactions: vec![],
             context: Context {
-                screen: ScreenInfo { width: 1440, height: 900, scale_factor: 2.0, display_index: 0 },
-                os: OsInfo { platform: "macos".to_string(), version: "26.0".to_string() },
+                screen: ScreenInfo {
+                    width: 1440,
+                    height: 900,
+                    scale_factor: 2.0,
+                    display_index: 0,
+                },
+                os: OsInfo {
+                    platform: "macos".to_string(),
+                    version: "26.0".to_string(),
+                },
                 window: None,
             },
             images: Images {
-                clean: dir.join(clean_png_filename(id)).to_string_lossy().into_owned(),
-                annotated: Some(dir.join(annotated_png_filename(id)).to_string_lossy().into_owned()),
+                clean: dir
+                    .join(clean_png_filename(id))
+                    .to_string_lossy()
+                    .into_owned(),
+                annotated: Some(
+                    dir.join(annotated_png_filename(id))
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
             },
             agent_prompt: crate::snapshot::default_agent_prompt(),
         };
@@ -161,10 +180,12 @@ mod tests {
 
         assert!(dir.is_dir(), "{} should be a directory", dir.display());
         assert_eq!(std::fs::read(&clean).unwrap(), b"clean-bytes-marker");
-        assert_eq!(std::fs::read(&annotated).unwrap(), b"annotated-bytes-marker");
+        assert_eq!(
+            std::fs::read(&annotated).unwrap(),
+            b"annotated-bytes-marker"
+        );
 
-        let parsed: Snapshot =
-            serde_json::from_slice(&std::fs::read(&json).unwrap()).unwrap();
+        let parsed: Snapshot = serde_json::from_slice(&std::fs::read(&json).unwrap()).unwrap();
         assert_eq!(parsed.id, "snap_w01");
         assert_eq!(parsed.annotations.len(), 1);
         assert_eq!(parsed.annotations[0].note, "fix this");

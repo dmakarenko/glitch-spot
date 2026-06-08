@@ -193,7 +193,18 @@ fn build_assigns_zero_padded_labels_from_array_position() {
             kind: "annotation".into(),
         })
         .collect();
-    let (built, _) = build(&fake_frame(), "frozen", incoming, "macos", "26.0", temp.path(), None, 2.0, crate::settings::RedactionStyle::Branded).unwrap();
+    let (built, _) = build(
+        &fake_frame(),
+        "frozen",
+        incoming,
+        "macos",
+        "26.0",
+        temp.path(),
+        None,
+        2.0,
+        crate::settings::RedactionStyle::Branded,
+    )
+    .unwrap();
     let labels: Vec<String> = built
         .snapshot
         .annotations
@@ -202,9 +213,7 @@ fn build_assigns_zero_padded_labels_from_array_position() {
         .collect();
     assert_eq!(
         labels,
-        vec![
-            "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11",
-        ]
+        vec!["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11",]
     );
 }
 
@@ -222,7 +231,18 @@ fn format_label_zero_pads_and_expands() {
 fn build_returns_paths_under_base_dir_and_bytes_match_frame() {
     let temp = tempfile::TempDir::new().unwrap();
     let frame = fake_frame();
-    let (built, _) = build(&frame, "live", vec![], "macos", "26.0", temp.path(), None, 2.0, crate::settings::RedactionStyle::Branded).unwrap();
+    let (built, _) = build(
+        &frame,
+        "live",
+        vec![],
+        "macos",
+        "26.0",
+        temp.path(),
+        None,
+        2.0,
+        crate::settings::RedactionStyle::Branded,
+    )
+    .unwrap();
 
     // Embedded paths point under `temp/{id}/...`
     let id = &built.snapshot.id;
@@ -383,7 +403,7 @@ fn build_crop_origin_translates_annotation_coords_into_window_local() {
     };
     let annotations = vec![IncomingAnnotation {
         id: "r1".into(),
-        x: 100.0,   // CSS px on the overlay
+        x: 100.0, // CSS px on the overlay
         y: 50.0,
         w: 80.0,
         h: 40.0,
@@ -429,15 +449,26 @@ fn context_window_round_trips() {
                 scale_factor: 2.0,
                 display_index: 0,
             },
-            os: OsInfo { platform: "macos".into(), version: "26.0".into() },
+            os: OsInfo {
+                platform: "macos".into(),
+                version: "26.0".into(),
+            },
             window: Some(WindowInfo {
                 app_name: "Safari".into(),
                 title: "Reader — example.com".into(),
-                bounds: WindowBounds { x: 120, y: 88, w: 1440, h: 900 },
+                bounds: WindowBounds {
+                    x: 120,
+                    y: 88,
+                    w: 1440,
+                    h: 900,
+                },
                 window_id: 12345,
             }),
         },
-        images: Images { clean: "x".into(), annotated: None },
+        images: Images {
+            clean: "x".into(),
+            annotated: None,
+        },
         agent_prompt: default_agent_prompt(),
     };
     let json = serde_json::to_string(&s).unwrap();
@@ -451,15 +482,32 @@ fn render_as_prompt_contains_annotation_labels_and_notes() {
     s.annotations.push(Annotation {
         id: "anno_2".into(),
         shape: "rect".into(),
-        coords: Coords { x: 10.0, y: 20.0, w: 100.0, h: 50.0 },
+        coords: Coords {
+            x: 10.0,
+            y: 20.0,
+            w: 100.0,
+            h: 50.0,
+        },
         note: "increase contrast here".into(),
         label: "02".into(),
     });
     let prompt = render_as_prompt(&s);
-    assert!(prompt.contains("[01]"), "should include label [01], got:\n{prompt}");
-    assert!(prompt.contains("make this smaller"), "should include first note, got:\n{prompt}");
-    assert!(prompt.contains("[02]"), "should include label [02], got:\n{prompt}");
-    assert!(prompt.contains("increase contrast here"), "should include second note, got:\n{prompt}");
+    assert!(
+        prompt.contains("[01]"),
+        "should include label [01], got:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("make this smaller"),
+        "should include first note, got:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("[02]"),
+        "should include label [02], got:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("increase contrast here"),
+        "should include second note, got:\n{prompt}"
+    );
 }
 
 #[test]
@@ -467,8 +515,14 @@ fn render_as_prompt_contains_coords() {
     let s = sample_snapshot();
     let prompt = render_as_prompt(&s);
     // coords for the sample annotation: x=280 y=620 w=560 h=120
-    assert!(prompt.contains("280"), "should include x coord, got:\n{prompt}");
-    assert!(prompt.contains("620"), "should include y coord, got:\n{prompt}");
+    assert!(
+        prompt.contains("280"),
+        "should include x coord, got:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("620"),
+        "should include y coord, got:\n{prompt}"
+    );
 }
 
 #[test]
@@ -492,19 +546,33 @@ fn render_as_prompt_includes_window_context_when_present() {
     s.context.window = Some(WindowInfo {
         app_name: "Xcode".into(),
         title: "ContentView.swift".into(),
-        bounds: WindowBounds { x: 0, y: 0, w: 1440, h: 900 },
+        bounds: WindowBounds {
+            x: 0,
+            y: 0,
+            w: 1440,
+            h: 900,
+        },
         window_id: 42,
     });
     let prompt = render_as_prompt(&s);
-    assert!(prompt.contains("Xcode"), "should include app name, got:\n{prompt}");
-    assert!(prompt.contains("ContentView.swift"), "should include window title, got:\n{prompt}");
+    assert!(
+        prompt.contains("Xcode"),
+        "should include app name, got:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("ContentView.swift"),
+        "should include window title, got:\n{prompt}"
+    );
 }
 
 #[test]
 fn render_as_prompt_no_window_skips_window_line() {
     let s = sample_snapshot(); // window: None
     let prompt = render_as_prompt(&s);
-    assert!(!prompt.contains("Window:"), "should not have Window: line, got:\n{prompt}");
+    assert!(
+        !prompt.contains("Window:"),
+        "should not have Window: line, got:\n{prompt}"
+    );
 }
 
 #[test]
@@ -523,7 +591,10 @@ fn context_window_omitted_when_none() {
     let mut s = sample_snapshot();
     s.context.window = None;
     let json = serde_json::to_string(&s).unwrap();
-    assert!(!json.contains("\"window\""), "expected `window` key omitted, got: {json}");
+    assert!(
+        !json.contains("\"window\""),
+        "expected `window` key omitted, got: {json}"
+    );
 }
 
 #[test]

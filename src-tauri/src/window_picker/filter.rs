@@ -10,12 +10,7 @@ pub const MIN_DIMENSION_PX: u32 = 80;
 /// Owning-application names that are always excluded regardless of size/layer.
 /// Bundle ID is the primary check (`com.glitchspot.app`); these are belt-and-braces
 /// for system processes that don't surface a stable bundle id.
-const EXCLUDED_APP_NAMES: &[&str] = &[
-    "Dock",
-    "WindowServer",
-    "SystemUIServer",
-    "Control Center",
-];
+const EXCLUDED_APP_NAMES: &[&str] = &["Dock", "WindowServer", "SystemUIServer", "Control Center"];
 
 /// Source-of-truth bundle id for *our own* app — excluded from the pickable set.
 pub const SELF_BUNDLE_ID: &str = "com.glitchspot.app";
@@ -63,7 +58,12 @@ mod tests {
             app_name: "Safari".into(),
             bundle_id: Some("com.apple.Safari".into()),
             title: "Reader".into(),
-            bounds: WindowBounds { x: 0, y: 0, w: 800, h: 600 },
+            bounds: WindowBounds {
+                x: 0,
+                y: 0,
+                w: 800,
+                h: 600,
+            },
             display_index: 0,
             layer: 0,
             is_on_screen: true,
@@ -115,7 +115,12 @@ mod tests {
     #[test]
     fn windows_smaller_than_min_are_excluded() {
         let mut r = raw(1);
-        r.bounds = WindowBounds { x: 0, y: 0, w: 50, h: 50 };
+        r.bounds = WindowBounds {
+            x: 0,
+            y: 0,
+            w: 50,
+            h: 50,
+        };
         let out = filter_standard_windows(&[r]);
         assert!(out.is_empty());
     }

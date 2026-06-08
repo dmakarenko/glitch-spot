@@ -9,7 +9,10 @@ use super::{PickableWindow, WindowBounds};
 ///
 /// Coordinates are physical pixels in global screen space.
 pub fn hit_test(windows: &[PickableWindow], cursor_x: i32, cursor_y: i32) -> Option<u32> {
-    windows.iter().find(|w| contains(&w.bounds, cursor_x, cursor_y)).map(|w| w.window_id)
+    windows
+        .iter()
+        .find(|w| contains(&w.bounds, cursor_x, cursor_y))
+        .map(|w| w.window_id)
 }
 
 fn contains(b: &WindowBounds, x: i32, y: i32) -> bool {
@@ -75,7 +78,9 @@ mod tests {
         use serde::Deserialize;
 
         #[derive(Deserialize)]
-        struct Fixture { cases: Vec<Case> }
+        struct Fixture {
+            cases: Vec<Case>,
+        }
         #[derive(Deserialize)]
         struct Case {
             name: String,
@@ -84,23 +89,33 @@ mod tests {
             expected: Option<u32>,
         }
         #[derive(Deserialize)]
-        struct FixtureWindow { window_id: u32, bounds: WindowBounds }
+        struct FixtureWindow {
+            window_id: u32,
+            bounds: WindowBounds,
+        }
         #[derive(Deserialize)]
-        struct Cursor { x: i32, y: i32 }
+        struct Cursor {
+            x: i32,
+            y: i32,
+        }
 
         let raw = include_str!("../../../tests/fixtures/hit-test-cases.json");
         let fixture: Fixture = serde_json::from_str(raw).expect("fixture parses");
 
         for case in fixture.cases {
-            let ws: Vec<PickableWindow> = case.windows.into_iter().map(|w| PickableWindow {
-                window_id: w.window_id,
-                app_name: String::new(),
-                title: String::new(),
-                bounds: w.bounds,
-                display_index: 0,
-                layer: 0,
-                visible_regions: vec![],
-            }).collect();
+            let ws: Vec<PickableWindow> = case
+                .windows
+                .into_iter()
+                .map(|w| PickableWindow {
+                    window_id: w.window_id,
+                    app_name: String::new(),
+                    title: String::new(),
+                    bounds: w.bounds,
+                    display_index: 0,
+                    layer: 0,
+                    visible_regions: vec![],
+                })
+                .collect();
             let got = hit_test(&ws, case.cursor.x, case.cursor.y);
             assert_eq!(got, case.expected, "case `{}` mismatch", case.name);
         }

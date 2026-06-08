@@ -1,10 +1,16 @@
 // ABOUTME: MCP JSON-RPC HTTP server exposing Glitch Spot snapshot tools.
 // ABOUTME: Runs on localhost:7820; CC registers it as an MCP server.
 
-use std::sync::Arc;
-use axum::{extract::State, http::StatusCode, response::{IntoResponse, Json as AxumJson, Response}, routing::post, Router};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Json as AxumJson, Response},
+    routing::post,
+    Router,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::Arc;
 
 use crate::mcp::store::{SnapshotStore, WaitResult};
 
@@ -36,11 +42,24 @@ pub struct RpcError {
 }
 
 fn ok(id: Option<Value>, result: Value) -> RpcResponse {
-    RpcResponse { jsonrpc: "2.0".into(), id, result: Some(result), error: None }
+    RpcResponse {
+        jsonrpc: "2.0".into(),
+        id,
+        result: Some(result),
+        error: None,
+    }
 }
 
 fn err(id: Option<Value>, code: i32, message: impl Into<String>) -> RpcResponse {
-    RpcResponse { jsonrpc: "2.0".into(), id, result: None, error: Some(RpcError { code, message: message.into() }) }
+    RpcResponse {
+        jsonrpc: "2.0".into(),
+        id,
+        result: None,
+        error: Some(RpcError {
+            code,
+            message: message.into(),
+        }),
+    }
 }
 
 // ---------- Route handler ----------
@@ -61,46 +80,52 @@ async fn handle_mcp(
 async fn dispatch(store: Arc<SnapshotStore>, req: RpcRequest) -> RpcResponse {
     let id = req.id.clone();
     match req.method.as_str() {
-        "initialize" => ok(id, json!({
-            "protocolVersion": "2024-11-05",
-            "serverInfo": { "name": "glitch-spot", "version": "0.4.0" },
-            "capabilities": { "tools": {} }
-        })),
+        "initialize" => ok(
+            id,
+            json!({
+                "protocolVersion": "2024-11-05",
+                "serverInfo": { "name": "glitch-spot", "version": "0.4.0" },
+                "capabilities": { "tools": {} }
+            }),
+        ),
 
-        "tools/list" => ok(id, json!({
-            "tools": [
-                {
-                    "name": "wait_for_snapshot",
-                    "description": "Blocks until the next Glitch Spot annotation is saved. Returns the full snapshot JSON. Server caps each call at 45s; on timeout it returns { pending: true, last_id: \"...\" } — retry immediately passing last_seen_id.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "timeout_seconds": { "type": "integer", "description": "Max seconds to wait per call. Default 600, max 1800." },
-                            "last_seen_id": { "type": "string", "description": "Optional. ID from the previous pending response's last_id field. If the current latest snapshot differs, it is returned immediately without blocking." }
+        "tools/list" => ok(
+            id,
+            json!({
+                "tools": [
+                    {
+                        "name": "wait_for_snapshot",
+                        "description": "Blocks until the next Glitch Spot annotation is saved. Returns the full snapshot JSON. Server caps each call at 45s; on timeout it returns { pending: true, last_id: \"...\" } — retry immediately passing last_seen_id.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "timeout_seconds": { "type": "integer", "description": "Max seconds to wait per call. Default 600, max 1800." },
+                                "last_seen_id": { "type": "string", "description": "Optional. ID from the previous pending response's last_id field. If the current latest snapshot differs, it is returned immediately without blocking." }
+                            }
                         }
+                    },
+                    {
+                        "name": "get_latest_snapshot",
+                        "description": "Returns the most recently saved snapshot, or null if none exist.",
+                        "inputSchema": { "type": "object", "properties": {} }
+                    },
+                    {
+                        "name": "get_snapshot",
+                        "description": "Returns a specific snapshot by ID.",
+                        "inputSchema": {
+                            "type": "object",
+                            "required": ["id"],
+                            "properties": { "id": { "type": "string" } }
+                        }
+                    },
+                    {
+                        "name": "cancel_wait",
+                        "description": "Cancels any in-flight wait_for_snapshot call. No-op if nothing is waiting.",
+                        "inputSchema": { "type": "object", "properties": {} }
                     }
-                },
-                {
-                    "name": "get_latest_snapshot",
-                    "description": "Returns the most recently saved snapshot, or null if none exist.",
-                    "inputSchema": { "type": "object", "properties": {} }
-                },
-                {
-                    "name": "get_snapshot",
-                    "description": "Returns a specific snapshot by ID.",
-                    "inputSchema": {
-                        "type": "object",
-                        "required": ["id"],
-                        "properties": { "id": { "type": "string" } }
-                    }
-                },
-                {
-                    "name": "cancel_wait",
-                    "description": "Cancels any in-flight wait_for_snapshot call. No-op if nothing is waiting.",
-                    "inputSchema": { "type": "object", "properties": {} }
-                }
-            ]
-        })),
+                ]
+            }),
+        ),
 
         "tools/call" => {
             let params = req.params.unwrap_or(json!({}));
@@ -113,7 +138,12 @@ async fn dispatch(store: Arc<SnapshotStore>, req: RpcRequest) -> RpcResponse {
     }
 }
 
-async fn call_tool(store: Arc<SnapshotStore>, id: Option<Value>, name: &str, args: Value) -> RpcResponse {
+async fn call_tool(
+    store: Arc<SnapshotStore>,
+    id: Option<Value>,
+    name: &str,
+    args: Value,
+) -> RpcResponse {
     match name {
         "wait_for_snapshot" => {
             let requested = args["timeout_seconds"].as_u64().unwrap_or(600).min(1800);
@@ -151,7 +181,8 @@ async fn call_tool(store: Arc<SnapshotStore>, id: Option<Value>, name: &str, arg
 
         "get_latest_snapshot" => {
             let snap = store.get_latest();
-            let body = snap.map(|s| serde_json::to_value(&s).unwrap_or(Value::Null))
+            let body = snap
+                .map(|s| serde_json::to_value(&s).unwrap_or(Value::Null))
                 .unwrap_or(Value::Null);
             mcp_text_content(id, body)
         }
@@ -169,7 +200,10 @@ async fn call_tool(store: Arc<SnapshotStore>, id: Option<Value>, name: &str, arg
 
         "cancel_wait" => {
             store.cancel();
-            ok(id, json!({ "content": [{ "type": "text", "text": "cancelled" }] }))
+            ok(
+                id,
+                json!({ "content": [{ "type": "text", "text": "cancelled" }] }),
+            )
         }
 
         _ => err(id, -32602, format!("unknown tool: {name}")),
@@ -178,9 +212,12 @@ async fn call_tool(store: Arc<SnapshotStore>, id: Option<Value>, name: &str, arg
 
 /// Wraps a value as MCP tool content (text type, JSON stringified).
 fn mcp_text_content(id: Option<Value>, value: Value) -> RpcResponse {
-    ok(id, json!({
-        "content": [{ "type": "text", "text": value.to_string() }]
-    }))
+    ok(
+        id,
+        json!({
+            "content": [{ "type": "text", "text": value.to_string() }]
+        }),
+    )
 }
 
 // ---------- Public API ----------
@@ -228,10 +265,10 @@ pub async fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::snapshot::{Context, Images, OsInfo, ScreenInfo, Snapshot};
     use axum::body::Body;
     use axum::http::{Method, Request};
     use tower::ServiceExt; // for `oneshot`
-    use crate::snapshot::{Context, Images, OsInfo, ScreenInfo, Snapshot};
 
     fn fake_snapshot(id: &str) -> Snapshot {
         Snapshot {
@@ -241,11 +278,22 @@ mod tests {
             annotations: vec![],
             redactions: vec![],
             context: Context {
-                screen: ScreenInfo { width: 1440, height: 900, scale_factor: 2.0, display_index: 0 },
-                os: OsInfo { platform: "macos".to_string(), version: "15.0".to_string() },
+                screen: ScreenInfo {
+                    width: 1440,
+                    height: 900,
+                    scale_factor: 2.0,
+                    display_index: 0,
+                },
+                os: OsInfo {
+                    platform: "macos".to_string(),
+                    version: "15.0".to_string(),
+                },
                 window: None,
             },
-            images: Images { clean: "/tmp/c.png".to_string(), annotated: None },
+            images: Images {
+                clean: "/tmp/c.png".to_string(),
+                annotated: None,
+            },
             agent_prompt: crate::snapshot::default_agent_prompt(),
         }
     }
@@ -264,21 +312,31 @@ mod tests {
             .body(Body::from(body.to_string()))
             .unwrap();
         let response = app.oneshot(req).await.unwrap();
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         serde_json::from_slice(&bytes).unwrap()
     }
 
     #[tokio::test]
     async fn initialize_returns_server_info() {
         let (app, _) = make_app();
-        let resp = post_json(app, json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})).await;
+        let resp = post_json(
+            app,
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+        )
+        .await;
         assert_eq!(resp["result"]["serverInfo"]["name"], "glitch-spot");
     }
 
     #[tokio::test]
     async fn tools_list_returns_four_tools() {
         let (app, _) = make_app();
-        let resp = post_json(app, json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}})).await;
+        let resp = post_json(
+            app,
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}),
+        )
+        .await;
         let tools = resp["result"]["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 4);
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
@@ -325,7 +383,11 @@ mod tests {
     #[tokio::test]
     async fn unknown_method_returns_error() {
         let (app, _) = make_app();
-        let resp = post_json(app, json!({"jsonrpc":"2.0","id":1,"method":"nonsense","params":{}})).await;
+        let resp = post_json(
+            app,
+            json!({"jsonrpc":"2.0","id":1,"method":"nonsense","params":{}}),
+        )
+        .await;
         assert!(resp["error"].is_object());
     }
 
@@ -364,11 +426,15 @@ mod tests {
     async fn wait_for_snapshot_returns_pending_when_nothing_arrives() {
         let (app, _) = make_app();
         // timeout_seconds: 0 forces an immediate timeout → should return pending: true
-        let resp = post_json(app, json!({
-            "jsonrpc": "2.0", "id": 8,
-            "method": "tools/call",
-            "params": { "name": "wait_for_snapshot", "arguments": { "timeout_seconds": 0 } }
-        })).await;
+        let resp = post_json(
+            app,
+            json!({
+                "jsonrpc": "2.0", "id": 8,
+                "method": "tools/call",
+                "params": { "name": "wait_for_snapshot", "arguments": { "timeout_seconds": 0 } }
+            }),
+        )
+        .await;
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         let body: Value = serde_json::from_str(text).unwrap();
         assert_eq!(body["pending"], true);
@@ -466,7 +532,10 @@ mod tests {
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
 
-        assert!(bound.load(Ordering::SeqCst), "bound should be set after successful bind");
+        assert!(
+            bound.load(Ordering::SeqCst),
+            "bound should be set after successful bind"
+        );
 
         task.abort();
     }
@@ -490,18 +559,26 @@ mod tests {
 
         // Brief pause so serve has attempted its first bind (and failed).
         sleep(Duration::from_millis(100)).await;
-        assert!(!bound.load(Ordering::SeqCst), "should still be false while port blocked");
+        assert!(
+            !bound.load(Ordering::SeqCst),
+            "should still be false while port blocked"
+        );
 
         // Release the port so the next retry succeeds.
         drop(blocker);
 
         // Poll for bound to flip (retry delay ≤ 1s, so 3s total is generous).
         for _ in 0..30 {
-            if bound.load(Ordering::SeqCst) { break; }
+            if bound.load(Ordering::SeqCst) {
+                break;
+            }
             sleep(Duration::from_millis(100)).await;
         }
 
-        assert!(bound.load(Ordering::SeqCst), "bound should flip once port is free");
+        assert!(
+            bound.load(Ordering::SeqCst),
+            "bound should flip once port is free"
+        );
         task.abort();
     }
 }

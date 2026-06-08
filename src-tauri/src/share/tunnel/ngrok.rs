@@ -62,7 +62,10 @@ impl TunnelProvider for Ngrok {
     async fn spawn(&self, local_port: u16) -> Result<(Child, UrlFuture), ProviderError> {
         let bin = crate::share::tunnel::resolve::resolve_executable_async("ngrok")
             .await
-            .ok_or(ProviderError::BinaryNotFound { provider: "ngrok", binary: "ngrok" })?;
+            .ok_or(ProviderError::BinaryNotFound {
+                provider: "ngrok",
+                binary: "ngrok",
+            })?;
         let mut child = Command::new(bin)
             .arg("http")
             .arg(local_port.to_string())
@@ -74,9 +77,15 @@ impl TunnelProvider for Ngrok {
             .spawn()
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
-                    ProviderError::BinaryNotFound { provider: "ngrok", binary: "ngrok" }
+                    ProviderError::BinaryNotFound {
+                        provider: "ngrok",
+                        binary: "ngrok",
+                    }
                 } else {
-                    ProviderError::Spawn { provider: "ngrok", reason: e.to_string() }
+                    ProviderError::Spawn {
+                        provider: "ngrok",
+                        reason: e.to_string(),
+                    }
                 }
             })?;
 
@@ -109,7 +118,9 @@ impl TunnelProvider for Ngrok {
         Ok((child, url_future))
     }
 
-    fn kind(&self) -> ProviderKind { ProviderKind::Ngrok }
+    fn kind(&self) -> ProviderKind {
+        ProviderKind::Ngrok
+    }
 }
 
 #[cfg(test)]
@@ -135,7 +146,10 @@ mod tests {
     #[test]
     fn returns_none_when_no_https_tunnel() {
         let body = r#"{ "tunnels": [{ "proto": "http", "public_url": "http://abc.ngrok.io" }] }"#;
-        assert!(parse_public_url(body).is_none(), "must require https tunnel");
+        assert!(
+            parse_public_url(body).is_none(),
+            "must require https tunnel"
+        );
     }
 
     #[test]

@@ -124,13 +124,25 @@ mod tests {
         let sub = b(25, 25, 50, 50);
         let got = subtract_rect(base, sub);
         // Top strip: y=0..25 spans full width
-        assert!(got.contains(&b(0, 0, 100, 25)), "missing top strip in {got:?}");
+        assert!(
+            got.contains(&b(0, 0, 100, 25)),
+            "missing top strip in {got:?}"
+        );
         // Bottom strip: y=75..100 spans full width
-        assert!(got.contains(&b(0, 75, 100, 25)), "missing bottom strip in {got:?}");
+        assert!(
+            got.contains(&b(0, 75, 100, 25)),
+            "missing bottom strip in {got:?}"
+        );
         // Left strip: within the intersection's y-band (25..75)
-        assert!(got.contains(&b(0, 25, 25, 50)), "missing left strip in {got:?}");
+        assert!(
+            got.contains(&b(0, 25, 25, 50)),
+            "missing left strip in {got:?}"
+        );
         // Right strip: within the intersection's y-band (25..75)
-        assert!(got.contains(&b(75, 25, 25, 50)), "missing right strip in {got:?}");
+        assert!(
+            got.contains(&b(75, 25, 25, 50)),
+            "missing right strip in {got:?}"
+        );
         assert_eq!(got.len(), 4);
     }
 
@@ -142,8 +154,14 @@ mod tests {
         let got = subtract_rect(base, sub);
         // intersection = 50,50..80,80 → bottom strip y=80..150 across full width,
         // right strip x=80..150 within y=50..80
-        assert!(got.contains(&b(50, 80, 100, 70)), "missing bottom strip in {got:?}");
-        assert!(got.contains(&b(80, 50, 70, 30)), "missing right strip in {got:?}");
+        assert!(
+            got.contains(&b(50, 80, 100, 70)),
+            "missing bottom strip in {got:?}"
+        );
+        assert!(
+            got.contains(&b(80, 50, 70, 30)),
+            "missing right strip in {got:?}"
+        );
         assert_eq!(got.len(), 2);
     }
 
@@ -162,8 +180,14 @@ mod tests {
         let base = b(0, 0, 100, 100);
         let sub = b(-50, 30, 300, 40);
         let got = subtract_rect(base, sub);
-        assert!(got.contains(&b(0, 0, 100, 30)), "missing top strip in {got:?}");
-        assert!(got.contains(&b(0, 70, 100, 30)), "missing bottom strip in {got:?}");
+        assert!(
+            got.contains(&b(0, 0, 100, 30)),
+            "missing top strip in {got:?}"
+        );
+        assert!(
+            got.contains(&b(0, 70, 100, 30)),
+            "missing bottom strip in {got:?}"
+        );
         assert_eq!(got.len(), 2);
     }
 
@@ -228,7 +252,11 @@ mod tests {
         // Bottom: lose intersections with top (25..100, 50..100) and middle
         // (50..150, 50..100). Union of the two covers x=25..150 of y=50..100,
         // leaving the right strip and the part below y=100.
-        assert!(regions[2].iter().any(|r| r.y >= 100), "missing pieces below middle in {:?}", regions[2]);
+        assert!(
+            regions[2].iter().any(|r| r.y >= 100),
+            "missing pieces below middle in {:?}",
+            regions[2]
+        );
     }
 
     #[test]

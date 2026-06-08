@@ -25,7 +25,10 @@ impl TunnelProvider for Cloudflared {
         let url = format!("http://127.0.0.1:{local_port}");
         let bin = crate::share::tunnel::resolve::resolve_executable_async("cloudflared")
             .await
-            .ok_or(ProviderError::BinaryNotFound { provider: "cloudflared", binary: "cloudflared" })?;
+            .ok_or(ProviderError::BinaryNotFound {
+                provider: "cloudflared",
+                binary: "cloudflared",
+            })?;
         let mut child = Command::new(bin)
             .arg("tunnel")
             .arg("--url")
@@ -36,9 +39,15 @@ impl TunnelProvider for Cloudflared {
             .spawn()
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
-                    ProviderError::BinaryNotFound { provider: "cloudflared", binary: "cloudflared" }
+                    ProviderError::BinaryNotFound {
+                        provider: "cloudflared",
+                        binary: "cloudflared",
+                    }
                 } else {
-                    ProviderError::Spawn { provider: "cloudflared", reason: e.to_string() }
+                    ProviderError::Spawn {
+                        provider: "cloudflared",
+                        reason: e.to_string(),
+                    }
                 }
             })?;
 
@@ -72,7 +81,9 @@ impl TunnelProvider for Cloudflared {
         Ok((child, url_future))
     }
 
-    fn kind(&self) -> ProviderKind { ProviderKind::Cloudflared }
+    fn kind(&self) -> ProviderKind {
+        ProviderKind::Cloudflared
+    }
 }
 
 #[cfg(test)]

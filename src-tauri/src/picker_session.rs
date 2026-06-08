@@ -33,7 +33,9 @@ pub struct PickerStateHolder {
 
 impl PickerStateHolder {
     pub fn new() -> Self {
-        Self { inner: Mutex::new(RunMode::Idle) }
+        Self {
+            inner: Mutex::new(RunMode::Idle),
+        }
     }
 
     pub fn current(&self) -> RunMode {
@@ -91,16 +93,29 @@ mod tests {
         PickerSession {
             windows: vec![],
             displays: vec![DisplayBounds {
-                display_index: 0, x: 0, y: 0, w: 2560, h: 1414, scale_factor: 2.0,
+                display_index: 0,
+                x: 0,
+                y: 0,
+                w: 2560,
+                h: 1414,
+                scale_factor: 2.0,
             }],
         }
     }
 
     fn pw() -> PickableWindow {
         PickableWindow {
-            window_id: 7, app_name: "Safari".into(), title: "x".into(),
-            bounds: WindowBounds { x: 0, y: 0, w: 1, h: 1 },
-            display_index: 0, layer: 0,
+            window_id: 7,
+            app_name: "Safari".into(),
+            title: "x".into(),
+            bounds: WindowBounds {
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+            },
+            display_index: 0,
+            layer: 0,
             visible_regions: vec![],
         }
     }
@@ -109,7 +124,14 @@ mod tests {
         AnnotatingSession {
             window_id: 7,
             window: pw(),
-            display: DisplayBounds { display_index: 0, x: 0, y: 0, w: 1, h: 1, scale_factor: 1.0 },
+            display: DisplayBounds {
+                display_index: 0,
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+                scale_factor: 1.0,
+            },
         }
     }
 

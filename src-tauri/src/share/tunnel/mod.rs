@@ -43,7 +43,10 @@ impl TunnelManager {
     pub fn new() -> Self {
         let (tx, _rx) = watch::channel(TunnelState::Idle);
         TunnelManager {
-            inner: Mutex::new(Inner { state: TunnelState::Idle, monitor: None }),
+            inner: Mutex::new(Inner {
+                state: TunnelState::Idle,
+                monitor: None,
+            }),
             tx,
         }
     }
@@ -63,7 +66,8 @@ impl TunnelManager {
         provider: Arc<dyn TunnelProvider>,
         local_port: u16,
     ) -> Result<String, ShareError> {
-        self.start_tunnel_with_deadline(provider, local_port, DEFAULT_URL_DEADLINE).await
+        self.start_tunnel_with_deadline(provider, local_port, DEFAULT_URL_DEADLINE)
+            .await
     }
 
     pub async fn start_tunnel_with_deadline(
@@ -87,7 +91,10 @@ impl TunnelManager {
             Ok(pair) => pair,
             Err(e) => {
                 let reason = e.to_string();
-                self.set_state(TunnelState::Error { reason: reason.clone() }).await;
+                self.set_state(TunnelState::Error {
+                    reason: reason.clone(),
+                })
+                .await;
                 return Err(ShareError::TunnelStartFailed(reason));
             }
         };
@@ -96,7 +103,10 @@ impl TunnelManager {
             Ok(Ok(u)) => u,
             Ok(Err(reason)) => {
                 drop(child); // kill_on_drop → SIGKILL
-                self.set_state(TunnelState::Error { reason: reason.clone() }).await;
+                self.set_state(TunnelState::Error {
+                    reason: reason.clone(),
+                })
+                .await;
                 return Err(ShareError::TunnelStartFailed(reason));
             }
             Err(_elapsed) => {
@@ -111,7 +121,10 @@ impl TunnelManager {
                     pretty_deadline,
                 );
                 drop(child);
-                self.set_state(TunnelState::Error { reason: reason.clone() }).await;
+                self.set_state(TunnelState::Error {
+                    reason: reason.clone(),
+                })
+                .await;
                 return Err(ShareError::TunnelStartFailed(reason));
             }
         };
@@ -127,9 +140,11 @@ impl TunnelManager {
                 let inner = self_clone.inner.lock().await;
                 if matches!(inner.state, TunnelState::Live { .. }) {
                     drop(inner);
-                    self_clone.set_state(TunnelState::Error {
-                        reason: "tunnel disconnected".to_string(),
-                    }).await;
+                    self_clone
+                        .set_state(TunnelState::Error {
+                            reason: "tunnel disconnected".to_string(),
+                        })
+                        .await;
                 }
             });
 
@@ -178,15 +193,17 @@ impl TunnelManager {
 }
 
 impl Default for TunnelManager {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-pub mod provider;
 pub mod cloudflared;
-pub mod ngrok;
-pub mod tailscale;
-pub mod resolve;
 pub mod log;
+pub mod ngrok;
+pub mod provider;
+pub mod resolve;
+pub mod tailscale;
 
 // `mock` is used by both the inline unit tests in this module AND by the
 // integration test in `tests/share_e2e.rs`. Integration tests cannot see
@@ -208,7 +225,9 @@ mod tests {
     #[tokio::test]
     async fn share_latest_transitions_to_live() {
         let mgr = Arc::new(TunnelManager::new());
-        let provider = Arc::new(MockTunnelProvider::with_url("https://abc.trycloudflare.com"));
+        let provider = Arc::new(MockTunnelProvider::with_url(
+            "https://abc.trycloudflare.com",
+        ));
         let url = mgr.clone().start_tunnel(provider, 7821).await.unwrap();
         assert_eq!(url, "https://abc.trycloudflare.com");
         assert!(matches!(mgr.current_state(), TunnelState::Live { .. }));
@@ -217,8 +236,14 @@ mod tests {
     #[tokio::test]
     async fn second_start_while_live_returns_same_url() {
         let mgr = Arc::new(TunnelManager::new());
-        let provider = Arc::new(MockTunnelProvider::with_url("https://abc.trycloudflare.com"));
-        let url1 = mgr.clone().start_tunnel(provider.clone(), 7821).await.unwrap();
+        let provider = Arc::new(MockTunnelProvider::with_url(
+            "https://abc.trycloudflare.com",
+        ));
+        let url1 = mgr
+            .clone()
+            .start_tunnel(provider.clone(), 7821)
+            .await
+            .unwrap();
         let url2 = mgr.clone().start_tunnel(provider, 7821).await.unwrap();
         assert_eq!(url1, url2);
     }
@@ -235,7 +260,9 @@ mod tests {
     #[tokio::test]
     async fn shutdown_returns_to_idle() {
         let mgr = Arc::new(TunnelManager::new());
-        let provider = Arc::new(MockTunnelProvider::with_url("https://abc.trycloudflare.com"));
+        let provider = Arc::new(MockTunnelProvider::with_url(
+            "https://abc.trycloudflare.com",
+        ));
         mgr.clone().start_tunnel(provider, 7821).await.unwrap();
         mgr.shutdown().await;
         assert!(matches!(mgr.current_state(), TunnelState::Idle));
@@ -275,7 +302,10 @@ mod tests {
             outcome,
             child_persists: true,
         });
-        let result = mgr.clone().start_tunnel_with_deadline(provider, 7821, std::time::Duration::from_millis(50)).await;
+        let result = mgr
+            .clone()
+            .start_tunnel_with_deadline(provider, 7821, std::time::Duration::from_millis(50))
+            .await;
         assert!(result.is_err());
         assert!(matches!(mgr.current_state(), TunnelState::Error { .. }));
     }
@@ -283,7 +313,10 @@ mod tests {
     #[tokio::test]
     async fn child_exit_transitions_to_error() {
         let mgr = Arc::new(TunnelManager::new());
-        let provider = Arc::new(MockTunnelProvider::with_short_lived_url("https://x.trycloudflare.com", 100));
+        let provider = Arc::new(MockTunnelProvider::with_short_lived_url(
+            "https://x.trycloudflare.com",
+            100,
+        ));
         mgr.clone().start_tunnel(provider, 7821).await.unwrap();
         assert!(matches!(mgr.current_state(), TunnelState::Live { .. }));
 
@@ -291,13 +324,18 @@ mod tests {
         // Poll up to 2s.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while std::time::Instant::now() < deadline {
-            if matches!(mgr.current_state(), TunnelState::Error { .. }) { break; }
+            if matches!(mgr.current_state(), TunnelState::Error { .. }) {
+                break;
+            }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
 
         let final_state = mgr.current_state();
         if !matches!(final_state, TunnelState::Error { .. }) {
-            panic!("expected Error state after child exit, got {:?}", final_state);
+            panic!(
+                "expected Error state after child exit, got {:?}",
+                final_state
+            );
         }
     }
 

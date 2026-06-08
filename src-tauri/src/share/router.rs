@@ -25,7 +25,9 @@ struct ShareState {
 }
 
 pub fn build_share_router(base: PathBuf) -> Router {
-    let state = ShareState { base: Arc::new(base) };
+    let state = ShareState {
+        base: Arc::new(base),
+    };
     Router::new()
         .route("/healthz", get(healthz))
         .route("/share/:id/:token/", get(landing))
@@ -59,10 +61,7 @@ fn authorize(state: &ShareState, id: &str, provided_token: &str) -> Option<PathB
 
 fn is_safe_id(id: &str) -> bool {
     // Reject empty, path separators, and dot-sequences that could traverse directories.
-    !id.is_empty()
-        && !id.contains('/')
-        && !id.contains('\\')
-        && !id.contains("..")
+    !id.is_empty() && !id.contains('/') && !id.contains('\\') && !id.contains("..")
 }
 
 async fn landing(
@@ -92,10 +91,7 @@ async fn snapshot_json(
         return StatusCode::NOT_FOUND.into_response();
     };
     match std::fs::read(dir.join(crate::snapshot::snapshot_json_filename(&id))) {
-        Ok(bytes) => (
-            [(header::CONTENT_TYPE, "application/json")],
-            bytes,
-        ).into_response(),
+        Ok(bytes) => ([(header::CONTENT_TYPE, "application/json")], bytes).into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -105,11 +101,7 @@ async fn serve_png(state: ShareState, id: &str, tok: &str, filename: String) -> 
         return StatusCode::NOT_FOUND.into_response();
     };
     match std::fs::read(dir.join(&filename)) {
-        Ok(bytes) => (
-            [(header::CONTENT_TYPE, "image/png")],
-            Body::from(bytes),
-        )
-            .into_response(),
+        Ok(bytes) => ([(header::CONTENT_TYPE, "image/png")], Body::from(bytes)).into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -178,19 +170,42 @@ mod tests {
             },
             "images": { "clean": "x", "annotated": "y" }
         });
-        std::fs::write(dir.join(crate::snapshot::snapshot_json_filename(id)), serde_json::to_vec_pretty(&snapshot_json).unwrap()).unwrap();
-        std::fs::write(dir.join(crate::snapshot::clean_png_filename(id)), b"clean-bytes").unwrap();
-        std::fs::write(dir.join(crate::snapshot::annotated_png_filename(id)), b"annotated-bytes").unwrap();
+        std::fs::write(
+            dir.join(crate::snapshot::snapshot_json_filename(id)),
+            serde_json::to_vec_pretty(&snapshot_json).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(crate::snapshot::clean_png_filename(id)),
+            b"clean-bytes",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(crate::snapshot::annotated_png_filename(id)),
+            b"annotated-bytes",
+        )
+        .unwrap();
         crate::share::token::write_for(&dir, token).unwrap();
         dir
     }
 
     async fn get(app: axum::Router, uri: &str) -> (StatusCode, Vec<u8>, Option<String>) {
-        let req = Request::builder().method(Method::GET).uri(uri).body(Body::empty()).unwrap();
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri(uri)
+            .body(Body::empty())
+            .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         let status = resp.status();
-        let ct = resp.headers().get("content-type").and_then(|h| h.to_str().ok()).map(|s| s.to_string());
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec();
+        let ct = resp
+            .headers()
+            .get("content-type")
+            .and_then(|h| h.to_str().ok())
+            .map(|s| s.to_string());
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec();
         (status, bytes, ct)
     }
 
@@ -263,7 +278,11 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let dir = temp.path().join("snap_eee");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(crate::snapshot::snapshot_json_filename("snap_eee")), b"{}").unwrap();
+        std::fs::write(
+            dir.join(crate::snapshot::snapshot_json_filename("snap_eee")),
+            b"{}",
+        )
+        .unwrap();
         let app = build_share_router(temp.path().to_path_buf());
         let (status, _, _) = get(app, "/share/snap_eee/whatever/snapshot.json").await;
         assert_eq!(status, StatusCode::NOT_FOUND);
@@ -307,7 +326,10 @@ mod tests {
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
 
-        assert!(bound.load(Ordering::SeqCst), "bound should be set after successful bind");
+        assert!(
+            bound.load(Ordering::SeqCst),
+            "bound should be set after successful bind"
+        );
         task.abort();
     }
 
@@ -315,8 +337,16 @@ mod tests {
     async fn router_has_no_mcp_route() {
         let temp = tempfile::TempDir::new().unwrap();
         let app = build_share_router(temp.path().to_path_buf());
-        let req = Request::builder().method(Method::POST).uri("/mcp").body(Body::from("{}")).unwrap();
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/mcp")
+            .body(Body::from("{}"))
+            .unwrap();
         let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "share router must not expose /mcp");
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "share router must not expose /mcp"
+        );
     }
 }

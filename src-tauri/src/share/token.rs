@@ -74,7 +74,8 @@ mod tests {
         let t = generate();
         assert_eq!(t.len(), 22, "expected 22 chars, got {}", t.len());
         assert!(
-            t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            t.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
             "token contains non-base64url char: {t}"
         );
     }
@@ -83,7 +84,10 @@ mod tests {
     fn generate_returns_different_values() {
         let a = generate();
         let b = generate();
-        assert_ne!(a, b, "two consecutive generate() calls produced the same token");
+        assert_ne!(
+            a, b,
+            "two consecutive generate() calls produced the same token"
+        );
     }
 
     #[test]
@@ -116,7 +120,10 @@ mod tests {
         write_for(dir, &t).unwrap();
         let read = read_for(dir).unwrap().expect("token file should exist");
         assert_eq!(read, t);
-        assert!(verify_ct(&read, &t), "round-tripped token must verify_ct against original");
+        assert!(
+            verify_ct(&read, &t),
+            "round-tripped token must verify_ct against original"
+        );
     }
 
     #[test]

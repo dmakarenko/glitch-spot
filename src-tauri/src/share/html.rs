@@ -66,16 +66,49 @@ mod tests {
             created_at: "2026-05-26T12:00:00Z".to_string(),
             mode: "frozen".to_string(),
             annotations: vec![
-                Annotation { id: "a1".into(), shape: "rect".into(), coords: Coords { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }, note: "the close button is misaligned".into(), label: "01".into() },
-                Annotation { id: "a2".into(), shape: "rect".into(), coords: Coords { x: 20.0, y: 0.0, w: 10.0, h: 10.0 }, note: "this label has a typo".into(), label: "02".into() },
+                Annotation {
+                    id: "a1".into(),
+                    shape: "rect".into(),
+                    coords: Coords {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 10.0,
+                        h: 10.0,
+                    },
+                    note: "the close button is misaligned".into(),
+                    label: "01".into(),
+                },
+                Annotation {
+                    id: "a2".into(),
+                    shape: "rect".into(),
+                    coords: Coords {
+                        x: 20.0,
+                        y: 0.0,
+                        w: 10.0,
+                        h: 10.0,
+                    },
+                    note: "this label has a typo".into(),
+                    label: "02".into(),
+                },
             ],
             redactions: vec![],
             context: Context {
-                screen: ScreenInfo { width: 1440, height: 900, scale_factor: 2.0, display_index: 0 },
-                os: OsInfo { platform: "macos".into(), version: "26.0".into() },
+                screen: ScreenInfo {
+                    width: 1440,
+                    height: 900,
+                    scale_factor: 2.0,
+                    display_index: 0,
+                },
+                os: OsInfo {
+                    platform: "macos".into(),
+                    version: "26.0".into(),
+                },
                 window: None,
             },
-            images: Images { clean: "/tmp/c.png".into(), annotated: Some("/tmp/a.png".into()) },
+            images: Images {
+                clean: "/tmp/c.png".into(),
+                annotated: Some("/tmp/a.png".into()),
+            },
             agent_prompt: crate::snapshot::default_agent_prompt(),
         }
     }
@@ -83,21 +116,31 @@ mod tests {
     #[test]
     fn includes_annotated_img_tag() {
         let html = render_share_page(&fake_snapshot());
-        assert!(html.contains(r#"<img src="annotated.png""#), "html missing annotated img tag: {html}");
+        assert!(
+            html.contains(r#"<img src="annotated.png""#),
+            "html missing annotated img tag: {html}"
+        );
     }
 
     #[test]
     fn lists_notes_in_order() {
         let html = render_share_page(&fake_snapshot());
-        let pos_first = html.find("the close button is misaligned").expect("first note missing");
-        let pos_second = html.find("this label has a typo").expect("second note missing");
+        let pos_first = html
+            .find("the close button is misaligned")
+            .expect("first note missing");
+        let pos_second = html
+            .find("this label has a typo")
+            .expect("second note missing");
         assert!(pos_first < pos_second, "notes rendered out of order");
     }
 
     #[test]
     fn includes_raw_json_link() {
         let html = render_share_page(&fake_snapshot());
-        assert!(html.contains(r#"<a href="snapshot.json""#), "html missing raw JSON link");
+        assert!(
+            html.contains(r#"<a href="snapshot.json""#),
+            "html missing raw JSON link"
+        );
     }
 
     #[test]
@@ -105,13 +148,22 @@ mod tests {
         let mut snap = fake_snapshot();
         snap.annotations[0].note = "<script>alert(1)</script>".into();
         let html = render_share_page(&snap);
-        assert!(!html.contains("<script>"), "raw <script> made it into rendered HTML");
-        assert!(html.contains("&lt;script&gt;"), "expected escaped &lt;script&gt;: {html}");
+        assert!(
+            !html.contains("<script>"),
+            "raw <script> made it into rendered HTML"
+        );
+        assert!(
+            html.contains("&lt;script&gt;"),
+            "expected escaped &lt;script&gt;: {html}"
+        );
     }
 
     #[test]
     fn includes_snapshot_id() {
         let html = render_share_page(&fake_snapshot());
-        assert!(html.contains("snap_x01"), "snapshot id not in page title/heading");
+        assert!(
+            html.contains("snap_x01"),
+            "snapshot id not in page title/heading"
+        );
     }
 }

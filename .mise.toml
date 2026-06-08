@@ -1,0 +1,4 @@
+# ABOUTME: mise tool versions for this repo.
+# ABOUTME: Pins hk, the git hooks manager that reads hk.pkl.
+[tools]
+hk = "1.46.0"

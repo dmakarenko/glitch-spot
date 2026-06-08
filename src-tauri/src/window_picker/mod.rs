@@ -3,9 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod coords;
 pub mod filter;
 pub mod hit_test;
-pub mod coords;
 pub mod visible_regions;
 pub mod z_order;
 
@@ -51,12 +51,27 @@ mod tests {
             window_id: 42,
             app_name: "Safari".into(),
             title: "Reader".into(),
-            bounds: WindowBounds { x: 10, y: 20, w: 800, h: 600 },
+            bounds: WindowBounds {
+                x: 10,
+                y: 20,
+                w: 800,
+                h: 600,
+            },
             display_index: 1,
             layer: 0,
             visible_regions: vec![
-                WindowBounds { x: 10, y: 20, w: 200, h: 600 },
-                WindowBounds { x: 400, y: 20, w: 410, h: 600 },
+                WindowBounds {
+                    x: 10,
+                    y: 20,
+                    w: 200,
+                    h: 600,
+                },
+                WindowBounds {
+                    x: 400,
+                    y: 20,
+                    w: 410,
+                    h: 600,
+                },
             ],
         };
         let json = serde_json::to_string(&w).unwrap();

@@ -45,7 +45,18 @@ fn build_then_persist_writes_files_at_paths_in_snapshot_images() {
         kind: "annotation".into(),
     }];
 
-    let (built, _) = build(&frame, "frozen", annotations, "macos", "26.0", temp.path(), None, 2.0, glitch_spot::settings::RedactionStyle::Branded).unwrap();
+    let (built, _) = build(
+        &frame,
+        "frozen",
+        annotations,
+        "macos",
+        "26.0",
+        temp.path(),
+        None,
+        2.0,
+        glitch_spot::settings::RedactionStyle::Branded,
+    )
+    .unwrap();
     persist::write(temp.path(), &built).unwrap();
 
     // The paths embedded in the snapshot must actually point to the files on disk.
@@ -64,7 +75,10 @@ fn build_then_persist_writes_files_at_paths_in_snapshot_images() {
 
     // Bytes round-trip.
     let clean_bytes = std::fs::read(clean).unwrap();
-    assert_eq!(clean_bytes, frame.png, "clean.png on disk must equal frame.png");
+    assert_eq!(
+        clean_bytes, frame.png,
+        "clean.png on disk must equal frame.png"
+    );
     let annotated_bytes = std::fs::read(annotated).unwrap();
     assert!(
         annotated_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]),
@@ -85,7 +99,18 @@ fn build_then_persist_writes_files_at_paths_in_snapshot_images() {
 fn cleanup_removes_a_persisted_snapshot_dir_after_24h() {
     let temp = TempDir::new().unwrap();
     let frame = fake_frame();
-    let (built, _) = build(&frame, "frozen", vec![], "macos", "26.0", temp.path(), None, 2.0, glitch_spot::settings::RedactionStyle::Branded).unwrap();
+    let (built, _) = build(
+        &frame,
+        "frozen",
+        vec![],
+        "macos",
+        "26.0",
+        temp.path(),
+        None,
+        2.0,
+        glitch_spot::settings::RedactionStyle::Branded,
+    )
+    .unwrap();
     persist::write(temp.path(), &built).unwrap();
 
     let snap_dir = temp.path().join(&built.snapshot.id);

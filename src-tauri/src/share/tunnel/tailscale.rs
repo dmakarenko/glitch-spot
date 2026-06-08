@@ -60,7 +60,10 @@ impl TunnelProvider for Tailscale {
         // managed by the tailscaled daemon already running on the system.
         let bin = crate::share::tunnel::resolve::resolve_executable_async("tailscale")
             .await
-            .ok_or(ProviderError::BinaryNotFound { provider: "tailscale", binary: "tailscale" })?;
+            .ok_or(ProviderError::BinaryNotFound {
+                provider: "tailscale",
+                binary: "tailscale",
+            })?;
         let mut child = Command::new(bin)
             .arg("funnel")
             .arg("--bg")
@@ -71,9 +74,15 @@ impl TunnelProvider for Tailscale {
             .spawn()
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
-                    ProviderError::BinaryNotFound { provider: "tailscale", binary: "tailscale" }
+                    ProviderError::BinaryNotFound {
+                        provider: "tailscale",
+                        binary: "tailscale",
+                    }
                 } else {
-                    ProviderError::Spawn { provider: "tailscale", reason: e.to_string() }
+                    ProviderError::Spawn {
+                        provider: "tailscale",
+                        reason: e.to_string(),
+                    }
                 }
             })?;
 
@@ -101,21 +110,24 @@ impl TunnelProvider for Tailscale {
             // Allow tailscaled a couple of seconds to register the funnel.
             tokio::time::sleep(Duration::from_millis(500)).await;
             let status = fetch_tailscale_status().await?;
-            parse_funnel_url(&status)
-                .ok_or_else(|| "tailscale status: no Self.DNSName".to_string())
+            parse_funnel_url(&status).ok_or_else(|| "tailscale status: no Self.DNSName".to_string())
         }
         .boxed();
 
         Ok((child, url_future))
     }
 
-    fn kind(&self) -> ProviderKind { ProviderKind::Tailscale }
+    fn kind(&self) -> ProviderKind {
+        ProviderKind::Tailscale
+    }
 
     /// `tailscale funnel --bg` is a control-plane invocation that exits
     /// immediately after handing off to the tailscaled daemon. The child
     /// exit is not a disconnect signal — the tunnel itself persists in the
     /// daemon.
-    fn child_persists_with_tunnel(&self) -> bool { false }
+    fn child_persists_with_tunnel(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

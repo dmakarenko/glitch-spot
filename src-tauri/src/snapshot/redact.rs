@@ -42,8 +42,15 @@ fn clamp(region: Region, img: &RgbaImage) -> Option<(u32, u32, u32, u32)> {
 /// Cover `region` of `img` in place using `style`. Destructive — the original
 /// pixels under the region are overwritten and cannot be recovered (except that
 /// `Pixelated` averages them; see [`RedactionStyle`] docs).
-pub fn apply_redaction(img: &mut RgbaImage, region: Region, style: RedactionStyle, scale_factor: f32) {
-    let Some(bounds) = clamp(region, img) else { return };
+pub fn apply_redaction(
+    img: &mut RgbaImage,
+    region: Region,
+    style: RedactionStyle,
+    scale_factor: f32,
+) {
+    let Some(bounds) = clamp(region, img) else {
+        return;
+    };
     match style {
         RedactionStyle::Solid => solid_fill(img, bounds),
         RedactionStyle::Pixelated => pixelate(img, bounds, scale_factor),
@@ -82,12 +89,7 @@ fn pixelate(img: &mut RgbaImage, (x0, y0, x1, y1): (u32, u32, u32, u32), scale_f
                     n += 1;
                 }
             }
-            let avg = Rgba([
-                (r / n) as u8,
-                (g / n) as u8,
-                (b / n) as u8,
-                (a / n) as u8,
-            ]);
+            let avg = Rgba([(r / n) as u8, (g / n) as u8, (b / n) as u8, (a / n) as u8]);
             for y in by..by_end {
                 for x in bx..bx_end {
                     img.put_pixel(x, y, avg);
@@ -140,9 +142,27 @@ mod tests {
     #[test]
     fn solid_fill_covers_region_and_leaves_outside_untouched() {
         let mut img = solid_red(20, 20);
-        apply_redaction(&mut img, Region { x: 5, y: 5, w: 8, h: 8 }, RedactionStyle::Solid, 1.0);
-        assert_ne!(img.get_pixel(8, 8), &Rgba([255, 0, 0, 255]), "region must be covered");
-        assert_eq!(img.get_pixel(0, 0), &Rgba([255, 0, 0, 255]), "outside must be untouched");
+        apply_redaction(
+            &mut img,
+            Region {
+                x: 5,
+                y: 5,
+                w: 8,
+                h: 8,
+            },
+            RedactionStyle::Solid,
+            1.0,
+        );
+        assert_ne!(
+            img.get_pixel(8, 8),
+            &Rgba([255, 0, 0, 255]),
+            "region must be covered"
+        );
+        assert_eq!(
+            img.get_pixel(0, 0),
+            &Rgba([255, 0, 0, 255]),
+            "outside must be untouched"
+        );
         assert_eq!(img.get_pixel(19, 19), &Rgba([255, 0, 0, 255]));
     }
 
@@ -151,7 +171,17 @@ mod tests {
         // The solid cover must read as a deliberate dark-grey block, not a pure
         // black hole, and lean warm (R > B).
         let mut img = solid_red(10, 10);
-        apply_redaction(&mut img, Region { x: 0, y: 0, w: 10, h: 10 }, RedactionStyle::Solid, 1.0);
+        apply_redaction(
+            &mut img,
+            Region {
+                x: 0,
+                y: 0,
+                w: 10,
+                h: 10,
+            },
+            RedactionStyle::Solid,
+            1.0,
+        );
         let p = img.get_pixel(5, 5).0;
         assert_ne!([p[0], p[1], p[2]], [0, 0, 0], "must not be pure black");
         assert!(p[0] < 80 && p[1] < 80 && p[2] < 80, "must stay dark: {p:?}");
@@ -164,27 +194,58 @@ mod tests {
         // Left half red, right half blue. Redact only an inner rect that straddles
         // the colour boundary so the block average differs from both source colours.
         let mut img = RgbaImage::from_fn(20, 20, |x, _| {
-            if x < 10 { Rgba([255, 0, 0, 255]) } else { Rgba([0, 0, 255, 255]) }
+            if x < 10 {
+                Rgba([255, 0, 0, 255])
+            } else {
+                Rgba([0, 0, 255, 255])
+            }
         });
-        apply_redaction(&mut img, Region { x: 4, y: 4, w: 12, h: 12 }, RedactionStyle::Pixelated, 1.0);
+        apply_redaction(
+            &mut img,
+            Region {
+                x: 4,
+                y: 4,
+                w: 12,
+                h: 12,
+            },
+            RedactionStyle::Pixelated,
+            1.0,
+        );
         let p = img.get_pixel(8, 8);
         assert_ne!(p, &Rgba([255, 0, 0, 255]));
         assert_ne!(p, &Rgba([0, 0, 255, 255]));
         // Outside the redacted rect stays the original source colour.
-        assert_eq!(img.get_pixel(0, 0), &Rgba([255, 0, 0, 255]), "outside untouched (red side)");
-        assert_eq!(img.get_pixel(19, 19), &Rgba([0, 0, 255, 255]), "outside untouched (blue side)");
+        assert_eq!(
+            img.get_pixel(0, 0),
+            &Rgba([255, 0, 0, 255]),
+            "outside untouched (red side)"
+        );
+        assert_eq!(
+            img.get_pixel(19, 19),
+            &Rgba([0, 0, 255, 255]),
+            "outside untouched (blue side)"
+        );
     }
 
     #[test]
     fn branded_is_independent_of_source_pixels() {
         let mut a = RgbaImage::from_pixel(20, 20, Rgba([255, 0, 0, 255]));
         let mut b = RgbaImage::from_pixel(20, 20, Rgba([0, 255, 0, 255]));
-        let region = Region { x: 2, y: 2, w: 16, h: 16 };
+        let region = Region {
+            x: 2,
+            y: 2,
+            w: 16,
+            h: 16,
+        };
         apply_redaction(&mut a, region, RedactionStyle::Branded, 1.0);
         apply_redaction(&mut b, region, RedactionStyle::Branded, 1.0);
         for y in 2..18u32 {
             for x in 2..18u32 {
-                assert_eq!(a.get_pixel(x, y), b.get_pixel(x, y), "branded cover must not depend on source");
+                assert_eq!(
+                    a.get_pixel(x, y),
+                    b.get_pixel(x, y),
+                    "branded cover must not depend on source"
+                );
             }
         }
     }
@@ -192,7 +253,17 @@ mod tests {
     #[test]
     fn region_clamped_to_image_bounds_does_not_panic() {
         let mut img = solid_red(10, 10);
-        apply_redaction(&mut img, Region { x: -4, y: -4, w: 40, h: 40 }, RedactionStyle::Solid, 1.0);
+        apply_redaction(
+            &mut img,
+            Region {
+                x: -4,
+                y: -4,
+                w: 40,
+                h: 40,
+            },
+            RedactionStyle::Solid,
+            1.0,
+        );
         assert_ne!(img.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
     }
 
@@ -201,11 +272,28 @@ mod tests {
         // At scale 2.0 the block is 24px, so a single 24x24 region is one block:
         // the whole region becomes one flat averaged colour.
         let mut img = RgbaImage::from_fn(24, 24, |x, _| {
-            if x < 12 { Rgba([255, 0, 0, 255]) } else { Rgba([0, 0, 255, 255]) }
+            if x < 12 {
+                Rgba([255, 0, 0, 255])
+            } else {
+                Rgba([0, 0, 255, 255])
+            }
         });
-        apply_redaction(&mut img, Region { x: 0, y: 0, w: 24, h: 24 }, RedactionStyle::Pixelated, 2.0);
+        apply_redaction(
+            &mut img,
+            Region {
+                x: 0,
+                y: 0,
+                w: 24,
+                h: 24,
+            },
+            RedactionStyle::Pixelated,
+            2.0,
+        );
         let corner = *img.get_pixel(0, 0);
         let opposite = *img.get_pixel(23, 23);
-        assert_eq!(corner, opposite, "one 24px block at scale 2.0 → uniform fill");
+        assert_eq!(
+            corner, opposite,
+            "one 24px block at scale 2.0 → uniform fill"
+        );
     }
 }

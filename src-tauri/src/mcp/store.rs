@@ -48,7 +48,10 @@ impl SnapshotStore {
             let mut latest = self.latest.lock().unwrap();
             *latest = Some(snap.clone());
         }
-        self.all.lock().unwrap().insert(snap.id.clone(), snap.clone());
+        self.all
+            .lock()
+            .unwrap()
+            .insert(snap.id.clone(), snap.clone());
         // Ignore send error — it means no receivers, which is fine.
         let _ = self.tx.send(Some(StoreEvent::Snapshot(snap)));
     }
@@ -126,17 +129,33 @@ mod tests {
             annotations: vec![Annotation {
                 id: "a1".to_string(),
                 shape: "rect".to_string(),
-                coords: Coords { x: 0.0, y: 0.0, w: 10.0, h: 10.0 },
+                coords: Coords {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 10.0,
+                    h: 10.0,
+                },
                 note: "fix this".to_string(),
                 label: "01".to_string(),
             }],
             redactions: vec![],
             context: Context {
-                screen: ScreenInfo { width: 1440, height: 900, scale_factor: 2.0, display_index: 0 },
-                os: OsInfo { platform: "macos".to_string(), version: "15.4.0".to_string() },
+                screen: ScreenInfo {
+                    width: 1440,
+                    height: 900,
+                    scale_factor: 2.0,
+                    display_index: 0,
+                },
+                os: OsInfo {
+                    platform: "macos".to_string(),
+                    version: "15.4.0".to_string(),
+                },
                 window: None,
             },
-            images: Images { clean: "/tmp/clean.png".to_string(), annotated: None },
+            images: Images {
+                clean: "/tmp/clean.png".to_string(),
+                annotated: None,
+            },
             agent_prompt: crate::snapshot::default_agent_prompt(),
         }
     }
@@ -160,16 +179,17 @@ mod tests {
         let store = Arc::new(SnapshotStore::new());
         let store2 = store.clone();
 
-        let handle = tokio::spawn(async move {
-            store2.wait_for_next(5).await
-        });
+        let handle = tokio::spawn(async move { store2.wait_for_next(5).await });
 
         tokio::time::sleep(Duration::from_millis(50)).await;
         store.publish(fake_snapshot("snap_002"));
 
         match handle.await.unwrap() {
             WaitResult::Snapshot(s) => assert_eq!(s.id, "snap_002"),
-            other => panic!("expected Snapshot, got {:?}", std::mem::discriminant(&other)),
+            other => panic!(
+                "expected Snapshot, got {:?}",
+                std::mem::discriminant(&other)
+            ),
         }
     }
 
@@ -178,16 +198,17 @@ mod tests {
         let store = Arc::new(SnapshotStore::new());
         let store2 = store.clone();
 
-        let handle = tokio::spawn(async move {
-            store2.wait_for_next(5).await
-        });
+        let handle = tokio::spawn(async move { store2.wait_for_next(5).await });
 
         tokio::time::sleep(Duration::from_millis(50)).await;
         store.cancel();
 
         match handle.await.unwrap() {
             WaitResult::Cancelled => {}
-            other => panic!("expected Cancelled, got {:?}", std::mem::discriminant(&other)),
+            other => panic!(
+                "expected Cancelled, got {:?}",
+                std::mem::discriminant(&other)
+            ),
         }
     }
 
@@ -196,7 +217,10 @@ mod tests {
         let store = SnapshotStore::new();
         match store.wait_for_next(0).await {
             WaitResult::TimedOut => {}
-            other => panic!("expected TimedOut, got {:?}", std::mem::discriminant(&other)),
+            other => panic!(
+                "expected TimedOut, got {:?}",
+                std::mem::discriminant(&other)
+            ),
         }
     }
 
@@ -231,7 +255,10 @@ mod tests {
         let expired = store.expire_if_deleted(temp.path());
         assert_eq!(expired, 1);
         assert!(store.get_latest().is_none(), "latest should be cleared");
-        assert!(store.get_snapshot(id).is_none(), "all-map entry should be removed");
+        assert!(
+            store.get_snapshot(id).is_none(),
+            "all-map entry should be removed"
+        );
     }
 
     #[test]

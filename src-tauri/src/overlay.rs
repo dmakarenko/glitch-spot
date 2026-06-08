@@ -12,8 +12,12 @@ const OVERLAY_LABEL: &str = "overlay";
 mod cg {
     use objc2::encode::{Encode, Encoding, RefEncode};
 
-    #[repr(C)] #[derive(Clone, Copy)]
-    pub struct CGPoint { pub x: f64, pub y: f64 }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct CGPoint {
+        pub x: f64,
+        pub y: f64,
+    }
     unsafe impl Encode for CGPoint {
         const ENCODING: Encoding = Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]);
     }
@@ -21,8 +25,12 @@ mod cg {
         const ENCODING_REF: Encoding = Encoding::Pointer(&Self::ENCODING);
     }
 
-    #[repr(C)] #[derive(Clone, Copy)]
-    pub struct CGSize { pub width: f64, pub height: f64 }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct CGSize {
+        pub width: f64,
+        pub height: f64,
+    }
     unsafe impl Encode for CGSize {
         const ENCODING: Encoding = Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]);
     }
@@ -30,8 +38,12 @@ mod cg {
         const ENCODING_REF: Encoding = Encoding::Pointer(&Self::ENCODING);
     }
 
-    #[repr(C)] #[derive(Clone, Copy)]
-    pub struct CGRect { pub origin: CGPoint, pub size: CGSize }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct CGRect {
+        pub origin: CGPoint,
+        pub size: CGSize,
+    }
     unsafe impl Encode for CGRect {
         const ENCODING: Encoding =
             Encoding::Struct("CGRect", &[CGPoint::ENCODING, CGSize::ENCODING]);
@@ -112,7 +124,9 @@ fn reassert_screen_frame(window: &WebviewWindow, which: ScreenRect) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
-    let Ok(ns_window) = window.ns_window() else { return; };
+    let Ok(ns_window) = window.ns_window() else {
+        return;
+    };
     let ns_window = ns_window as usize;
 
     let _ = window.run_on_main_thread(move || {
@@ -266,10 +280,20 @@ pub struct WindowModePayload {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct CssRect { pub x: f32, pub y: f32, pub w: f32, pub h: f32 }
+pub struct CssRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct WindowRectPhysical { pub x: i32, pub y: i32, pub w: u32, pub h: u32 }
+pub struct WindowRectPhysical {
+    pub x: i32,
+    pub y: i32,
+    pub w: u32,
+    pub h: u32,
+}
 
 /// Height of the menu bar / notch on a monitor, in CSS pixels — the gap between
 /// the monitor's full frame top and its work area top. Window mode covers the

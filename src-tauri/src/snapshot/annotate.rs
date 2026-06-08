@@ -60,8 +60,7 @@ pub fn render_annotated_png(
     annotations: &[Annotation],
     scale_factor: f32,
 ) -> Result<(Vec<u8>, RgbaImage), AnnotateError> {
-    let img =
-        image::load_from_memory_with_format(clean_png, image::ImageFormat::Png)?.to_rgba8();
+    let img = image::load_from_memory_with_format(clean_png, image::ImageFormat::Png)?.to_rgba8();
     render_annotations_onto(img, annotations, scale_factor)
 }
 
@@ -413,7 +412,12 @@ mod tests {
         Annotation {
             id: "a1".into(),
             shape: "rect".into(),
-            coords: Coords { x: 40.0, y: 40.0, w: 120.0, h: 80.0 },
+            coords: Coords {
+                x: 40.0,
+                y: 40.0,
+                w: 120.0,
+                h: 80.0,
+            },
             note: note.into(),
             label: "01".into(),
         }
@@ -422,15 +426,17 @@ mod tests {
     #[test]
     fn caption_draws_dark_pixels_below_the_rect_when_note_present() {
         let clean = white_png(400, 400);
-        let (out, _) =
-            render_annotated_png(&clean, &[anno_with_note("hello world")], 1.0).unwrap();
+        let (out, _) = render_annotated_png(&clean, &[anno_with_note("hello world")], 1.0).unwrap();
         let img = image::load_from_memory(&out).unwrap().to_rgba8();
         assert_eq!(img.dimensions(), (400, 400), "dimensions must not change");
         // The caption box sits just below the rect (rect bottom = 40+80 = 120,
         // gap 6 -> box top ~126). Sample a pixel inside the box; it must be dark
         // (#161616 fill or accent border), not the white background.
         let px = img.get_pixel(50, 135);
-        assert!(px[0] < 250, "expected a non-white caption pixel, got {px:?}");
+        assert!(
+            px[0] < 250,
+            "expected a non-white caption pixel, got {px:?}"
+        );
     }
 
     #[test]
@@ -450,7 +456,12 @@ mod tests {
         let anno = Annotation {
             id: "a1".into(),
             shape: "rect".into(),
-            coords: Coords { x: 40.0, y: 150.0, w: 120.0, h: 40.0 },
+            coords: Coords {
+                x: 40.0,
+                y: 150.0,
+                w: 120.0,
+                h: 40.0,
+            },
             note: "near the bottom".into(),
             label: "01".into(),
         };
@@ -459,7 +470,10 @@ mod tests {
         // box_h = round(13*1.4) + 2*round(6) = 18 + 12 = 30; flipped box_y = 150 - 6 - 30
         // = 114; box spans y[114,144), so (50,140) lands inside the flipped box.
         let px = img.get_pixel(50, 140);
-        assert!(px[0] < 250, "expected flipped caption pixel above the rect, got {px:?}");
+        assert!(
+            px[0] < 250,
+            "expected flipped caption pixel above the rect, got {px:?}"
+        );
     }
 
     #[test]
@@ -470,7 +484,12 @@ mod tests {
         let anno = Annotation {
             id: "a1".into(),
             shape: "rect".into(),
-            coords: Coords { x: 10.0, y: 8.0, w: 40.0, h: 16.0 },
+            coords: Coords {
+                x: 10.0,
+                y: 8.0,
+                w: 40.0,
+                h: 16.0,
+            },
             note: "alpha bravo charlie delta echo foxtrot golf hotel india juliet".into(),
             label: "01".into(),
         };
@@ -499,6 +518,10 @@ mod tests {
             render_annotated_png(&clean, &[anno_with_note("hello world")], 2.0).unwrap();
         let decoded = image::load_from_memory(&png).unwrap().to_rgba8();
         assert_eq!(img.dimensions(), decoded.dimensions());
-        assert_eq!(img.as_raw(), decoded.as_raw(), "RGBA must equal the decoded PNG");
+        assert_eq!(
+            img.as_raw(),
+            decoded.as_raw(),
+            "RGBA must equal the decoded PNG"
+        );
     }
 }

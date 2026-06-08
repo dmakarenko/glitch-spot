@@ -20,11 +20,17 @@ pub struct MockTunnelProvider {
 pub enum MockOutcome {
     ImmediateUrl(String),
     ImmediateError(String),
-    DelayedUrl { url: String, delay_ms: u64 },
+    DelayedUrl {
+        url: String,
+        delay_ms: u64,
+    },
     /// Spawns a child that exits after `child_lives_ms` milliseconds.
     /// The URL future resolves immediately so TunnelManager reaches Live;
     /// then the child's exit triggers the disconnect-detection path.
-    ShortLivedUrl { url: String, child_lives_ms: u64 },
+    ShortLivedUrl {
+        url: String,
+        child_lives_ms: u64,
+    },
 }
 
 impl MockTunnelProvider {
@@ -83,15 +89,19 @@ impl TunnelProvider for MockTunnelProvider {
                     .arg(secs)
                     .kill_on_drop(true)
                     .spawn()
-                    .map_err(|e| ProviderError::Spawn { provider: "mock", reason: e.to_string() })?
+                    .map_err(|e| ProviderError::Spawn {
+                        provider: "mock",
+                        reason: e.to_string(),
+                    })?
             }
-            _ => {
-                Command::new("sleep")
-                    .arg("3600")
-                    .kill_on_drop(true)
-                    .spawn()
-                    .map_err(|e| ProviderError::Spawn { provider: "mock", reason: e.to_string() })?
-            }
+            _ => Command::new("sleep")
+                .arg("3600")
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|e| ProviderError::Spawn {
+                    provider: "mock",
+                    reason: e.to_string(),
+                })?,
         };
 
         let url_future: UrlFuture = match &*outcome {

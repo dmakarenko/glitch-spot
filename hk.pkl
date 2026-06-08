@@ -1,0 +1,74 @@
+// ABOUTME: hk git-hooks config — fast auto-fixers on pre-commit, slow checks on pre-push.
+// ABOUTME: Run `hk install` after cloning to wire the hooks into git.
+amends "package://github.com/jdx/hk/releases/download/v1.46.0/hk@1.46.0#/Config.pkl"
+
+local rustGlob = "**/*.rs"
+local tsGlob = List("**/*.ts", "**/*.tsx")
+
+// Formats the Rust crate in place and re-stages the result.
+local cargoFmt = new Step {
+    glob = rustGlob
+    dir = "src-tauri"
+    check = "cargo fmt --check"
+    fix = "cargo fmt"
+    stage = List(rustGlob)
+}
+
+// Whole-project typecheck — tsconfig uses references + noEmit, so no file list.
+local tsc = new Step {
+    glob = tsGlob
+    check = "npx tsc --noEmit"
+}
+
+// Compiles the crate; too slow for every commit, so pre-push only.
+local cargoClippy = new Step {
+    glob = rustGlob
+    dir = "src-tauri"
+    check = "cargo clippy"
+}
+
+local vitest = new Step {
+    glob = tsGlob
+    check = "npx vitest run"
+}
+
+// Compiles + runs the Rust suite; pre-push only, like clippy.
+local cargoTest = new Step {
+    glob = rustGlob
+    dir = "src-tauri"
+    check = "cargo test"
+}
+
+hooks {
+    ["pre-commit"] {
+        fix = true
+        stash = "git"
+        steps {
+            ["cargo-fmt"] = cargoFmt
+            ["tsc"] = tsc
+        }
+    }
+    ["pre-push"] {
+        steps {
+            ["cargo-clippy"] = cargoClippy
+            ["cargo-test"] = cargoTest
+            ["vitest"] = vitest
+        }
+    }
+    // `hk check` runs every gate without touching files; `hk fix` applies fixers.
+    ["check"] {
+        steps {
+            ["cargo-fmt"] = cargoFmt
+            ["tsc"] = tsc
+            ["cargo-clippy"] = cargoClippy
+            ["cargo-test"] = cargoTest
+            ["vitest"] = vitest
+        }
+    }
+    ["fix"] {
+        fix = true
+        steps {
+            ["cargo-fmt"] = cargoFmt
+        }
+    }
+}

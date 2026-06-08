@@ -34,28 +34,28 @@ impl SnapshotRetention {
     pub fn max_age(self) -> Option<Duration> {
         match self {
             Self::Hours24 => Some(Duration::from_secs(24 * 60 * 60)),
-            Self::Days7   => Some(Duration::from_secs(7 * 24 * 60 * 60)),
-            Self::Days30  => Some(Duration::from_secs(30 * 24 * 60 * 60)),
-            Self::Never   => None,
+            Self::Days7 => Some(Duration::from_secs(7 * 24 * 60 * 60)),
+            Self::Days30 => Some(Duration::from_secs(30 * 24 * 60 * 60)),
+            Self::Never => None,
         }
     }
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Hours24 => "24h",
-            Self::Days7   => "7d",
-            Self::Days30  => "30d",
-            Self::Never   => "never",
+            Self::Days7 => "7d",
+            Self::Days30 => "30d",
+            Self::Never => "never",
         }
     }
 
     pub fn from_name(s: &str) -> Option<Self> {
         match s {
-            "24h"   => Some(Self::Hours24),
-            "7d"    => Some(Self::Days7),
-            "30d"   => Some(Self::Days30),
+            "24h" => Some(Self::Hours24),
+            "7d" => Some(Self::Days7),
+            "30d" => Some(Self::Days30),
             "never" => Some(Self::Never),
-            _       => None,
+            _ => None,
         }
     }
 }
@@ -72,18 +72,18 @@ pub enum ClipboardFormat {
 impl ClipboardFormat {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Json    => "json",
-            Self::Image   => "image",
-            Self::Prompt  => "prompt",
+            Self::Json => "json",
+            Self::Image => "image",
+            Self::Prompt => "prompt",
         }
     }
 
     pub fn from_name(s: &str) -> Option<Self> {
         match s {
-            "json"   => Some(Self::Json),
-            "image"  => Some(Self::Image),
+            "json" => Some(Self::Json),
+            "image" => Some(Self::Image),
             "prompt" => Some(Self::Prompt),
-            _        => None,
+            _ => None,
         }
     }
 }
@@ -105,18 +105,18 @@ pub enum RedactionStyle {
 impl RedactionStyle {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Solid      => "solid",
-            Self::Pixelated  => "pixelated",
-            Self::Branded    => "branded",
+            Self::Solid => "solid",
+            Self::Pixelated => "pixelated",
+            Self::Branded => "branded",
         }
     }
 
     pub fn from_name(s: &str) -> Option<Self> {
         match s {
-            "solid"     => Some(Self::Solid),
+            "solid" => Some(Self::Solid),
             "pixelated" => Some(Self::Pixelated),
-            "branded"   => Some(Self::Branded),
-            _           => None,
+            "branded" => Some(Self::Branded),
+            _ => None,
         }
     }
 }
@@ -277,8 +277,12 @@ impl Settings {
 
     /// Hand the animation loop its own `Arc` to the flag so it can read each
     /// tick without going through `&Settings`.
-    pub fn tray_animated_flag(&self) -> Arc<AtomicBool> { Arc::clone(&self.tray_animated) }
-    pub fn tray_coloured_flag(&self) -> Arc<AtomicBool> { Arc::clone(&self.tray_coloured) }
+    pub fn tray_animated_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.tray_animated)
+    }
+    pub fn tray_coloured_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.tray_coloured)
+    }
 
     /// Update the in-memory provider AND persist the new value to disk.
     pub fn save_provider(&self, dir: &Path, kind: ProviderKind) -> io::Result<()> {
@@ -302,26 +306,38 @@ impl Settings {
     }
 
     pub fn current_retention(&self) -> SnapshotRetention {
-        *self.snapshot_retention.read().expect("settings lock poisoned")
+        *self
+            .snapshot_retention
+            .read()
+            .expect("settings lock poisoned")
     }
 
     /// Update the in-memory retention AND persist it to disk.
     pub fn save_retention(&self, dir: &Path, retention: SnapshotRetention) -> io::Result<()> {
         {
-            let mut w = self.snapshot_retention.write().expect("settings lock poisoned");
+            let mut w = self
+                .snapshot_retention
+                .write()
+                .expect("settings lock poisoned");
             *w = retention;
         }
         self.write_config_file(dir)
     }
 
     pub fn current_clipboard_format(&self) -> ClipboardFormat {
-        *self.clipboard_format.read().expect("settings lock poisoned")
+        *self
+            .clipboard_format
+            .read()
+            .expect("settings lock poisoned")
     }
 
     /// Update the in-memory clipboard format AND persist it to disk.
     pub fn save_clipboard_format(&self, dir: &Path, format: ClipboardFormat) -> io::Result<()> {
         {
-            let mut w = self.clipboard_format.write().expect("settings lock poisoned");
+            let mut w = self
+                .clipboard_format
+                .write()
+                .expect("settings lock poisoned");
             *w = format;
         }
         self.write_config_file(dir)
@@ -334,7 +350,10 @@ impl Settings {
     /// Update the in-memory redaction style AND persist it to disk.
     pub fn save_redaction_style(&self, dir: &Path, style: RedactionStyle) -> io::Result<()> {
         {
-            let mut w = self.redaction_style.write().expect("settings lock poisoned");
+            let mut w = self
+                .redaction_style
+                .write()
+                .expect("settings lock poisoned");
             *w = style;
         }
         self.write_config_file(dir)
@@ -349,7 +368,9 @@ impl Settings {
             tunnel: TunnelSection {
                 provider: Some(self.current_provider().as_str().to_string()),
             },
-            mcp: McpSection { port: Some(self.mcp_port) },
+            mcp: McpSection {
+                port: Some(self.mcp_port),
+            },
             tray: TraySection {
                 animated: Some(animated),
                 coloured: Some(coloured),
@@ -382,7 +403,11 @@ mod tests {
     #[test]
     fn malformed_toml_yields_default_provider() {
         let temp = tempfile::TempDir::new().unwrap();
-        std::fs::write(temp.path().join("config.toml"), b"this is { not :: valid !! toml").unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            b"this is { not :: valid !! toml",
+        )
+        .unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
         assert_eq!(settings.current_provider(), ProviderKind::Cloudflared);
     }
@@ -390,7 +415,11 @@ mod tests {
     #[test]
     fn explicit_ngrok_is_parsed() {
         let temp = tempfile::TempDir::new().unwrap();
-        std::fs::write(temp.path().join("config.toml"), b"[tunnel]\nprovider = \"ngrok\"\n").unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            b"[tunnel]\nprovider = \"ngrok\"\n",
+        )
+        .unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
         assert_eq!(settings.current_provider(), ProviderKind::Ngrok);
     }
@@ -398,7 +427,11 @@ mod tests {
     #[test]
     fn unknown_provider_falls_back_to_default() {
         let temp = tempfile::TempDir::new().unwrap();
-        std::fs::write(temp.path().join("config.toml"), b"[tunnel]\nprovider = \"localtunnel\"\n").unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            b"[tunnel]\nprovider = \"localtunnel\"\n",
+        )
+        .unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
         assert_eq!(settings.current_provider(), ProviderKind::Cloudflared);
     }
@@ -407,7 +440,9 @@ mod tests {
     fn save_then_load_roundtrip() {
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        settings.save_provider(temp.path(), ProviderKind::Tailscale).unwrap();
+        settings
+            .save_provider(temp.path(), ProviderKind::Tailscale)
+            .unwrap();
 
         let settings2 = Settings::load_from(temp.path()).unwrap();
         assert_eq!(settings2.current_provider(), ProviderKind::Tailscale);
@@ -423,11 +458,7 @@ mod tests {
     #[test]
     fn explicit_mcp_port_is_parsed() {
         let temp = tempfile::TempDir::new().unwrap();
-        std::fs::write(
-            temp.path().join("config.toml"),
-            b"[mcp]\nport = 9090\n",
-        )
-        .unwrap();
+        std::fs::write(temp.path().join("config.toml"), b"[mcp]\nport = 9090\n").unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
         assert_eq!(settings.mcp_port(), 9090);
     }
@@ -515,7 +546,9 @@ mod tests {
     fn save_tray_appearance_roundtrip() {
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        settings.save_tray_appearance(temp.path(), false, true).unwrap();
+        settings
+            .save_tray_appearance(temp.path(), false, true)
+            .unwrap();
 
         let reloaded = Settings::load_from(temp.path()).unwrap();
         assert_eq!(reloaded.current_tray(), (false, true));
@@ -528,12 +561,24 @@ mod tests {
         // write_config_file path; this locks that in.
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        settings.save_tray_appearance(temp.path(), false, false).unwrap();
-        settings.save_provider(temp.path(), ProviderKind::Ngrok).unwrap();
+        settings
+            .save_tray_appearance(temp.path(), false, false)
+            .unwrap();
+        settings
+            .save_provider(temp.path(), ProviderKind::Ngrok)
+            .unwrap();
 
         let reloaded = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(reloaded.current_tray(), (false, false), "tray section preserved");
-        assert_eq!(reloaded.current_provider(), ProviderKind::Ngrok, "provider applied");
+        assert_eq!(
+            reloaded.current_tray(),
+            (false, false),
+            "tray section preserved"
+        );
+        assert_eq!(
+            reloaded.current_provider(),
+            ProviderKind::Ngrok,
+            "provider applied"
+        );
     }
 
     #[test]
@@ -541,12 +586,24 @@ mod tests {
         // Mirror of the above in the opposite direction.
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        settings.save_provider(temp.path(), ProviderKind::Tailscale).unwrap();
-        settings.save_tray_appearance(temp.path(), true, false).unwrap();
+        settings
+            .save_provider(temp.path(), ProviderKind::Tailscale)
+            .unwrap();
+        settings
+            .save_tray_appearance(temp.path(), true, false)
+            .unwrap();
 
         let reloaded = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(reloaded.current_provider(), ProviderKind::Tailscale, "provider preserved");
-        assert_eq!(reloaded.current_tray(), (true, false), "tray section applied");
+        assert_eq!(
+            reloaded.current_provider(),
+            ProviderKind::Tailscale,
+            "provider preserved"
+        );
+        assert_eq!(
+            reloaded.current_tray(),
+            (true, false),
+            "tray section applied"
+        );
     }
 
     #[test]
@@ -558,17 +615,26 @@ mod tests {
 
     #[test]
     fn snapshot_retention_max_age_hours24() {
-        assert_eq!(SnapshotRetention::Hours24.max_age(), Some(Duration::from_secs(24 * 60 * 60)));
+        assert_eq!(
+            SnapshotRetention::Hours24.max_age(),
+            Some(Duration::from_secs(24 * 60 * 60))
+        );
     }
 
     #[test]
     fn snapshot_retention_max_age_days7() {
-        assert_eq!(SnapshotRetention::Days7.max_age(), Some(Duration::from_secs(7 * 24 * 60 * 60)));
+        assert_eq!(
+            SnapshotRetention::Days7.max_age(),
+            Some(Duration::from_secs(7 * 24 * 60 * 60))
+        );
     }
 
     #[test]
     fn snapshot_retention_max_age_days30() {
-        assert_eq!(SnapshotRetention::Days30.max_age(), Some(Duration::from_secs(30 * 24 * 60 * 60)));
+        assert_eq!(
+            SnapshotRetention::Days30.max_age(),
+            Some(Duration::from_secs(30 * 24 * 60 * 60))
+        );
     }
 
     #[test]
@@ -604,7 +670,9 @@ mod tests {
     fn save_retention_roundtrip() {
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        settings.save_retention(temp.path(), SnapshotRetention::Days30).unwrap();
+        settings
+            .save_retention(temp.path(), SnapshotRetention::Days30)
+            .unwrap();
 
         let reloaded = Settings::load_from(temp.path()).unwrap();
         assert_eq!(reloaded.current_retention(), SnapshotRetention::Days30);
@@ -614,7 +682,9 @@ mod tests {
     fn save_retention_never_roundtrip() {
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        settings.save_retention(temp.path(), SnapshotRetention::Never).unwrap();
+        settings
+            .save_retention(temp.path(), SnapshotRetention::Never)
+            .unwrap();
 
         let reloaded = Settings::load_from(temp.path()).unwrap();
         assert_eq!(reloaded.current_retention(), SnapshotRetention::Never);
@@ -624,14 +694,28 @@ mod tests {
     fn save_retention_preserves_other_sections() {
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        settings.save_provider(temp.path(), ProviderKind::Ngrok).unwrap();
-        settings.save_tray_appearance(temp.path(), false, false).unwrap();
-        settings.save_retention(temp.path(), SnapshotRetention::Days7).unwrap();
+        settings
+            .save_provider(temp.path(), ProviderKind::Ngrok)
+            .unwrap();
+        settings
+            .save_tray_appearance(temp.path(), false, false)
+            .unwrap();
+        settings
+            .save_retention(temp.path(), SnapshotRetention::Days7)
+            .unwrap();
 
         let reloaded = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(reloaded.current_provider(), ProviderKind::Ngrok, "provider preserved");
+        assert_eq!(
+            reloaded.current_provider(),
+            ProviderKind::Ngrok,
+            "provider preserved"
+        );
         assert_eq!(reloaded.current_tray(), (false, false), "tray preserved");
-        assert_eq!(reloaded.current_retention(), SnapshotRetention::Days7, "retention applied");
+        assert_eq!(
+            reloaded.current_retention(),
+            SnapshotRetention::Days7,
+            "retention applied"
+        );
     }
 
     #[test]
@@ -669,7 +753,9 @@ mod tests {
     fn save_clipboard_format_roundtrip() {
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        settings.save_clipboard_format(temp.path(), ClipboardFormat::Image).unwrap();
+        settings
+            .save_clipboard_format(temp.path(), ClipboardFormat::Image)
+            .unwrap();
 
         let reloaded = Settings::load_from(temp.path()).unwrap();
         assert_eq!(reloaded.current_clipboard_format(), ClipboardFormat::Image);
@@ -679,14 +765,28 @@ mod tests {
     fn save_clipboard_format_preserves_other_sections() {
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        settings.save_provider(temp.path(), ProviderKind::Ngrok).unwrap();
-        settings.save_tray_appearance(temp.path(), false, false).unwrap();
-        settings.save_clipboard_format(temp.path(), ClipboardFormat::Image).unwrap();
+        settings
+            .save_provider(temp.path(), ProviderKind::Ngrok)
+            .unwrap();
+        settings
+            .save_tray_appearance(temp.path(), false, false)
+            .unwrap();
+        settings
+            .save_clipboard_format(temp.path(), ClipboardFormat::Image)
+            .unwrap();
 
         let reloaded = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(reloaded.current_provider(), ProviderKind::Ngrok, "provider preserved");
+        assert_eq!(
+            reloaded.current_provider(),
+            ProviderKind::Ngrok,
+            "provider preserved"
+        );
         assert_eq!(reloaded.current_tray(), (false, false), "tray preserved");
-        assert_eq!(reloaded.current_clipboard_format(), ClipboardFormat::Image, "format applied");
+        assert_eq!(
+            reloaded.current_clipboard_format(),
+            ClipboardFormat::Image,
+            "format applied"
+        );
     }
 
     #[test]
@@ -724,21 +824,44 @@ mod tests {
     fn save_redaction_style_roundtrip() {
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        settings.save_redaction_style(temp.path(), RedactionStyle::Pixelated).unwrap();
+        settings
+            .save_redaction_style(temp.path(), RedactionStyle::Pixelated)
+            .unwrap();
         let reloaded = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(reloaded.current_redaction_style(), RedactionStyle::Pixelated);
+        assert_eq!(
+            reloaded.current_redaction_style(),
+            RedactionStyle::Pixelated
+        );
     }
 
     #[test]
     fn save_redaction_style_preserves_other_sections() {
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        settings.save_provider(temp.path(), ProviderKind::Ngrok).unwrap();
-        settings.save_clipboard_format(temp.path(), ClipboardFormat::Image).unwrap();
-        settings.save_redaction_style(temp.path(), RedactionStyle::Solid).unwrap();
+        settings
+            .save_provider(temp.path(), ProviderKind::Ngrok)
+            .unwrap();
+        settings
+            .save_clipboard_format(temp.path(), ClipboardFormat::Image)
+            .unwrap();
+        settings
+            .save_redaction_style(temp.path(), RedactionStyle::Solid)
+            .unwrap();
         let reloaded = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(reloaded.current_provider(), ProviderKind::Ngrok, "provider preserved");
-        assert_eq!(reloaded.current_clipboard_format(), ClipboardFormat::Image, "format preserved");
-        assert_eq!(reloaded.current_redaction_style(), RedactionStyle::Solid, "style applied");
+        assert_eq!(
+            reloaded.current_provider(),
+            ProviderKind::Ngrok,
+            "provider preserved"
+        );
+        assert_eq!(
+            reloaded.current_clipboard_format(),
+            ClipboardFormat::Image,
+            "format preserved"
+        );
+        assert_eq!(
+            reloaded.current_redaction_style(),
+            RedactionStyle::Solid,
+            "style applied"
+        );
     }
 }

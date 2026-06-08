@@ -36,10 +36,8 @@ mod tests {
         unsafe { std::env::set_var("HOME", temp.path()) };
         append("test-provider", "hello world");
         append("test-provider", "second line");
-        let contents = std::fs::read_to_string(
-            temp.path().join(".glitch-spot").join("tunnel.log"),
-        )
-        .unwrap();
+        let contents =
+            std::fs::read_to_string(temp.path().join(".glitch-spot").join("tunnel.log")).unwrap();
         assert!(contents.contains("[test-provider] hello world"));
         assert!(contents.contains("[test-provider] second line"));
     }

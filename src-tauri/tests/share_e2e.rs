@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use glitch_spot::share::{router::build_share_router, token, tunnel::mock::MockTunnelProvider, tunnel::TunnelManager};
+use glitch_spot::share::{
+    router::build_share_router, token, tunnel::mock::MockTunnelProvider, tunnel::TunnelManager,
+};
 use tower::ServiceExt;
 
 fn write_real_snapshot(base: &std::path::Path, id: &str) -> std::path::PathBuf {
@@ -27,9 +29,21 @@ fn write_real_snapshot(base: &std::path::Path, id: &str) -> std::path::PathBuf {
         },
         "images": { "clean": "x", "annotated": "y" }
     });
-    std::fs::write(dir.join(glitch_spot::snapshot::snapshot_json_filename(id)), serde_json::to_vec_pretty(&snap).unwrap()).unwrap();
-    std::fs::write(dir.join(glitch_spot::snapshot::clean_png_filename(id)), b"\x89PNG-fixture-clean").unwrap();
-    std::fs::write(dir.join(glitch_spot::snapshot::annotated_png_filename(id)), b"\x89PNG-fixture-annotated").unwrap();
+    std::fs::write(
+        dir.join(glitch_spot::snapshot::snapshot_json_filename(id)),
+        serde_json::to_vec_pretty(&snap).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(glitch_spot::snapshot::clean_png_filename(id)),
+        b"\x89PNG-fixture-clean",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(glitch_spot::snapshot::annotated_png_filename(id)),
+        b"\x89PNG-fixture-annotated",
+    )
+    .unwrap();
     dir
 }
 
@@ -41,7 +55,9 @@ async fn share_flow_yields_html_view_with_note() {
 
     // Mock the tunnel.
     let mgr = Arc::new(TunnelManager::new());
-    let provider = Arc::new(MockTunnelProvider::with_url("https://e2e.trycloudflare.com"));
+    let provider = Arc::new(MockTunnelProvider::with_url(
+        "https://e2e.trycloudflare.com",
+    ));
     let tunnel_url = mgr.clone().start_tunnel(provider, 7821).await.unwrap();
     assert_eq!(tunnel_url, "https://e2e.trycloudflare.com");
 
@@ -52,11 +68,17 @@ async fn share_flow_yields_html_view_with_note() {
     // Hit the share router directly (no real network).
     let app = build_share_router(temp.path().to_path_buf());
     let landing_path = format!("/share/{snap_id}/{tok}/");
-    let req = Request::builder().method(Method::GET).uri(&landing_path).body(Body::empty()).unwrap();
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri(&landing_path)
+        .body(Body::empty())
+        .unwrap();
     let resp = app.oneshot(req).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body = std::str::from_utf8(&body_bytes).unwrap();
     assert!(body.contains("the cancel button is misaligned by 3 px"));
     assert!(body.contains(r#"<img src="annotated.png""#));

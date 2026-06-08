@@ -77,7 +77,13 @@ pub fn load_image_frame(
     let img = img.to_rgba8();
     let (width, height) = (img.width(), img.height());
     let png = encode_png(&img)?;
-    Ok(CapturedFrame { width, height, scale_factor: 1.0, png, display_index })
+    Ok(CapturedFrame {
+        width,
+        height,
+        scale_factor: 1.0,
+        png,
+        display_index,
+    })
 }
 
 /// What `save_snapshot("image")` needs at save time: the decoded frame plus the
