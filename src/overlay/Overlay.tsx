@@ -158,13 +158,13 @@ function GlitchImage({ url }: { url: string }) {
   )
 }
 
-// Dims everything except the selected window with four solid panels framing the
-// clear window rect, faded in together over ~250ms so the surround darkens
-// smoothly when a window is selected rather than snapping to dim. Solid fills
-// rasterise immediately; a single 100vmax box-shadow spread rasterised late and
-// flashed the screen undimmed for a frame. Visual only — the full-screen
-// DrawingLayer above forwards outside-clicks via onOutsideClick.
-function WindowDim({ rect }: { rect: { x: number; y: number; w: number; h: number } }) {
+// Dims everything except the framed rect (the selected window in window mode,
+// the opened image in image mode) with four solid panels, faded in together
+// over ~250ms so the surround darkens smoothly rather than snapping to dim.
+// Solid fills rasterise immediately; a single 100vmax box-shadow spread
+// rasterised late and flashed the screen undimmed for a frame. Visual only —
+// the full-screen DrawingLayer above forwards outside-clicks via onOutsideClick.
+function FramedDim({ rect }: { rect: { x: number; y: number; w: number; h: number } }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const anim = ref.current?.animate?.(
@@ -178,10 +178,10 @@ function WindowDim({ rect }: { rect: { x: number; y: number; w: number; h: numbe
   // the fade-in animation takes over (that flash read as a blink on select).
   return (
     <div ref={ref} style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none' }}>
-      <div data-testid="window-dim-top" style={{ ...panel, top: 0, left: 0, right: 0, height: rect.y }} />
-      <div data-testid="window-dim-bottom" style={{ ...panel, top: rect.y + rect.h, left: 0, right: 0, bottom: 0 }} />
-      <div data-testid="window-dim-left" style={{ ...panel, top: rect.y, left: 0, width: rect.x, height: rect.h }} />
-      <div data-testid="window-dim-right" style={{ ...panel, top: rect.y, left: rect.x + rect.w, right: 0, height: rect.h }} />
+      <div data-testid="framed-dim-top" style={{ ...panel, top: 0, left: 0, right: 0, height: rect.y }} />
+      <div data-testid="framed-dim-bottom" style={{ ...panel, top: rect.y + rect.h, left: 0, right: 0, bottom: 0 }} />
+      <div data-testid="framed-dim-left" style={{ ...panel, top: rect.y, left: 0, width: rect.x, height: rect.h }} />
+      <div data-testid="framed-dim-right" style={{ ...panel, top: rect.y, left: rect.x + rect.w, right: 0, height: rect.h }} />
     </div>
   )
 }
@@ -409,14 +409,14 @@ export function Overlay() {
   if (framedRect) {
     return (
       <div style={{ position: 'fixed', inset: 0, background: 'transparent' }}>
-        <WindowDim rect={framedRect} />
+        <FramedDim rect={framedRect} />
         {/* The framed capture — a selected-window screenshot (window mode) or an
             opened image (image mode) — clipped to framedRect. While no frame has
             arrived the box stays transparent so nothing flashes; a scanline
             shimmer plays as a loading cue, then the chromatic shake resolves the
             image in. overflow:hidden clips the ~18px shake. */}
         <div
-          data-testid="window-frozen-frame"
+          data-testid="framed-frozen-frame"
           style={{
             position: 'absolute',
             left: framedRect.x,

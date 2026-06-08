@@ -72,19 +72,19 @@ describe("<Overlay/> window mode", () => {
     // Four solid panels frame the clear window rect (top / bottom / left /
     // right). Solid fills rasterise immediately; a 100vmax box-shadow spread
     // rasterised late and flashed undimmed for a frame on show.
-    const top = getByTestId("window-dim-top");
+    const top = getByTestId("framed-dim-top");
     expect(top.style.top).toBe("0px");
     expect(top.style.height).toBe(`${r.y}px`);
 
-    const bottom = getByTestId("window-dim-bottom");
+    const bottom = getByTestId("framed-dim-bottom");
     expect(bottom.style.top).toBe(`${r.y + r.h}px`);
 
-    const left = getByTestId("window-dim-left");
+    const left = getByTestId("framed-dim-left");
     expect(left.style.top).toBe(`${r.y}px`);
     expect(left.style.width).toBe(`${r.x}px`);
     expect(left.style.height).toBe(`${r.h}px`);
 
-    const right = getByTestId("window-dim-right");
+    const right = getByTestId("framed-dim-right");
     expect(right.style.top).toBe(`${r.y}px`);
     expect(right.style.left).toBe(`${r.x + r.w}px`);
     expect(right.style.height).toBe(`${r.h}px`);
@@ -242,9 +242,9 @@ describe("<Overlay/> image mode", () => {
     });
     // The window-mode dim panels are reused for image mode; their presence
     // proves the framed branch (not the live/frozen branch) rendered.
-    const top = getByTestId("window-dim-top");
+    const top = getByTestId("framed-dim-top");
     expect(top).toBeTruthy();
-    const frame = getByTestId("window-frozen-frame");
+    const frame = getByTestId("framed-frozen-frame");
     expect(frame.style.left).toBe("100px");
     expect(frame.style.top).toBe("50px");
     expect(frame.style.width).toBe("400px");
@@ -258,8 +258,8 @@ describe("<Overlay/> image mode", () => {
         window as unknown as { __glitchSpotPresent: (mode: string) => void }
       ).__glitchSpotPresent("frozen");
     });
-    expect(queryByTestId("window-dim-top")).toBeNull();
-    expect(queryByTestId("window-frozen-frame")).toBeNull();
+    expect(queryByTestId("framed-dim-top")).toBeNull();
+    expect(queryByTestId("framed-frozen-frame")).toBeNull();
   });
 
   it("renders a pushed frame into the framed box without flipping out of image mode", async () => {
@@ -315,7 +315,7 @@ describe("<Overlay/> image mode", () => {
 
       // The framed box is still present at the image rect — the showBlob guard
       // held (a regression flipping to frozen would drop this testid).
-      const frame = getByTestId("window-frozen-frame");
+      const frame = getByTestId("framed-frozen-frame");
       expect(frame.style.left).toBe("100px");
       // The decoded frame's blob URL reached the DOM (GlitchImage's channel
       // layers), not the GlitchShimmer placeholder.
@@ -365,7 +365,7 @@ describe("<Overlay/> post-paint signals", () => {
     const payload = makeWindowPayload();
     presentWindowMode(payload);
 
-    const frame = getByTestId("window-frozen-frame");
+    const frame = getByTestId("framed-frozen-frame");
     const { window_rect_css } = payload;
     expect(frame.style.left).toBe(`${window_rect_css.x}px`);
     expect(frame.style.top).toBe(`${window_rect_css.y}px`);
