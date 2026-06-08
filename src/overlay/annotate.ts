@@ -4,12 +4,12 @@ import type { AnnotationPayload } from '../../packages/electron/src/types'
 import type { RedactionStyle } from './bridge'
 import { annotationLabels } from './annotations/label'
 import { wrapNote } from './annotations/wrapNote'
+import { pixelateBlocks, redactionBlockPx } from './annotations/pixelate'
 
 const COVER_DARK = '#0c0c0c' // DESIGN.md background — matches redact.rs COVER_DARK
 const SOLID_COVER = '#241f1b' // warm dark grey solid cover — matches redact.rs SOLID_COVER
 const ACCENT = '#ee6633'     // matches redact.rs ACCENT
 const ACCENT_DIM = '#78341a' // matches redact.rs ACCENT_DIM
-const BLOCK_CSS = 12         // coarse block; matches redact.rs BLOCK_CSS
 
 // Cover redaction regions on `ctx`. Mirrors src-tauri/src/snapshot/redact.rs so
 // the Tauri and Electron outputs match. Operates in physical pixels.
@@ -19,7 +19,7 @@ function coverRegions(
   scaleFactor: number,
   style: RedactionStyle,
 ) {
-  const block = Math.max(2, Math.round(BLOCK_CSS * scaleFactor))
+  const block = redactionBlockPx(scaleFactor)
   for (const r of regions) {
     const x = Math.round(r.x * scaleFactor)
     const y = Math.round(r.y * scaleFactor)
@@ -48,21 +48,11 @@ function coverRegions(
       continue
     }
 
-    // pixelated: average each block from the source and refill it.
-    for (let by = y; by < y + h; by += block) {
-      for (let bx = x; bx < x + w; bx += block) {
-        const bw = Math.min(block, x + w - bx)
-        const bh = Math.min(block, y + h - by)
-        const data = ctx.getImageData(bx, by, bw, bh).data
-        let rr = 0, gg = 0, bb = 0, aa = 0
-        const n = data.length / 4
-        for (let i = 0; i < data.length; i += 4) {
-          rr += data[i]; gg += data[i + 1]; bb += data[i + 2]; aa += data[i + 3]
-        }
-        ctx.fillStyle = `rgba(${Math.round(rr / n)}, ${Math.round(gg / n)}, ${Math.round(bb / n)}, ${(aa / n / 255).toFixed(3)})`
-        ctx.fillRect(bx, by, bw, bh)
-      }
-    }
+    // pixelated: average each block from the source and refill it. Shared with
+    // the live editing preview via pixelateBlocks so both look identical.
+    const region = ctx.getImageData(x, y, w, h)
+    const averaged = pixelateBlocks(region.data, w, h, block)
+    ctx.putImageData(new ImageData(averaged, w, h), x, y)
   }
 }
 

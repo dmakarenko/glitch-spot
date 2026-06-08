@@ -6,7 +6,7 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { render, fireEvent, cleanup } from "@testing-library/react";
 import { useReducer } from "react";
-import { DrawingLayer } from "./DrawingLayer";
+import { DrawingLayer, nextRectId } from "./DrawingLayer";
 import { initialState, reducer } from "./state";
 import type { AnnotationsState } from "./types";
 
@@ -126,6 +126,118 @@ describe("DrawingLayer cursor", () => {
     const surface = container.firstChild as HTMLDivElement;
     expect(surface.style.cursor).not.toBe("crosshair");
     expect(surface.style.cursor).toContain("data:image/svg+xml");
+  });
+});
+
+function redactionState(_style: "pixelated" | "branded" | "solid"): AnnotationsState {
+  const id = nextRectId();
+  return {
+    rects: [{ id, x: 20, y: 20, w: 120, h: 80, note: "", kind: "redaction" }],
+    history: [],
+    active: null,
+    lastCreatedId: id,
+  };
+}
+
+function RedactionHarness({ style }: { style: "pixelated" | "branded" | "solid" }) {
+  const [state, dispatch] = useReducer(reducer, redactionState(style));
+  return (
+    <DrawingLayer
+      state={state}
+      dispatch={dispatch}
+      redactMode
+      redactionStyle={style}
+    />
+  );
+}
+
+describe("DrawingLayer pixelated redaction preview", () => {
+  it("does not paint the mosaic background for pixelated rects", () => {
+    const { container } = render(<RedactionHarness style="pixelated" />);
+    const rect = container.querySelector('[data-rect-id]') as HTMLDivElement;
+    // No grey-checker mosaic and no 12px tiling — the live canvas owns the fill.
+    expect(rect.style.background).not.toContain("svg");
+    expect(rect.style.backgroundSize).toBe("");
+  });
+
+  it("still paints the mosaic background for branded rects", () => {
+    const { container } = render(<RedactionHarness style="branded" />);
+    const rect = container.querySelector('[data-rect-id]') as HTMLDivElement;
+    expect(rect.style.background).toContain("svg");
+    expect(rect.style.backgroundSize).toBe("12px 12px");
+  });
+
+  it("paints a solid fill for solid rects", () => {
+    const { container } = render(<RedactionHarness style="solid" />);
+    const rect = container.querySelector('[data-rect-id]') as HTMLDivElement;
+    // jsdom decomposes `background: "#241f1b"` into backgroundColor; check either.
+    const fill = rect.style.background || rect.style.backgroundColor;
+    expect(fill).toContain("rgb(36, 31, 27)");
+  });
+});
+
+describe("PixelatedRedactionFill live sampling", () => {
+  it("renders the canvas and paints one averaged block-fill per block from the sampled source", () => {
+    // One fake 2D context backs both the offscreen source canvas and the pixel
+    // canvas. getImageData yields all-white pixels → every block mean is 255.
+    const fills: Array<{ style: string; x: number; y: number; w: number; h: number }> = [];
+    let currentStyle = "";
+    const fakeCtx = {
+      drawImage: () => {},
+      clearRect: () => {},
+      getImageData: (_x: number, _y: number, w: number, h: number) => ({
+        data: new Uint8ClampedArray(w * h * 4).fill(255),
+        width: w,
+        height: h,
+      }),
+      set fillStyle(v: string) { currentStyle = v; },
+      get fillStyle() { return currentStyle; },
+      fillRect: (x: number, y: number, w: number, h: number) => fills.push({ style: currentStyle, x, y, w, h }),
+    };
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+      fakeCtx as unknown as CanvasRenderingContext2D,
+    );
+    class FakeImage {
+      naturalWidth = 100; naturalHeight = 100; onload: (() => void) | null = null;
+      set src(_s: string) { this.onload?.(); }
+    }
+    vi.stubGlobal("Image", FakeImage);
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 1; });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+
+    const id = nextRectId();
+    const state: AnnotationsState = {
+      rects: [{ id, x: 10, y: 20, w: 48, h: 36, note: "", kind: "redaction" }],
+      history: [],
+      active: null,
+      lastCreatedId: id,
+    };
+    function Harness() {
+      const [s, dispatch] = useReducer(reducer, state);
+      return (
+        <DrawingLayer
+          state={s}
+          dispatch={dispatch}
+          redactMode
+          redactionStyle="pixelated"
+          sourceImageUrl="blob:x"
+          imageRect={{ x: 0, y: 0, w: 100, h: 100 }}
+        />
+      );
+    }
+    const { container } = render(<Harness />);
+
+    // Live canvas renders for the pixelated redaction once the source decodes.
+    expect(container.querySelector('[data-testid="redaction-pixel-canvas"]')).not.toBeNull();
+
+    // scale = source.width(100) / imageRect.w(100) = 1 → block = 12.
+    // 48×36 rect → 4 cols × 3 rows = 12 blocks, each the white mean, first at (0,0).
+    expect(fills.length).toBe(12);
+    expect(fills.every((f) => f.style === "rgba(255, 255, 255, 1.000)")).toBe(true);
+    expect(fills[0]).toMatchObject({ x: 0, y: 0, w: 12, h: 12 });
+
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 });
 

@@ -84,6 +84,51 @@ describe('redactClean', () => {
     expect(fills.length).toBeGreaterThan(0)
   })
 
+  it('pixelated writes the truncated block mean back to the region', async () => {
+    // 4x4 source image, scale 1 → one 12px block covers the whole 4x4 region.
+    const W = 4, H = 4
+    const store = new Uint8ClampedArray(W * H * 4)
+    // Half black, half (5,5,5,255): 8 px of 0 + 8 px of 5 → mean 2.5 → floor 2 (round would give 3).
+    for (let i = 0; i < store.length; i += 4) {
+      const px = i / 4
+      const v = px < 8 ? 0 : 5
+      store[i] = v; store[i + 1] = v; store[i + 2] = v; store[i + 3] = 255
+    }
+    let written: Uint8ClampedArray | null = null
+    const fakeCtx = {
+      drawImage: () => {},
+      set fillStyle(_v: string) {}, get fillStyle() { return '#000' },
+      fillRect: () => {},
+      beginPath: () => {}, roundRect: () => {}, fill: () => {},
+      getImageData: (x: number, y: number, w: number, h: number) => {
+        const data = new Uint8ClampedArray(w * h * 4)
+        for (let yy = 0; yy < h; yy++)
+          for (let xx = 0; xx < w; xx++) {
+            const si = ((y + yy) * W + (x + xx)) * 4
+            const di = (yy * w + xx) * 4
+            data[di] = store[si]; data[di + 1] = store[si + 1]
+            data[di + 2] = store[si + 2]; data[di + 3] = store[si + 3]
+          }
+        return { data, width: w, height: h }
+      },
+      putImageData: (img: { data: Uint8ClampedArray }) => { written = img.data },
+    }
+    const fakeCanvas = { width: 0, height: 0, getContext: () => fakeCtx, toDataURL: () => 'data:image/png;base64,AAAA' }
+    ;(document as unknown as { createElement: (t: string) => unknown }).createElement = (t: string) =>
+      t === 'canvas' ? fakeCanvas : pristineCreateElement(t)
+    ;(globalThis as unknown as { ImageData: unknown }).ImageData =
+      class { data: Uint8ClampedArray; width: number; height: number
+        constructor(d: Uint8ClampedArray, w: number, h: number) { this.data = d; this.width = w; this.height = h } }
+    class FakeImage { naturalWidth = W; naturalHeight = H; onload: (() => void) | null = null; set src(_s: string) { this.onload?.() } }
+    ;(globalThis as unknown as { Image: unknown }).Image = FakeImage as unknown
+
+    await redactClean('blob:x', [{ id: 'r', x: 0, y: 0, w: 4, h: 4, note: '', kind: 'redaction' }], 1, 'pixelated')
+
+    expect(written).not.toBeNull()
+    // Every pixel of the single block is the truncated mean = 2.
+    expect((written as unknown as Uint8ClampedArray)[0]).toBe(2)
+  })
+
   it('branded covers the region with only palette colors, per block', async () => {
     const fills: string[] = []
     let current = '#000'

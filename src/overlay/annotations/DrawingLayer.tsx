@@ -2,12 +2,14 @@
 // ABOUTME: rectangles as absolutely-positioned DOM divs the parent can wire to notes.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AnnotationsAction, AnnotationsState, Handle } from "./types";
+import type { AnnotationsAction, AnnotationsState, Handle, Rect } from "./types";
 import { MIN_RECT_DIMENSION } from "./state";
 import { PICKER_CURSOR_CSS } from "../../picker/cursor";
 import { RectangleNote } from "./RectangleNote";
 import { annotationLabels } from "./label";
 import type { RedactionStyle } from "../bridge";
+import { forEachBlockMean, redactionBlockPx } from "./pixelate";
+import { useDecodedSource } from "./useDecodedSource";
 
 const RECT_BORDER = "1.5px solid rgba(238, 102, 51, 0.9)";
 const RECT_FILL = "rgba(238, 102, 51, 0.05)";
@@ -29,12 +31,18 @@ type Props = {
   onOutsideClick?: () => void;
   redactMode?: boolean;
   redactionStyle?: RedactionStyle;
+  // Decoded screenshot blob URL + the CSS box it occupies (viewport in frozen
+  // mode, the window rect in window mode). Enables the live pixelated preview.
+  sourceImageUrl?: string;
+  imageRect?: { x: number; y: number; w: number; h: number };
 };
 
 function redactionPreviewBg(style: RedactionStyle): string {
   if (style === "solid") return "#241f1b"; // warm dark grey — matches annotate.ts SOLID_COVER
-  // A small mosaic pattern stands in for the baked cover (no live-screen pixels
-  // in the DOM). Branded uses the accent palette; pixelated greys.
+  // Branded's cover is a deterministic palette pattern independent of the source,
+  // so a small accent-palette mosaic stands in for it during editing. (Pixelated
+  // draws a live source-sampled canvas instead and never reaches here; solid
+  // returns above.)
   const a = style === "branded" ? "%23ee6633" : "%23777777";
   const b = style === "branded" ? "%2378341a" : "%23444444";
   return (
@@ -43,6 +51,84 @@ function redactionPreviewBg(style: RedactionStyle): string {
     `<rect width='6' height='6' fill='${b}'/>` +
     `<rect x='6' y='6' width='6' height='6' fill='${b}'/>` +
     "</svg>\")"
+  );
+}
+
+// Renders the live pixelated cover for one redaction rect: samples the decoded
+// screenshot under the rect and paints averaged blocks identical to the bake.
+// Redraws are coalesced to one animation frame so fast drags don't pile up work.
+// Each rect samples the original screenshot independently; the bake instead
+// pixelates rects sequentially, so where two pixelated rects overlap the saved
+// overlap can differ cosmetically from this preview (both still obscure the
+// content — not a leak).
+function PixelatedRedactionFill({
+  source,
+  imageRect,
+  rect,
+}: {
+  source: HTMLCanvasElement;
+  imageRect: { x: number; y: number; w: number; h: number };
+  rect: Rect;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const draw = () => {
+      rafRef.current = null;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const sctx = source.getContext("2d");
+      if (!ctx || !sctx) return;
+
+      // CSS→source scale from displayed geometry (== capture DPR), so frozen and
+      // window modes are both correct without a separate scaleFactor.
+      const scale = source.width / imageRect.w;
+      const block = redactionBlockPx(scale);
+      const sx = Math.round((rect.x - imageRect.x) * scale);
+      const sy = Math.round((rect.y - imageRect.y) * scale);
+      const sw = Math.round(rect.w * scale);
+      const sh = Math.round(rect.h * scale);
+      if (sw <= 0 || sh <= 0) return;
+
+      // Backing store spans the whole rect in source px; out-of-image areas stay
+      // transparent, matching the bake which covers only captured pixels.
+      canvas.width = sw;
+      canvas.height = sh;
+      ctx.clearRect(0, 0, sw, sh);
+
+      const cx = Math.max(0, sx);
+      const cy = Math.max(0, sy);
+      const cw = Math.min(source.width, sx + sw) - cx;
+      const ch = Math.min(source.height, sy + sh) - cy;
+      if (cw <= 0 || ch <= 0) return;
+
+      // Paint each block's mean directly rather than building a second full-size
+      // buffer + putImageData, halving per-frame allocation during a drag.
+      const region = sctx.getImageData(cx, cy, cw, ch);
+      const offX = cx - sx;
+      const offY = cy - sy;
+      forEachBlockMean(region.data, cw, ch, block, (bx, by, bw, bh, r, g, b, a) => {
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+        ctx.fillRect(offX + bx, offY + by, bw, bh);
+      });
+    };
+
+    if (rafRef.current == null) rafRef.current = requestAnimationFrame(draw);
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+  }, [source, imageRect.x, imageRect.y, imageRect.w, imageRect.h, rect.x, rect.y, rect.w, rect.h]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden
+      data-testid="redaction-pixel-canvas"
+      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+    />
   );
 }
 
@@ -109,7 +195,8 @@ function ResizeHandle({
   );
 }
 
-export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick, redactMode = false, redactionStyle = 'branded' }: Props) {
+export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick, redactMode = false, redactionStyle = 'branded', sourceImageUrl, imageRect }: Props) {
+  const source = useDecodedSource(sourceImageUrl);
   const ref = useRef<HTMLDivElement | null>(null);
 
   const [containerHeight, setContainerHeight] = useState<number>(
@@ -241,8 +328,13 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick, redact
               width: r.w,
               height: r.h,
               border: isRedaction ? "1.5px solid rgba(238, 102, 51, 0.5)" : RECT_BORDER,
-              background: isRedaction ? redactionPreviewBg(redactionStyle) : RECT_FILL,
-              backgroundSize: isRedaction && redactionStyle !== "solid" ? "12px 12px" : undefined,
+              background: isRedaction
+                ? (redactionStyle === "pixelated" ? "transparent" : redactionPreviewBg(redactionStyle))
+                : RECT_FILL,
+              backgroundSize:
+                isRedaction && redactionStyle !== "solid" && redactionStyle !== "pixelated"
+                  ? "12px 12px"
+                  : undefined,
               boxSizing: "border-box",
               pointerEvents: "auto",
               cursor: "move",
@@ -251,6 +343,9 @@ export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick, redact
           >
             {r.w >= MIN_RECT_DIMENSION && r.h >= MIN_RECT_DIMENSION && (
               <>
+                {isRedaction && redactionStyle === "pixelated" && source && imageRect && (
+                  <PixelatedRedactionFill source={source} imageRect={imageRect} rect={r} />
+                )}
                 {!isRedaction && (
                   <div
                     aria-hidden
