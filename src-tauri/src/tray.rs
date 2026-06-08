@@ -197,6 +197,17 @@ pub(crate) fn share_status_label(healthy: bool, port: u16) -> String {
     format!("{indicator} Share Server :{port}")
 }
 
+/// Suffix shown after the "Latest snapshot:" age, naming what clicking the item
+/// copies — driven by the user's current clipboard-format preference.
+pub(crate) fn clipboard_action_label(format: crate::settings::ClipboardFormat) -> &'static str {
+    use crate::settings::ClipboardFormat;
+    match format {
+        ClipboardFormat::Json => "copy JSON",
+        ClipboardFormat::Image => "copy Image",
+        ClipboardFormat::Prompt => "copy Prompt",
+    }
+}
+
 pub(crate) fn release_version_label() -> String {
     format!("Version: {} ({})", env!("CARGO_PKG_VERSION"), env!("GIT_SHA"))
 }
@@ -292,7 +303,11 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
     let snapshot_label = {
         let ts = *state.latest_snapshot_at.lock().unwrap();
         match ts {
-            Some(t) => format!("Latest snapshot: {}", format_snapshot_age(t, Utc::now())),
+            Some(t) => format!(
+                "Latest snapshot: {} ({})",
+                format_snapshot_age(t, Utc::now()),
+                clipboard_action_label(state.settings.current_clipboard_format()),
+            ),
             None => "Latest snapshot: none yet".to_string(),
         }
     };
@@ -641,29 +656,61 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                     });
                 }
                 "latest_snapshot" => {
-                    let state = app.state::<crate::AppState>();
-                    let Some(snap) = state.snapshot_store.get_latest() else {
-                        let _ = app
+                    // Copy the latest snapshot in the user's chosen clipboard
+                    // format — the same preference applied at save time and
+                    // named in the menu item's "(copy …)" suffix.
+                    let app2 = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app2.state::<crate::AppState>();
+                        let Some(snap) = state.snapshot_store.get_latest() else {
+                            let _ = app2
+                                .notification()
+                                .builder()
+                                .title("Glitch Spot")
+                                .body("No snapshot yet — capture one first.")
+                                .show();
+                            return;
+                        };
+                        let body = match state.settings.current_clipboard_format() {
+                            crate::settings::ClipboardFormat::Json => {
+                                match serde_json::to_string_pretty(&snap) {
+                                    Ok(json) => match app2.clipboard().write_text(json) {
+                                        Ok(()) => format!("Copied JSON for {} to clipboard.", snap.id),
+                                        Err(e) => format!("Couldn't copy to clipboard: {e}"),
+                                    },
+                                    Err(e) => format!("Couldn't serialize snapshot: {e}"),
+                                }
+                            }
+                            crate::settings::ClipboardFormat::Prompt => {
+                                let prompt = crate::snapshot::render_as_prompt(&snap);
+                                match app2.clipboard().write_text(prompt) {
+                                    Ok(()) => format!("Copied prompt for {} to clipboard.", snap.id),
+                                    Err(e) => format!("Couldn't copy to clipboard: {e}"),
+                                }
+                            }
+                            crate::settings::ClipboardFormat::Image => {
+                                match image::open(snap.reveal_target()) {
+                                    Ok(img) => {
+                                        let rgba = img.to_rgba8();
+                                        let (w, h) = rgba.dimensions();
+                                        let tauri_img =
+                                            tauri::image::Image::new_owned(rgba.into_raw(), w, h);
+                                        match app2.clipboard().write_image(&tauri_img) {
+                                            Ok(()) => format!("Copied image for {} to clipboard.", snap.id),
+                                            Err(e) => format!("Couldn't copy image to clipboard: {e}"),
+                                        }
+                                    }
+                                    Err(e) => format!("Couldn't load snapshot image: {e}"),
+                                }
+                            }
+                        };
+                        let _ = app2
                             .notification()
                             .builder()
                             .title("Glitch Spot")
-                            .body("No snapshot yet — capture one first.")
+                            .body(body)
                             .show();
-                        return;
-                    };
-                    let body = match serde_json::to_string_pretty(&snap) {
-                        Ok(json) => match app.clipboard().write_text(json) {
-                            Ok(()) => format!("Copied JSON for {} to clipboard.", snap.id),
-                            Err(e) => format!("Couldn't copy to clipboard: {e}"),
-                        },
-                        Err(e) => format!("Couldn't serialize snapshot: {e}"),
-                    };
-                    let _ = app
-                        .notification()
-                        .builder()
-                        .title("Glitch Spot")
-                        .body(body)
-                        .show();
+                    });
                 }
                 "show_in_finder" => {
                     let state = app.state::<crate::AppState>();
@@ -1163,6 +1210,14 @@ mod tests {
         assert!(label.starts_with("Version: "), "expected 'Version: ' prefix, got: {label}");
         assert!(label.contains('('), "expected '(' in label, got: {label}");
         assert!(label.ends_with(')'), "expected ')' suffix, got: {label}");
+    }
+
+    #[test]
+    fn clipboard_action_label_names_each_format() {
+        use crate::settings::ClipboardFormat;
+        assert_eq!(clipboard_action_label(ClipboardFormat::Json), "copy JSON");
+        assert_eq!(clipboard_action_label(ClipboardFormat::Image), "copy Image");
+        assert_eq!(clipboard_action_label(ClipboardFormat::Prompt), "copy Prompt");
     }
 
     #[test]
