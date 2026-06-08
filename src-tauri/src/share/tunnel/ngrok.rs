@@ -60,7 +60,10 @@ async fn poll_for_url(deadline: Duration) -> Result<String, String> {
 #[async_trait]
 impl TunnelProvider for Ngrok {
     async fn spawn(&self, local_port: u16) -> Result<(Child, UrlFuture), ProviderError> {
-        let mut child = Command::new("ngrok")
+        let bin = crate::share::tunnel::resolve::resolve_executable_async("ngrok")
+            .await
+            .ok_or(ProviderError::BinaryNotFound { provider: "ngrok", binary: "ngrok" })?;
+        let mut child = Command::new(bin)
             .arg("http")
             .arg(local_port.to_string())
             .arg("--log=stdout")

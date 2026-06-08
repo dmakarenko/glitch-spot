@@ -23,7 +23,10 @@ pub fn extract_trycloudflare_url(text: &str) -> Option<String> {
 impl TunnelProvider for Cloudflared {
     async fn spawn(&self, local_port: u16) -> Result<(Child, UrlFuture), ProviderError> {
         let url = format!("http://127.0.0.1:{local_port}");
-        let mut child = Command::new("cloudflared")
+        let bin = crate::share::tunnel::resolve::resolve_executable_async("cloudflared")
+            .await
+            .ok_or(ProviderError::BinaryNotFound { provider: "cloudflared", binary: "cloudflared" })?;
+        let mut child = Command::new(bin)
             .arg("tunnel")
             .arg("--url")
             .arg(&url)

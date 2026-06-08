@@ -47,7 +47,7 @@ use tokio::process::Child;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
-    #[error("{provider} binary not installed (looked for `{binary}` on PATH)")]
+    #[error("{provider} binary not installed (looked for `{binary}` on PATH or standard install locations)")]
     BinaryNotFound { provider: &'static str, binary: &'static str },
     #[error("{provider}: {reason}")]
     Spawn { provider: &'static str, reason: String },

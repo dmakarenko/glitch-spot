@@ -185,6 +185,7 @@ pub mod provider;
 pub mod cloudflared;
 pub mod ngrok;
 pub mod tailscale;
+pub mod resolve;
 pub mod log;
 
 // `mock` is used by both the inline unit tests in this module AND by the

@@ -37,7 +37,10 @@ pub fn parse_funnel_url(status_json: &str) -> Option<String> {
 }
 
 async fn fetch_tailscale_status() -> Result<String, String> {
-    let out = Command::new("tailscale")
+    let bin = crate::share::tunnel::resolve::resolve_executable_async("tailscale")
+        .await
+        .ok_or_else(|| "tailscale binary not found".to_string())?;
+    let out = Command::new(bin)
         .arg("status")
         .arg("--json")
         .output()
@@ -55,7 +58,10 @@ impl TunnelProvider for Tailscale {
         // `tailscale funnel --bg` returns immediately after enabling the funnel.
         // We treat this child as a no-op marker; the actual public surface is
         // managed by the tailscaled daemon already running on the system.
-        let mut child = Command::new("tailscale")
+        let bin = crate::share::tunnel::resolve::resolve_executable_async("tailscale")
+            .await
+            .ok_or(ProviderError::BinaryNotFound { provider: "tailscale", binary: "tailscale" })?;
+        let mut child = Command::new(bin)
             .arg("funnel")
             .arg("--bg")
             .arg(local_port.to_string())
