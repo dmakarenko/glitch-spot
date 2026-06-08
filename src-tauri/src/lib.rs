@@ -22,6 +22,17 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use snapshot::build::IncomingAnnotation;
 
+/// Tracks the share menu item's visual state across the tunnel lifecycle.
+#[derive(Clone)]
+pub enum ShareMenuState {
+    /// No share in progress — item reads "Share latest snapshot…".
+    Idle,
+    /// Tunnel is starting up — item reads "Sharing latest snapshot…" (disabled).
+    Sharing,
+    /// Tunnel is live and a URL is ready — item reads "Copy latest snapshot link".
+    Ready(String),
+}
+
 /// Process-wide cache of the most recently captured frame.
 ///
 /// Currently only populated by the frozen-overlay path; the live-overlay path
@@ -58,6 +69,8 @@ pub struct AppState {
     /// Set at image-open time, consumed by `save_snapshot("image")`. Holds the
     /// decoded file frame and the overlay-CSS→image-px mapping.
     pub pending_image: Mutex<Option<open_image::ImageSession>>,
+    /// Drives the tray share item label through Idle → Sharing → Ready.
+    pub share_menu_state: Mutex<ShareMenuState>,
 }
 
 #[tauri::command]
@@ -300,6 +313,10 @@ async fn save_snapshot(
 
     if let Ok(mut ts) = state.latest_snapshot_at.lock() {
         *ts = Some(chrono::Utc::now());
+    }
+    // New snapshot invalidates any previously shared URL.
+    if let Ok(mut s) = state.share_menu_state.lock() {
+        *s = ShareMenuState::Idle;
     }
     tray::refresh_menu(&app);
 
@@ -1165,6 +1182,7 @@ mod tests {
             freeze_generation: Arc::new(AtomicU64::new(0)),
             live_generation: Arc::new(AtomicU64::new(0)),
             pending_image: Mutex::new(None),
+            share_menu_state: Mutex::new(ShareMenuState::Idle),
         };
         assert!(state.latest_snapshot_at.lock().unwrap().is_none());
     }
@@ -1261,6 +1279,7 @@ pub fn run() {
             freeze_generation: Arc::new(AtomicU64::new(0)),
             live_generation: Arc::new(AtomicU64::new(0)),
             pending_image: Mutex::new(None),
+            share_menu_state: Mutex::new(ShareMenuState::Idle),
         })
         .setup(|app| {
             #[cfg(target_os = "macos")]
