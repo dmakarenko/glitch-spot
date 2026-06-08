@@ -3,6 +3,7 @@
 mod capture;
 mod hotkey;
 pub mod mcp;
+mod open_image;
 mod overlay;
 mod picker_session;
 mod window_picker;
