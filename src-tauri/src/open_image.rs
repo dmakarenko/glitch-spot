@@ -34,6 +34,32 @@ pub fn fit_image_rect(work_css: (f32, f32), image: (u32, u32)) -> FitResult {
     }
 }
 
+use crate::capture::{encode_png, CaptureError, CapturedFrame};
+
+#[derive(Debug, thiserror::Error)]
+pub enum OpenImageError {
+    #[error("read file: {0}")]
+    Read(#[from] std::io::Error),
+    #[error("decode image: {0}")]
+    Decode(#[from] image::ImageError),
+    #[error("encode png: {0}")]
+    Encode(#[from] CaptureError),
+}
+
+/// Decode image bytes (any format the `image` crate supports) into a
+/// `CapturedFrame` at native resolution. `scale_factor` is 1.0 — the saved
+/// image's own pixels are the coordinate space; the overlay-to-image scaling is
+/// carried separately as `coord_scale` (see `fit_image_rect`).
+pub fn load_image_frame(
+    bytes: &[u8],
+    display_index: usize,
+) -> Result<CapturedFrame, OpenImageError> {
+    let img = image::load_from_memory(bytes)?.to_rgba8();
+    let (width, height) = (img.width(), img.height());
+    let png = encode_png(&img)?;
+    Ok(CapturedFrame { width, height, scale_factor: 1.0, png, display_index })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,5 +117,24 @@ mod tests {
         let (x, y, _, _) = r.css_rect;
         approx(x * r.coord_scale - r.crop_origin.0, 0.0);
         approx(y * r.coord_scale - r.crop_origin.1, 0.0);
+    }
+
+    #[test]
+    fn load_image_frame_decodes_to_native_dims_at_scale_one() {
+        use image::{Rgba, RgbaImage};
+        let src = RgbaImage::from_pixel(64, 32, Rgba([10, 20, 30, 255]));
+        let png = crate::capture::encode_png(&src).unwrap();
+        let frame = load_image_frame(&png, 2).unwrap();
+        assert_eq!((frame.width, frame.height), (64, 32));
+        assert_eq!(frame.scale_factor, 1.0);
+        assert_eq!(frame.display_index, 2);
+        let decoded = image::load_from_memory(&frame.png).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (64, 32));
+    }
+
+    #[test]
+    fn load_image_frame_rejects_garbage_bytes() {
+        let err = load_image_frame(&[1, 2, 3, 4], 0).unwrap_err();
+        assert!(matches!(err, OpenImageError::Decode(_)), "got {err:?}");
     }
 }
