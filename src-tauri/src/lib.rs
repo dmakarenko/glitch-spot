@@ -1005,7 +1005,13 @@ async fn present_image(app: &tauri::AppHandle, path: std::path::PathBuf) -> anyh
 
     if let Some(state) = app.try_state::<AppState>() {
         // Defensive reset: opening an image supersedes any in-flight session.
+        // Bump the capture generations too — otherwise a Capture + Freeze whose
+        // screen capture is still running could pass its generation check and
+        // push the screen frame into this image overlay (user would annotate the
+        // wrong pixels). Mirrors hide_overlay.
         state.picker_state.reset_to_idle();
+        state.freeze_generation.fetch_add(1, Ordering::SeqCst);
+        state.live_generation.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut slot) = state.pending_image.lock() {
             *slot = Some(open_image::ImageSession {
                 frame: frame.clone(),

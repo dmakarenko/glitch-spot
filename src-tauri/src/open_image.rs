@@ -34,6 +34,8 @@ pub fn fit_image_rect(work_css: (f32, f32), image: (u32, u32)) -> FitResult {
     }
 }
 
+use image::{DynamicImage, ImageDecoder, ImageReader};
+
 use crate::capture::{encode_png, CaptureError, CapturedFrame};
 
 #[derive(Debug, thiserror::Error)]
@@ -50,11 +52,22 @@ pub enum OpenImageError {
 /// `CapturedFrame` at native resolution. `scale_factor` is 1.0 — the saved
 /// image's own pixels are the coordinate space; the overlay-to-image scaling is
 /// carried separately as `coord_scale` (see `fit_image_rect`).
+///
+/// EXIF orientation is applied before rasterising, so phone JPEGs (and other
+/// rotated sources) render the way Finder/Preview show them — otherwise the
+/// overlay and saved PNG would be rotated/flipped and annotations would land on
+/// an unexpectedly transformed image.
 pub fn load_image_frame(
     bytes: &[u8],
     display_index: usize,
 ) -> Result<CapturedFrame, OpenImageError> {
-    let img = image::load_from_memory(bytes)?.to_rgba8();
+    let mut decoder = ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()?
+        .into_decoder()?;
+    let orientation = decoder.orientation()?;
+    let mut img = DynamicImage::from_decoder(decoder)?;
+    img.apply_orientation(orientation);
+    let img = img.to_rgba8();
     let (width, height) = (img.width(), img.height());
     let png = encode_png(&img)?;
     Ok(CapturedFrame { width, height, scale_factor: 1.0, png, display_index })
