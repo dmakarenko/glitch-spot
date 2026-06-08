@@ -85,6 +85,9 @@ async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
     // tasks from the dismissed session don't affect the next presentation.
     state.freeze_generation.fetch_add(1, Ordering::SeqCst);
     state.live_generation.fetch_add(1, Ordering::SeqCst);
+    if let Ok(mut slot) = state.pending_image.lock() {
+        *slot = None;
+    }
     overlay::hide(&app).map_err(|e| e.to_string())
 }
 
@@ -1019,20 +1022,38 @@ async fn present_image(app: &tauri::AppHandle, path: std::path::PathBuf) -> anyh
     let payload = overlay::ImageModePayload {
         image_rect_css: overlay::CssRect { x, y, w, h },
     };
-    overlay::show_image_mode(app, &payload)?;
 
-    // Fallback reveal in case the frontend's double-rAF revealOverlay() signal
-    // is lost — reveal is idempotent, so a redundant call is harmless.
-    {
-        let app_fb = app.clone();
-        tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            let _ = overlay::reveal(&app_fb);
-        });
+    // Roll back to Idle, clear the cached session, and hide the overlay on any
+    // failure: because we show the overlay before pushing its frame, a show/push
+    // error would otherwise leave the image overlay stuck at alpha 0 with no
+    // frame and a stale pending_image. Mirrors trigger_overlay_frozen.
+    let result = (|| -> anyhow::Result<()> {
+        overlay::show_image_mode(app, &payload)?;
+
+        // Fallback reveal in case the frontend's double-rAF revealOverlay()
+        // signal is lost — reveal is idempotent, so a redundant call is harmless.
+        {
+            let app_fb = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                let _ = overlay::reveal(&app_fb);
+            });
+        }
+
+        overlay::push_frame(app, &frame)?;
+        Ok(())
+    })();
+
+    if result.is_err() {
+        if let Some(state) = app.try_state::<AppState>() {
+            state.picker_state.reset_to_idle();
+            if let Ok(mut slot) = state.pending_image.lock() {
+                *slot = None;
+            }
+        }
+        let _ = overlay::hide(app);
     }
-
-    overlay::push_frame(app, &frame)?;
-    Ok(())
+    result
 }
 
 /// Open a native file picker for an image, then present it for annotation.
