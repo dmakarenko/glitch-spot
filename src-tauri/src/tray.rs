@@ -314,6 +314,10 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .accelerator("Ctrl+Alt+Super+J")
         .build(app)?;
 
+    let open_image = MenuItemBuilder::new("Open Image…")
+        .id("open_image")
+        .build(app)?;
+
     let port = state.settings.mcp_port();
     let mcp_status = MenuItemBuilder::new(mcp_status_label(is_healthy(&state.mcp_bound), port))
         .id("mcp_status")
@@ -481,6 +485,7 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&capture_live)
         .item(&capture_frozen)
         .item(&capture_window)
+        .item(&open_image)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&mcp_status)
         .item(&share_status)
@@ -626,6 +631,9 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
                             eprintln!("tray: capture window failed: {e}");
                         }
                     });
+                }
+                "open_image" => {
+                    crate::trigger_open_image(&app);
                 }
                 "latest_snapshot" => {
                     let state = app.state::<crate::AppState>();
