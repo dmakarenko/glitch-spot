@@ -144,11 +144,11 @@ class ElectronBridge implements OverlayBridge {
   // specific to the Tauri single-window overlay repositioned across displays.
   revealOverlay(): void {}
   async getClipboardFormat(): Promise<ClipboardFormat> {
-    return 'json'
+    return 'prompt'
   }
   async setClipboardFormat(_format: ClipboardFormat): Promise<void> {}
   async getRedactionStyle(): Promise<RedactionStyle> {
-    return 'branded'
+    return 'pixelated'
   }
   async setRedactionStyle(_style: RedactionStyle): Promise<void> {}
 }

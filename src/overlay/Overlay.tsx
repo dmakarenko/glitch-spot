@@ -196,9 +196,9 @@ export function Overlay() {
   const imageUrlRef = useRef<string | null>(null)
   const [annotations, dispatch] = useReducer(reducer, initialState)
   const [showDiscardModal, setShowDiscardModal] = useState(false)
-  const [clipboardFormat, setClipboardFormat] = useState<ClipboardFormat>('json')
+  const [clipboardFormat, setClipboardFormat] = useState<ClipboardFormat>('prompt')
   const [redactMode, setRedactMode] = useState(false)
-  const [redactionStyle, setRedactionStyle] = useState<RedactionStyle>('branded')
+  const [redactionStyle, setRedactionStyle] = useState<RedactionStyle>('pixelated')
   // Bumped each time Rust presents the overlay; drives the post-paint cursor
   // refresh below.
   const [presentationId, setPresentationId] = useState(0)

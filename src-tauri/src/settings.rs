@@ -21,8 +21,8 @@ const DEFAULT_TRAY_COLOURED: bool = true;
 /// How long to retain snapshots before auto-deletion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SnapshotRetention {
-    #[default]
     Hours24,
+    #[default]
     Days7,
     Days30,
     /// Never auto-delete — cleanup is skipped entirely.
@@ -63,9 +63,9 @@ impl SnapshotRetention {
 /// Which format is copied to the clipboard after a successful save.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ClipboardFormat {
-    #[default]
     Json,
     Image,
+    #[default]
     Prompt,
 }
 
@@ -94,11 +94,11 @@ pub enum RedactionStyle {
     /// Opaque dark box — destroys the underlying content.
     Solid,
     /// Averaged mosaic. Safe at coarse block sizes; not guaranteed against a
-    /// determined attacker on known-charset text.
+    /// determined attacker on known-charset text. Default.
+    #[default]
     Pixelated,
     /// Accent glitch mosaic whose pixels are independent of the source content —
-    /// destroys the underlying content. Default.
-    #[default]
+    /// destroys the underlying content.
     Branded,
 }
 
@@ -610,7 +610,7 @@ mod tests {
     fn missing_snapshot_section_yields_default_retention() {
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(settings.current_retention(), SnapshotRetention::Hours24);
+        assert_eq!(settings.current_retention(), SnapshotRetention::Days7);
     }
 
     #[test]
@@ -647,11 +647,11 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         std::fs::write(
             temp.path().join("config.toml"),
-            b"[snapshot]\nretention = \"7d\"\n",
+            b"[snapshot]\nretention = \"30d\"\n",
         )
         .unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(settings.current_retention(), SnapshotRetention::Days7);
+        assert_eq!(settings.current_retention(), SnapshotRetention::Days30);
     }
 
     #[test]
@@ -663,7 +663,7 @@ mod tests {
         )
         .unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(settings.current_retention(), SnapshotRetention::Hours24);
+        assert_eq!(settings.current_retention(), SnapshotRetention::Days7);
     }
 
     #[test]
@@ -719,10 +719,10 @@ mod tests {
     }
 
     #[test]
-    fn missing_clipboard_format_yields_json_default() {
+    fn missing_clipboard_format_yields_prompt_default() {
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(settings.current_clipboard_format(), ClipboardFormat::Json);
+        assert_eq!(settings.current_clipboard_format(), ClipboardFormat::Prompt);
     }
 
     #[test]
@@ -738,7 +738,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_clipboard_format_falls_back_to_json() {
+    fn unknown_clipboard_format_falls_back_to_prompt() {
         let temp = tempfile::TempDir::new().unwrap();
         std::fs::write(
             temp.path().join("config.toml"),
@@ -746,7 +746,7 @@ mod tests {
         )
         .unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(settings.current_clipboard_format(), ClipboardFormat::Json);
+        assert_eq!(settings.current_clipboard_format(), ClipboardFormat::Prompt);
     }
 
     #[test]
@@ -790,10 +790,13 @@ mod tests {
     }
 
     #[test]
-    fn missing_redaction_style_yields_branded_default() {
+    fn missing_redaction_style_yields_pixelated_default() {
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(settings.current_redaction_style(), RedactionStyle::Branded);
+        assert_eq!(
+            settings.current_redaction_style(),
+            RedactionStyle::Pixelated
+        );
     }
 
     #[test]
@@ -809,7 +812,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_redaction_style_falls_back_to_branded() {
+    fn unknown_redaction_style_falls_back_to_pixelated() {
         let temp = tempfile::TempDir::new().unwrap();
         std::fs::write(
             temp.path().join("config.toml"),
@@ -817,7 +820,10 @@ mod tests {
         )
         .unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(settings.current_redaction_style(), RedactionStyle::Branded);
+        assert_eq!(
+            settings.current_redaction_style(),
+            RedactionStyle::Pixelated
+        );
     }
 
     #[test]
@@ -825,13 +831,10 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let settings = Settings::load_from(temp.path()).unwrap();
         settings
-            .save_redaction_style(temp.path(), RedactionStyle::Pixelated)
+            .save_redaction_style(temp.path(), RedactionStyle::Solid)
             .unwrap();
         let reloaded = Settings::load_from(temp.path()).unwrap();
-        assert_eq!(
-            reloaded.current_redaction_style(),
-            RedactionStyle::Pixelated
-        );
+        assert_eq!(reloaded.current_redaction_style(), RedactionStyle::Solid);
     }
 
     #[test]

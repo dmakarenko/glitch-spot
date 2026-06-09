@@ -22,13 +22,13 @@ describe('TauriBridge clipboard format', () => {
 })
 
 describe('ElectronBridge clipboard format', () => {
-  it('getClipboardFormat resolves to json', async () => {
+  it('getClipboardFormat resolves to prompt', async () => {
     window.glitchSpotBridge = {
       onFrame: vi.fn(), offFrame: vi.fn(), saveSnapshot: vi.fn(), cancel: vi.fn(),
     }
     const { createBridge } = await import('./bridge')
     const bridge = createBridge()
-    await expect(bridge.getClipboardFormat()).resolves.toBe('json')
+    await expect(bridge.getClipboardFormat()).resolves.toBe('prompt')
   })
 
   it('setClipboardFormat resolves without throwing', async () => {
