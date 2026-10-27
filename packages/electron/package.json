@@ -1,0 +1,53 @@
+{
+  "name": "@glitch-spot/electron",
+  "version": "0.1.0",
+  "description": "Embed the Glitch Spot annotation overlay in any Electron app",
+  "license": "MIT",
+  "main": "./dist/main.cjs",
+  "module": "./dist/main.mjs",
+  "types": "./dist/main.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/main.mjs",
+      "require": "./dist/main.cjs",
+      "types": "./dist/main.d.ts"
+    },
+    "./renderer": {
+      "import": "./dist/renderer.mjs",
+      "require": "./dist/renderer.cjs",
+      "types": "./dist/renderer.d.ts"
+    },
+    "./preload": {
+      "require": "./dist/preload.cjs"
+    }
+  },
+  "files": ["dist", "overlay"],
+  "scripts": {
+    "build": "tsup",
+    "build:overlay": "cd ../.. && npx vite build --config vite.config.electron-overlay.ts",
+    "build:all": "npm run build:overlay && npm run build",
+    "prepublishOnly": "npm run build:all",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "electron": ">=28",
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "electron": "^28.0.0",
+    "jsdom": "^29.1.1",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "tsup": "^8.0.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.14",
+    "vitest": "^4.1.7"
+  }
+}

@@ -1,0 +1,163 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Glitch Spot",
+  "version": "0.10.2",
+  "identifier": "spot.glitch.release",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "overlay",
+        "url": "overlay.html",
+        "title": "Glitch Spot Overlay",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": false,
+        "focus": true,
+        "acceptFirstMouse": true
+      },
+      {
+        "label": "picker-0",
+        "url": "picker.html",
+        "title": "Glitch Spot Picker 0",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": false,
+        "focus": true,
+        "acceptFirstMouse": true
+      },
+      {
+        "label": "picker-1",
+        "url": "picker.html",
+        "title": "Glitch Spot Picker 1",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": false,
+        "focus": true,
+        "acceptFirstMouse": true
+      },
+      {
+        "label": "picker-2",
+        "url": "picker.html",
+        "title": "Glitch Spot Picker 2",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": false,
+        "focus": true,
+        "acceptFirstMouse": true
+      },
+      {
+        "label": "picker-3",
+        "url": "picker.html",
+        "title": "Glitch Spot Picker 3",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": false,
+        "focus": true,
+        "acceptFirstMouse": true
+      },
+      {
+        "label": "picker-4",
+        "url": "picker.html",
+        "title": "Glitch Spot Picker 4",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": false,
+        "focus": true,
+        "acceptFirstMouse": true
+      },
+      {
+        "label": "picker-5",
+        "url": "picker.html",
+        "title": "Glitch Spot Picker 5",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": false,
+        "focus": true,
+        "acceptFirstMouse": true
+      },
+      {
+        "label": "picker-6",
+        "url": "picker.html",
+        "title": "Glitch Spot Picker 6",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": false,
+        "focus": true,
+        "acceptFirstMouse": true
+      },
+      {
+        "label": "picker-7",
+        "url": "picker.html",
+        "title": "Glitch Spot Picker 7",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": false,
+        "focus": true,
+        "acceptFirstMouse": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "macOS": {
+      "signingIdentity": "-"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "android": {
+      "debugApplicationIdSuffix": ".debug"
+    }
+  }
+}
