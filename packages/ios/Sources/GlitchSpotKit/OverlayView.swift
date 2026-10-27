@@ -151,11 +151,10 @@ private struct MarkView: View {
             .accessibilityLabel("Delete rectangle")
             .offset(x: 9, y: -9)
         }
-        .overlay(alignment: .bottomLeading) {
+        .overlay(alignment: .topLeading) {
             if mark.kind == .annotation {
                 NoteField(note: $note, tinted: mark.id.uuid.0 % 2 == 1)
-                    .offset(y: 6)
-                    .alignmentGuide(.bottom) { $0[.top] }
+                    .offset(y: rect.height + 6)
             }
         }
         .offset(x: rect.minX, y: rect.minY)
