@@ -289,6 +289,8 @@ mod tests {
                     version: "15.0".to_string(),
                 },
                 window: None,
+                app: None,
+                device: None,
             },
             images: Images {
                 clean: "/tmp/c.png".to_string(),

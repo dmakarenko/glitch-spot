@@ -151,6 +151,8 @@ mod tests {
                     version: "15.4.0".to_string(),
                 },
                 window: None,
+                app: None,
+                device: None,
             },
             images: Images {
                 clean: "/tmp/clean.png".to_string(),

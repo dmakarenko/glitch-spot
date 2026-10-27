@@ -188,6 +188,8 @@ pub fn build(
                 version: os_version.to_string(),
             },
             window: None,
+            app: None,
+            device: None,
         },
         images: Images {
             clean: clean_path.to_string_lossy().into_owned(),

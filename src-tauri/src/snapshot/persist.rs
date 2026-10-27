@@ -145,6 +145,8 @@ mod tests {
                     version: "26.0".to_string(),
                 },
                 window: None,
+                app: None,
+                device: None,
             },
             images: Images {
                 clean: dir
