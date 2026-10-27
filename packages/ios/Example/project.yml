@@ -1,0 +1,44 @@
+# ABOUTME: XcodeGen spec for the Example host app and the hosted GlitchSpotKit tests.
+name: GlitchSpotExample
+options:
+  bundleIdPrefix: dev.glitchspot
+  deploymentTarget:
+    iOS: "18.6"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+packages:
+  GlitchSpotKit:
+    path: ../../..
+targets:
+  GlitchSpotExample:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: GlitchSpotKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.glitchspot.example
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Glitch Spot Example
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        CODE_SIGN_STYLE: Automatic
+    scheme:
+      testTargets: [GlitchSpotKitTests]
+  GlitchSpotKitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [../Tests/GlitchSpotKitTests]
+    dependencies:
+      - target: GlitchSpotExample
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.glitchspot.example.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/GlitchSpotExample.app/GlitchSpotExample
+        BUNDLE_LOADER: $(TEST_HOST)
