@@ -82,6 +82,25 @@ pub struct Context {
     pub os: OsInfo,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub window: Option<WindowInfo>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub app: Option<AppInfo>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub device: Option<DeviceInfo>,
+}
+
+/// The host app that sent the snapshot through an SDK.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AppInfo {
+    pub name: String,
+    pub version: String,
+    pub build: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeviceInfo {
+    pub model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -178,6 +197,7 @@ pub mod annotate;
 pub mod build;
 pub mod persist;
 pub mod redact;
+pub mod wire;
 
 pub use build::BuiltSnapshot;
 

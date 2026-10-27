@@ -28,7 +28,7 @@ serde_bytes = "0.11"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 imageproc = { version = "0.25", default-features = false }
 ab_glyph = "0.2"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["serde", "v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-os = "2"
@@ -53,6 +53,8 @@ objc2 = "0.6"
 # SCShareableContent's window list does not reliably provide.
 core-graphics = "0.25"
 core-foundation = "0.10"
+hpke = { version = "0.13", default-features = false, features = ["alloc", "x25519"] }
+percent-encoding = "2"
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }

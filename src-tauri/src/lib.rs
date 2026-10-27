@@ -6,6 +6,7 @@ pub mod mcp;
 mod open_image;
 mod overlay;
 mod picker_session;
+pub mod seal;
 pub mod settings;
 pub mod share;
 pub mod snapshot;

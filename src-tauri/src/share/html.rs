@@ -104,6 +104,8 @@ mod tests {
                     version: "26.0".into(),
                 },
                 window: None,
+                app: None,
+                device: None,
             },
             images: Images {
                 clean: "/tmp/c.png".into(),

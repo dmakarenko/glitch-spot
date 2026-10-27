@@ -1,0 +1,33 @@
+{
+  "hpke": {
+    "mode": "psk",
+    "kem": "DHKEM(X25519, HKDF-SHA256)",
+    "kdf": "HKDF-SHA256",
+    "aead": "ChaCha20Poly1305",
+    "info": "glitch-spot sealed snapshot v1",
+    "aad": "",
+    "psk": "the 32-byte sender secret",
+    "psk_id": "the sender id as UTF-8 bytes",
+    "contexts_per_upload": 1
+  },
+  "sealed_body": {
+    "layout": "version byte, then encapsulated key, then ciphertext",
+    "version_byte": 1,
+    "encapsulated_key_bytes": 32,
+    "tag_bytes": 16,
+    "max_bytes": 26214400
+  },
+  "payload": {
+    "v": 1,
+    "delivery_id": "UUID",
+    "images": "standard base64 with padding, no line breaks",
+    "max_image_side": 4096
+  },
+  "pairing_link": {
+    "scheme": "glitchspot-pair",
+    "version": "v1",
+    "fields": ["url", "sender", "secret", "key"],
+    "binary_fields": "base64url without padding",
+    "url_field": "RFC 3986 percent-encoding of every byte outside the unreserved set"
+  }
+}

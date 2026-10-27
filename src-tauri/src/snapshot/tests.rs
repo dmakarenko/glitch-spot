@@ -32,6 +32,8 @@ fn sample_snapshot() -> Snapshot {
                 version: "26.0".into(),
             },
             window: None,
+            app: None,
+            device: None,
         },
         images: Images {
             clean: "/tmp/glitch-spot-snap_test123.png".into(),
@@ -464,6 +466,8 @@ fn context_window_round_trips() {
                 },
                 window_id: 12345,
             }),
+            app: None,
+            device: None,
         },
         images: Images {
             clean: "x".into(),
@@ -611,4 +615,229 @@ fn snapshot_without_redactions_field_deserializes_to_empty() {
     }"#;
     let snap: crate::snapshot::Snapshot = serde_json::from_str(json).unwrap();
     assert!(snap.redactions.is_empty());
+}
+
+#[test]
+fn context_app_and_device_round_trip() {
+    let mut s = sample_snapshot();
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("screen".into(), "Checkout".into());
+    s.context.app = Some(AppInfo {
+        name: "Ondera".into(),
+        version: "2.4.0".into(),
+        build: "512".into(),
+        metadata: Some(metadata),
+    });
+    s.context.device = Some(DeviceInfo {
+        model: "iPhone17,1".into(),
+    });
+    let json = serde_json::to_string(&s).unwrap();
+    let back: Snapshot = serde_json::from_str(&json).unwrap();
+    assert_eq!(s, back);
+}
+
+mod ios_contract {
+    use image::{Rgba, RgbaImage};
+    use serde_json::{json, Value};
+
+    use crate::settings::RedactionStyle;
+    use crate::snapshot::wire::{Delivery, WireError};
+    use crate::snapshot::Snapshot;
+
+    const OLD_SNAPSHOT: &str =
+        include_str!("../../../tests/fixtures/ios-contract/snapshot-v0.10.2.json");
+    const WIRE: &[u8] = include_bytes!("../../../tests/fixtures/ios-contract/wire-snapshot.json");
+
+    fn png_base64(img: &RgbaImage) -> String {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(crate::capture::encode_png(img).unwrap())
+    }
+
+    fn delivery_json(image: &RgbaImage) -> Value {
+        json!({
+            "v": 1,
+            "delivery_id": "6F1C2B8E-4D3A-4E5F-9A0B-1C2D3E4F5A6B",
+            "snapshot": {
+                "id": "anything",
+                "created_at": "2026-10-27T16:30:00Z",
+                "mode": "window",
+                "annotations": [
+                    {"id": "a1", "shape": "rect", "coords": {"x": 1, "y": 2, "w": 3, "h": 4}, "note": "first", "label": "07"},
+                    {"id": "a2", "shape": "rect", "coords": {"x": 5, "y": 6, "w": 7, "h": 8}, "note": "second", "label": "07"}
+                ],
+                "redactions": [{"x": 16, "y": 16, "w": 16, "h": 16}],
+                "context": {
+                    "screen": {"width": 64, "height": 64, "scale_factor": 1},
+                    "os": {"platform": "macos", "version": "18.6"},
+                    "app": {"name": "Ondera", "version": "2.4.0", "build": "512"},
+                    "device": {"model": "iPhone17,1"}
+                },
+                "images": {"clean_base64": png_base64(image), "annotated_base64": png_base64(image)}
+            }
+        })
+    }
+
+    fn gray_with_white_dot() -> RgbaImage {
+        let mut img = RgbaImage::from_pixel(64, 64, Rgba([90, 90, 90, 255]));
+        img.put_pixel(20, 20, Rgba([255, 255, 255, 255]));
+        img
+    }
+
+    fn parse(value: &Value) -> Result<Delivery, WireError> {
+        Delivery::from_slice(&serde_json::to_vec(value).unwrap())
+    }
+
+    #[test]
+    fn old_snapshot_json_without_app_block_loads() {
+        let original: Value = serde_json::from_str(OLD_SNAPSHOT).unwrap();
+        assert!(original["context"].get("app").is_none());
+
+        let snap: Snapshot = serde_json::from_str(OLD_SNAPSHOT).unwrap();
+        assert_eq!(snap.context.app, None);
+        assert_eq!(snap.context.device, None);
+        assert_eq!(serde_json::to_value(&snap).unwrap(), original);
+    }
+
+    #[test]
+    fn wire_id_never_reaches_a_path() {
+        let raw: Value = serde_json::from_slice(WIRE).unwrap();
+        assert_eq!(raw["snapshot"]["id"], "../../etc");
+
+        let delivery = Delivery::from_slice(WIRE).unwrap();
+        let base = tempfile::TempDir::new().unwrap();
+        let built = delivery
+            .into_built(base.path(), RedactionStyle::default())
+            .unwrap();
+        let id = &built.snapshot.id;
+
+        assert_ne!(id, "../../etc");
+        assert!(
+            regex::Regex::new(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_[0-9a-f]{12}$")
+                .unwrap()
+                .is_match(id),
+            "{id}"
+        );
+        let dir = base.path().join(id);
+        for path in [
+            built.snapshot.images.clean.as_str(),
+            built.snapshot.images.annotated.as_deref().unwrap(),
+        ] {
+            assert!(std::path::Path::new(path).starts_with(&dir), "{path}");
+            assert!(!path.contains(".."), "{path}");
+        }
+    }
+
+    #[test]
+    fn converts_wire_fields_to_desktop_fields() {
+        let built = parse(&delivery_json(&gray_with_white_dot()))
+            .unwrap()
+            .into_built(std::path::Path::new("/base"), RedactionStyle::default())
+            .unwrap();
+        let s = built.snapshot;
+
+        assert_eq!(s.mode, "frozen");
+        assert_eq!(s.created_at, "2026-10-27T16:30:00Z");
+        assert_eq!(s.context.os.platform, "iOS");
+        assert_eq!(s.context.os.version, "18.6");
+        assert_eq!(s.context.screen.display_index, 0);
+        assert_eq!(s.context.screen.width, 64);
+        assert_eq!(s.context.window, None);
+        assert_eq!(s.context.app.as_ref().unwrap().build, "512");
+        assert_eq!(s.context.device.as_ref().unwrap().model, "iPhone17,1");
+        let labels: Vec<&str> = s.annotations.iter().map(|a| a.label.as_str()).collect();
+        assert_eq!(labels, ["01", "02"]);
+        assert_eq!(s.annotations[1].note, "second");
+        assert_eq!(s.annotations[1].coords.h, 8.0);
+        assert_eq!(s.redactions.len(), 1);
+    }
+
+    #[test]
+    fn reapplies_redactions_to_both_images() {
+        let built = parse(&delivery_json(&gray_with_white_dot()))
+            .unwrap()
+            .into_built(std::path::Path::new("/base"), RedactionStyle::default())
+            .unwrap();
+
+        for bytes in [&built.clean_bytes, &built.annotated_bytes] {
+            let img = image::load_from_memory(bytes).unwrap().to_rgba8();
+            assert_ne!(*img.get_pixel(20, 20), Rgba([255, 255, 255, 255]));
+            assert_eq!(*img.get_pixel(2, 2), Rgba([90, 90, 90, 255]));
+        }
+    }
+
+    #[test]
+    fn rejects_delivery_id_that_is_not_a_uuid() {
+        let mut value = delivery_json(&gray_with_white_dot());
+        value["delivery_id"] = "../../etc".into();
+        assert!(matches!(parse(&value), Err(WireError::Json(_))));
+    }
+
+    #[test]
+    fn rejects_unknown_payload_version() {
+        let mut value = delivery_json(&gray_with_white_dot());
+        value["v"] = 2.into();
+        assert!(matches!(parse(&value), Err(WireError::UnknownVersion(2))));
+    }
+
+    fn build(value: &Value) -> Result<crate::snapshot::BuiltSnapshot, WireError> {
+        parse(value)
+            .unwrap()
+            .into_built(std::path::Path::new("/base"), RedactionStyle::default())
+    }
+
+    #[test]
+    fn rejects_redactions_outside_the_image() {
+        let bad = [
+            json!({"x": 1, "y": 1, "w": 3e9, "h": 4}),
+            json!({"x": -1, "y": 1, "w": 4, "h": 4}),
+            json!({"x": 60, "y": 1, "w": 5, "h": 4}),
+            json!({"x": 1, "y": 1, "w": 0, "h": 4}),
+            json!({"x": 1, "y": 1, "w": 4, "h": 1e39}),
+        ];
+        for region in bad {
+            let mut value = delivery_json(&gray_with_white_dot());
+            value["snapshot"]["redactions"] = json!([region.clone()]);
+            assert!(
+                matches!(build(&value), Err(WireError::BadRedaction)),
+                "{region}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_scale_factor_out_of_range() {
+        for scale in [json!(0), json!(-2), json!(1e39), json!(11)] {
+            let mut value = delivery_json(&gray_with_white_dot());
+            value["snapshot"]["context"]["screen"]["scale_factor"] = scale.clone();
+            assert!(matches!(build(&value), Err(WireError::BadScale)), "{scale}");
+        }
+    }
+
+    #[test]
+    fn rejects_images_over_the_side_limit() {
+        let side = crate::snapshot::wire::MAX_IMAGE_SIDE + 1;
+        let wide = RgbaImage::from_pixel(side, 1, Rgba([0, 0, 0, 255]));
+        let mut value = delivery_json(&gray_with_white_dot());
+        value["snapshot"]["redactions"] = json!([]);
+        value["snapshot"]["images"]["clean_base64"] = png_base64(&wide).into();
+        assert!(matches!(build(&value), Err(WireError::Image(_))));
+    }
+
+    #[test]
+    fn rejects_images_of_different_sizes() {
+        let mut value = delivery_json(&gray_with_white_dot());
+        let other = RgbaImage::from_pixel(32, 64, Rgba([0, 0, 0, 255]));
+        value["snapshot"]["images"]["annotated_base64"] = png_base64(&other).into();
+        assert!(matches!(build(&value), Err(WireError::ImageSizeMismatch)));
+    }
+
+    #[test]
+    fn rejects_images_that_are_not_png() {
+        let mut value = delivery_json(&gray_with_white_dot());
+        value["snapshot"]["images"]["clean_base64"] = "bm90IGEgcG5n".into();
+        let result = parse(&value)
+            .unwrap()
+            .into_built(std::path::Path::new("/base"), RedactionStyle::default());
+        assert!(matches!(result, Err(WireError::Image(_))));
+    }
 }
