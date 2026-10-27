@@ -110,6 +110,8 @@ final class OverlayTests: XCTestCase {
     }
 
     func testOpenBeforeStartDoesNothing() throws {
+        // The Example host starts the SDK at launch.
+        GlitchSpot.stop()
         GlitchSpot.open()
         XCTAssertNil(GlitchSpot.session)
     }
