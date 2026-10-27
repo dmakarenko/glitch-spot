@@ -4,6 +4,7 @@ node_modules/
 dist/
 packages/electron/overlay/
 packages/electron/dist/
+.build/
 
 # Per-user agent scratch space (worktrees, session files, etc.)
 .claude/
