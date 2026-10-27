@@ -11,8 +11,7 @@ enum SnapshotRendererError: Error {
 enum SnapshotRenderer {
     /// Returns the clean PNG (redactions baked in) and the annotated PNG (the clean image plus frames and notes).
     static func images(frame: CGImage, scale: CGFloat, marks: [Mark]) throws -> (clean: Data, annotated: Data) {
-        let redactions = marks.filter { $0.kind == .redaction }.map { $0.pixelRect(scale: scale) }
-        let clean = try pixelate(frame, regions: redactions, scale: scale)
+        let clean = try redacted(frame, scale: scale, marks: marks)
         let annotated = annotate(clean, scale: scale, annotations: marks.filter { $0.kind == .annotation })
         guard let cleanPNG = UIImage(cgImage: clean).pngData(), let annotatedPNG = annotated.pngData() else {
             throw SnapshotRendererError.pngEncodingFailed
@@ -23,6 +22,12 @@ enum SnapshotRenderer {
     /// The Desktop rule (`redact.rs`): blocks of 12 points, at least 2 px, anchored at the region origin.
     static func blockPixels(scale: CGFloat) -> Int {
         max(2, Int((12 * scale).rounded()))
+    }
+
+    /// The frame with each redaction mark pixelated.
+    static func redacted(_ frame: CGImage, scale: CGFloat, marks: [Mark]) throws -> CGImage {
+        let regions = marks.filter { $0.kind == .redaction }.map { $0.pixelRect(scale: scale) }
+        return try pixelate(frame, regions: regions, scale: scale)
     }
 
     private static func pixelate(_ frame: CGImage, regions: [CGRect], scale: CGFloat) throws -> CGImage {
