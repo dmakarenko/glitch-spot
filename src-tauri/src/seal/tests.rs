@@ -56,6 +56,10 @@ mod ios_contract {
         assert_eq!(contract["sealed_body"]["tag_bytes"], seal::TAG_BYTES);
         assert_eq!(contract["sealed_body"]["max_bytes"], seal::MAX_SEALED_BYTES);
         assert_eq!(contract["payload"]["v"], crate::snapshot::wire::VERSION);
+        assert_eq!(
+            contract["payload"]["max_image_side"],
+            crate::snapshot::wire::MAX_IMAGE_SIDE
+        );
     }
 
     #[test]

@@ -20,7 +20,8 @@
   "payload": {
     "v": 1,
     "delivery_id": "UUID",
-    "images": "standard base64 with padding, no line breaks"
+    "images": "standard base64 with padding, no line breaks",
+    "max_image_side": 4096
   },
   "pairing_link": {
     "scheme": "glitchspot-pair",

@@ -108,7 +108,6 @@ pub struct ScreenInfo {
     pub width: u32,
     pub height: u32,
     pub scale_factor: f32,
-    #[serde(default)]
     pub display_index: usize,
 }
 

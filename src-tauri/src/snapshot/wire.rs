@@ -17,6 +17,10 @@ use crate::snapshot::{
 };
 
 pub const VERSION: u32 = 1;
+/// Largest width or height of a received image, checked before the pixels are decoded.
+pub const MAX_IMAGE_SIDE: u32 = 4096;
+/// The pixelated redaction block grows with the scale; a cap keeps its arithmetic in range.
+const MAX_SCALE_FACTOR: f32 = 10.0;
 
 /// One upload from a Sender: the snapshot plus the id that dedups a retried upload.
 #[derive(Debug, Deserialize)]
@@ -77,6 +81,12 @@ pub enum WireError {
     Image(#[from] image::ImageError),
     #[error("encode png: {0}")]
     Encode(#[from] crate::capture::CaptureError),
+    #[error("scale_factor is not in (0, {MAX_SCALE_FACTOR}]")]
+    BadScale,
+    #[error("the clean and annotated images differ in size")]
+    ImageSizeMismatch,
+    #[error("a redaction is not a non-empty rectangle inside the image")]
+    BadRedaction,
 }
 
 impl Delivery {
@@ -96,9 +106,27 @@ impl Delivery {
     ) -> Result<BuiltSnapshot, WireError> {
         let wire = self.snapshot;
         let scale = wire.context.screen.scale_factor;
+        if !(scale > 0.0 && scale <= MAX_SCALE_FACTOR) {
+            return Err(WireError::BadScale);
+        }
 
         let mut clean = decode_png(&wire.images.clean_base64)?;
         let mut annotated = decode_png(&wire.images.annotated_base64)?;
+        if clean.dimensions() != annotated.dimensions() {
+            return Err(WireError::ImageSizeMismatch);
+        }
+        let (width, height) = (clean.width() as f32, clean.height() as f32);
+        let inside = |r: &RedactionRegion| {
+            r.x >= 0.0
+                && r.y >= 0.0
+                && r.w > 0.0
+                && r.h > 0.0
+                && r.x + r.w <= width
+                && r.y + r.h <= height
+        };
+        if !wire.redactions.iter().all(inside) {
+            return Err(WireError::BadRedaction);
+        }
         for r in &wire.redactions {
             let region = Region {
                 x: r.x.round() as i32,
@@ -169,5 +197,11 @@ impl Delivery {
 
 fn decode_png(encoded: &str) -> Result<RgbaImage, WireError> {
     let bytes = STANDARD.decode(encoded)?;
-    Ok(image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)?.to_rgba8())
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_SIDE);
+    limits.max_image_height = Some(MAX_IMAGE_SIDE);
+    let mut reader =
+        image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
+    reader.limits(limits);
+    Ok(reader.decode()?.to_rgba8())
 }

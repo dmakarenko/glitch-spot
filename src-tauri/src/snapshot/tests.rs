@@ -779,6 +779,58 @@ mod ios_contract {
         assert!(matches!(parse(&value), Err(WireError::UnknownVersion(2))));
     }
 
+    fn build(value: &Value) -> Result<crate::snapshot::BuiltSnapshot, WireError> {
+        parse(value)
+            .unwrap()
+            .into_built(std::path::Path::new("/base"), RedactionStyle::default())
+    }
+
+    #[test]
+    fn rejects_redactions_outside_the_image() {
+        let bad = [
+            json!({"x": 1, "y": 1, "w": 3e9, "h": 4}),
+            json!({"x": -1, "y": 1, "w": 4, "h": 4}),
+            json!({"x": 60, "y": 1, "w": 5, "h": 4}),
+            json!({"x": 1, "y": 1, "w": 0, "h": 4}),
+            json!({"x": 1, "y": 1, "w": 4, "h": 1e39}),
+        ];
+        for region in bad {
+            let mut value = delivery_json(&gray_with_white_dot());
+            value["snapshot"]["redactions"] = json!([region.clone()]);
+            assert!(
+                matches!(build(&value), Err(WireError::BadRedaction)),
+                "{region}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_scale_factor_out_of_range() {
+        for scale in [json!(0), json!(-2), json!(1e39), json!(11)] {
+            let mut value = delivery_json(&gray_with_white_dot());
+            value["snapshot"]["context"]["screen"]["scale_factor"] = scale.clone();
+            assert!(matches!(build(&value), Err(WireError::BadScale)), "{scale}");
+        }
+    }
+
+    #[test]
+    fn rejects_images_over_the_side_limit() {
+        let side = crate::snapshot::wire::MAX_IMAGE_SIDE + 1;
+        let wide = RgbaImage::from_pixel(side, 1, Rgba([0, 0, 0, 255]));
+        let mut value = delivery_json(&gray_with_white_dot());
+        value["snapshot"]["redactions"] = json!([]);
+        value["snapshot"]["images"]["clean_base64"] = png_base64(&wide).into();
+        assert!(matches!(build(&value), Err(WireError::Image(_))));
+    }
+
+    #[test]
+    fn rejects_images_of_different_sizes() {
+        let mut value = delivery_json(&gray_with_white_dot());
+        let other = RgbaImage::from_pixel(32, 64, Rgba([0, 0, 0, 255]));
+        value["snapshot"]["images"]["annotated_base64"] = png_base64(&other).into();
+        assert!(matches!(build(&value), Err(WireError::ImageSizeMismatch)));
+    }
+
     #[test]
     fn rejects_images_that_are_not_png() {
         let mut value = delivery_json(&gray_with_white_dot());
