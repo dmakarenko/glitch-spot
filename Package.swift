@@ -6,10 +6,15 @@ let package = Package(
     name: "GlitchSpotKit",
     platforms: [.iOS("18.6"), .macOS(.v14)],
     products: [
-        .library(name: "GlitchSpotKit", targets: ["GlitchSpotCore"]),
+        .library(name: "GlitchSpotKit", targets: ["GlitchSpotKit"]),
     ],
     targets: [
         .target(name: "GlitchSpotCore", path: "packages/ios/Sources/GlitchSpotCore"),
+        .target(
+            name: "GlitchSpotKit",
+            dependencies: ["GlitchSpotCore"],
+            path: "packages/ios/Sources/GlitchSpotKit"
+        ),
         .testTarget(
             name: "GlitchSpotCoreTests",
             dependencies: ["GlitchSpotCore"],

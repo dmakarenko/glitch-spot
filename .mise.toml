@@ -2,3 +2,4 @@
 # ABOUTME: Pins hk, the git hooks manager that reads hk.pkl.
 [tools]
 hk = "1.46.0"
+xcodegen = "2.45.4"
