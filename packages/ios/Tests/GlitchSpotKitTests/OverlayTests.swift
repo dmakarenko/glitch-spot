@@ -109,6 +109,18 @@ final class OverlayTests: XCTestCase {
         XCTAssertNil(GlitchSpot.session?.toast)
     }
 
+    func testToolbarStaysBelowTheSafeAreaTop() async throws {
+        GlitchSpot.start(onSnapshot: { _ in })
+        _ = try await openOverlay()
+        let overlay = try XCTUnwrap(GlitchSpot.session?.overlay)
+        overlay.layoutIfNeeded()
+
+        // The full-screen frame must not push the toolbar under the Dynamic Island.
+        let picker = try XCTUnwrap(overlay.firstSubview(ofType: UISegmentedControl.self))
+        XCTAssertGreaterThan(overlay.safeAreaInsets.top, 0, "the test needs a device with a top inset")
+        XCTAssertGreaterThanOrEqual(picker.convert(picker.bounds, to: overlay).minY, overlay.safeAreaInsets.top)
+    }
+
     func testOpenBeforeStartDoesNothing() throws {
         // The Example host starts the SDK at launch.
         GlitchSpot.stop()
@@ -127,5 +139,10 @@ extension UIView {
     func firstSubview(withIdentifier identifier: String) -> UIView? {
         if accessibilityIdentifier == identifier { return self }
         return subviews.lazy.compactMap { $0.firstSubview(withIdentifier: identifier) }.first
+    }
+
+    func firstSubview<T: UIView>(ofType type: T.Type) -> T? {
+        if let match = self as? T { return match }
+        return subviews.lazy.compactMap { $0.firstSubview(ofType: type) }.first
     }
 }

@@ -1,4 +1,4 @@
-// ABOUTME: A Metal view whose clear colour cycles, so a capture shows whether GPU content survives.
+// ABOUTME: A Metal view whose clear color cycles, so a capture shows whether GPU content survives.
 import MetalKit
 import SwiftUI
 

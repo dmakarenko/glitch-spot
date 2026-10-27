@@ -28,7 +28,7 @@ final class CaptureTests: XCTestCase {
     }
 }
 
-/// Clears each frame to the view's clear colour and reports when the GPU finishes the fifth frame.
+/// Clears each frame to the view's clear color and reports when the GPU finishes the fifth frame.
 @MainActor
 private final class ClearToRed: NSObject, MTKViewDelegate {
     let presented = XCTestExpectation(description: "red frames are on screen")

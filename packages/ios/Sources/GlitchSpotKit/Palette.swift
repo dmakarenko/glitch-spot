@@ -1,4 +1,4 @@
-// ABOUTME: DESIGN.md colour tokens and the chromatic-split frame that surfaced containers get.
+// ABOUTME: DESIGN.md color tokens and the chromatic-split frame that surfaced containers get.
 #if os(iOS) && DEBUG
 import UIKit
 

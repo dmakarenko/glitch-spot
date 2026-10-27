@@ -8,6 +8,20 @@ struct OverlayView: View {
     @State private var confirmingDiscard = false
 
     var body: some View {
+        // Only the frame fills the screen; the toolbar stays inside the safe area, clear of the Dynamic Island.
+        ZStack(alignment: .top) {
+            canvas
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+                .ignoresSafeArea(.container)
+            toolbar.padding(.top, 8)
+        }
+        .alert("Discard this snapshot?", isPresented: $confirmingDiscard) {
+            Button("Discard", role: .destructive) { model.cancel() }
+            Button("Keep editing", role: .cancel) {}
+        }
+    }
+
+    private var canvas: some View {
         ZStack(alignment: .topLeading) {
             Image(uiImage: model.preview)
                 .resizable()
@@ -35,12 +49,6 @@ struct OverlayView: View {
             }
         }
         .frame(width: model.frame.size.width, height: model.frame.size.height, alignment: .topLeading)
-        .overlay(alignment: .top) { toolbar.padding(.top, 8) }
-        .ignoresSafeArea(.container)
-        .alert("Discard this snapshot?", isPresented: $confirmingDiscard) {
-            Button("Discard", role: .destructive) { model.cancel() }
-            Button("Keep editing", role: .cancel) {}
-        }
     }
 
     private var drawGesture: some Gesture {
