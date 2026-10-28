@@ -1938,24 +1938,30 @@ mod tests {
     }
 
     #[test]
-    fn tray_animated_pulse_ticks_at_250ms_and_bursts_at_100ms() {
+    fn tray_pulse_ticks_at_250ms_and_bursts_at_100ms() {
+        use std::time::Duration;
         let mut anim = animator(true, true, true);
-        let (mut pulses, mut bursts) = (0, 0);
+        let (mut elapsed, mut pulse_calls_in_10s, mut bursts) = (Duration::ZERO, 0, 0);
         for _ in 0..400 {
             let mut phase = None;
             let delay = anim.tick(true, true, |k, _| phase = Some(k.phase.clone()));
             match phase {
-                Some(Phase::Pulse(_)) => {
-                    pulses += 1;
-                    assert_eq!(delay, std::time::Duration::from_millis(250));
-                }
+                Some(Phase::Pulse(_)) => assert_eq!(delay, Duration::from_millis(250)),
                 Some(Phase::Burst { .. }) => {
                     bursts += 1;
-                    assert_eq!(delay, std::time::Duration::from_millis(100));
+                    assert_eq!(delay, Duration::from_millis(100));
                 }
                 _ => {}
             }
+            if matches!(phase, Some(Phase::Pulse(_))) && elapsed < Duration::from_secs(10) {
+                pulse_calls_in_10s += 1;
+            }
+            elapsed += delay;
         }
-        assert!(pulses > 0 && bursts > 0, "pulses={pulses} bursts={bursts}");
+        assert!(
+            pulse_calls_in_10s <= 40,
+            "pulse_calls_in_10s={pulse_calls_in_10s}"
+        );
+        assert!(bursts > 0, "a burst must occur in 400 ticks");
     }
 }
