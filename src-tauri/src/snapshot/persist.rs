@@ -24,19 +24,16 @@ pub fn snapshots_dir() -> io::Result<PathBuf> {
     static EXISTING_MADE_PRIVATE: AtomicBool = AtomicBool::new(false);
     let home =
         env::var("HOME").map_err(|_| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))?;
-    let home = Path::new(&home);
-    if EXISTING_MADE_PRIVATE.swap(true, Ordering::Relaxed) {
-        private_root(home)
-    } else {
-        snapshots_dir_in(home)
-    }
+    snapshots_dir_in(Path::new(&home), &EXISTING_MADE_PRIVATE)
 }
 
-/// Returns `{home}/.glitch-spot/snapshots/` with mode 0700, and sets 0700 on
-/// each snapshot folder in it and 0600 on each file in those folders.
-pub fn snapshots_dir_in(home: &Path) -> io::Result<PathBuf> {
+/// Returns `{home}/.glitch-spot/snapshots/` with mode 0700. Until `existing_made_private`
+/// is set, also sets 0700 on each snapshot folder in it and 0600 on each file in those folders.
+fn snapshots_dir_in(home: &Path, existing_made_private: &AtomicBool) -> io::Result<PathBuf> {
     let dir = private_root(home)?;
-    make_snapshot_folders_private(&dir);
+    if !existing_made_private.swap(true, Ordering::Relaxed) {
+        make_snapshot_folders_private(&dir);
+    }
     Ok(dir)
 }
 
@@ -389,7 +386,7 @@ mod tests {
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
         }
 
-        let dir = snapshots_dir_in(home.path()).unwrap();
+        let dir = snapshots_dir_in(home.path(), &AtomicBool::new(false)).unwrap();
 
         assert_eq!(dir, root);
         assert_eq!(mode_of(&root), 0o700);
@@ -400,6 +397,47 @@ mod tests {
             0o644,
             "root-level files are left alone"
         );
+    }
+
+    #[test]
+    fn existing_folders_made_private_after_a_failed_first_call() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        std::fs::write(&home, b"a file, so the root cannot be created").unwrap();
+        let made_private = AtomicBool::new(false);
+
+        snapshots_dir_in(&home, &made_private).expect_err("root under a file must fail");
+
+        std::fs::remove_file(&home).unwrap();
+        let snap = home.join(".glitch-spot").join("snapshots").join("snap_old");
+        std::fs::create_dir_all(&snap).unwrap();
+        std::fs::set_permissions(&snap, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        snapshots_dir_in(&home, &made_private).unwrap();
+
+        assert_eq!(mode_of(&snap), 0o700);
+    }
+
+    #[test]
+    fn existing_folder_sweep_skips_symlinks() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let home = tempfile::TempDir::new().unwrap();
+        let outside = tempfile::TempDir::new().unwrap();
+        let outside_file = outside.path().join("config");
+        std::fs::write(&outside_file, b"secret").unwrap();
+        std::fs::set_permissions(outside.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&outside_file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let root = home.path().join(".glitch-spot").join("snapshots");
+        let snap = root.join("snap_old");
+        std::fs::create_dir_all(&snap).unwrap();
+        symlink(outside.path(), root.join("linked_folder")).unwrap();
+        symlink(&outside_file, snap.join("linked_file")).unwrap();
+
+        snapshots_dir_in(home.path(), &AtomicBool::new(false)).unwrap();
+
+        assert_eq!(mode_of(outside.path()), 0o755);
+        assert_eq!(mode_of(&outside_file), 0o644);
     }
 
     #[test]
