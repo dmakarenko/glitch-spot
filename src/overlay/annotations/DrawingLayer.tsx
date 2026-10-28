@@ -54,6 +54,19 @@ function redactionPreviewBg(style: RedactionStyle): string {
   );
 }
 
+// One readback per decoded frame, so a drag samples this copy instead of the canvas.
+const sourcePixelsCache = new WeakMap<HTMLCanvasElement, ImageData>();
+function sourcePixels(source: HTMLCanvasElement): ImageData | null {
+  let pixels = sourcePixelsCache.get(source);
+  if (!pixels) {
+    const sctx = source.getContext("2d");
+    if (!sctx) return null;
+    pixels = sctx.getImageData(0, 0, source.width, source.height);
+    sourcePixelsCache.set(source, pixels);
+  }
+  return pixels;
+}
+
 // Renders the live pixelated cover for one redaction rect: samples the decoded
 // screenshot under the rect and paints averaged blocks identical to the bake.
 // Redraws are coalesced to one animation frame so fast drags don't pile up work.
@@ -79,8 +92,8 @@ function PixelatedRedactionFill({
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
-      const sctx = source.getContext("2d");
-      if (!ctx || !sctx) return;
+      const pixels = sourcePixels(source);
+      if (!ctx || !pixels) return;
 
       // CSS→source scale from displayed geometry (== capture DPR), so frozen and
       // window modes are both correct without a separate scaleFactor.
@@ -93,9 +106,10 @@ function PixelatedRedactionFill({
       if (sw <= 0 || sh <= 0) return;
 
       // Backing store spans the whole rect in source px; out-of-image areas stay
-      // transparent, matching the bake which covers only captured pixels.
-      canvas.width = sw;
-      canvas.height = sh;
+      // transparent, matching the bake which covers only captured pixels. Resizing
+      // reallocates the backing store, so a move (same size) skips it.
+      if (canvas.width !== sw) canvas.width = sw;
+      if (canvas.height !== sh) canvas.height = sh;
       ctx.clearRect(0, 0, sw, sh);
 
       const cx = Math.max(0, sx);
@@ -105,14 +119,13 @@ function PixelatedRedactionFill({
       if (cw <= 0 || ch <= 0) return;
 
       // Paint each block's mean directly rather than building a second full-size
-      // buffer + putImageData, halving per-frame allocation during a drag.
-      const region = sctx.getImageData(cx, cy, cw, ch);
+      // buffer + putImageData, so a frame allocates no pixel buffer.
       const offX = cx - sx;
       const offY = cy - sy;
-      forEachBlockMean(region.data, cw, ch, block, (bx, by, bw, bh, r, g, b, a) => {
+      forEachBlockMean(pixels.data, cw, ch, block, (bx, by, bw, bh, r, g, b, a) => {
         ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
         ctx.fillRect(offX + bx, offY + by, bw, bh);
-      });
+      }, pixels.width, cy * pixels.width + cx);
     };
 
     if (rafRef.current == null) rafRef.current = requestAnimationFrame(draw);
@@ -198,6 +211,11 @@ function ResizeHandle({
 export function DrawingLayer({ state, dispatch, clipRect, onOutsideClick, redactMode = false, redactionStyle = 'branded', sourceImageUrl, imageRect }: Props) {
   const source = useDecodedSource(sourceImageUrl);
   const ref = useRef<HTMLDivElement | null>(null);
+
+  // Read the frame back at decode time, not inside the first drag.
+  useEffect(() => {
+    if (source && redactionStyle === "pixelated") sourcePixels(source);
+  }, [source, redactionStyle]);
 
   const [containerHeight, setContainerHeight] = useState<number>(
     typeof window !== "undefined" ? window.innerHeight : 0
