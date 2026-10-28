@@ -213,13 +213,19 @@ function stubLiveSource(pixelAt: (x: number, y: number) => [number, number] = ()
   return { fills, reads };
 }
 
-function LivePixelatedHarness() {
+function LivePixelatedHarness({
+  withRect = true,
+  imageRect = { x: 0, y: 0, w: 100, h: 100 },
+}: {
+  withRect?: boolean;
+  imageRect?: { x: number; y: number; w: number; h: number };
+}) {
   const id = "live-pixelated";
   const [s, dispatch] = useReducer(reducer, {
-    rects: [{ id, x: 10, y: 20, w: 48, h: 36, note: "", kind: "redaction" }],
+    rects: withRect ? [{ id, x: 10, y: 20, w: 48, h: 36, note: "", kind: "redaction" }] : [],
     history: [],
     active: null,
-    lastCreatedId: id,
+    lastCreatedId: withRect ? id : null,
   } satisfies AnnotationsState);
   return (
     <DrawingLayer
@@ -228,7 +234,7 @@ function LivePixelatedHarness() {
       redactMode
       redactionStyle="pixelated"
       sourceImageUrl="blob:x"
-      imageRect={{ x: 0, y: 0, w: 100, h: 100 }}
+      imageRect={imageRect}
     />
   );
 }
@@ -268,6 +274,20 @@ describe("PixelatedRedactionFill live sampling", () => {
     render(<LivePixelatedHarness />);
     expect(fills[0].style).toBe("rgba(15, 25, 255, 1.000)");
     expect(fills[1].style).toBe("rgba(27, 25, 255, 1.000)");
+  });
+
+  it("samples from the clipped origin when the rect extends past the image's top-left", () => {
+    // Image starts at (20, 30), rect at (10, 20): 10 px of the rect lie outside on
+    // each axis, so the first block paints at (10, 10) from source x 0..11, y 0..11 (mean 5).
+    const { fills } = stubLiveSource((x, y) => [x, y]);
+    render(<LivePixelatedHarness imageRect={{ x: 20, y: 30, w: 100, h: 100 }} />);
+    expect(fills[0]).toMatchObject({ style: "rgba(5, 5, 255, 1.000)", x: 10, y: 10, w: 12, h: 12 });
+  });
+
+  it("reads the frame back at decode, before any pixelated rect exists", () => {
+    const { reads } = stubLiveSource();
+    render(<LivePixelatedHarness withRect={false} />);
+    expect(reads.count).toBe(1);
   });
 
   it("pixelate drag reads back once", () => {
