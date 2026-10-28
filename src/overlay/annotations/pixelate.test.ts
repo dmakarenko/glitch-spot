@@ -83,4 +83,15 @@ describe('forEachBlockMean', () => {
     forEachBlockMean(buffer(3, 1, (x) => (x === 2 ? [2, 2, 2, 255] : [0, 0, 0, 255])), 3, 1, 12, (_x, _y, _w, _h, r) => { mean = r })
     expect(mean).toBe(0)
   })
+
+  it('averages a sub-rectangle of a wider buffer given its stride and offset', () => {
+    // 5x4 source with a distinct value per pixel; region is 3x2 at (1,1).
+    const full = buffer(5, 4, (x, y) => [x * 10 + y, 0, 0, 255])
+    const cropped = buffer(3, 2, (x, y) => [(x + 1) * 10 + (y + 1), 0, 0, 255])
+    const fromCrop: number[][] = []
+    const fromFull: number[][] = []
+    forEachBlockMean(cropped, 3, 2, 2, (...v) => fromCrop.push(v))
+    forEachBlockMean(full, 3, 2, 2, (...v) => fromFull.push(v), 5, 1 * 5 + 1)
+    expect(fromFull).toEqual(fromCrop)
+  })
 })

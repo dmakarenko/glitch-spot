@@ -179,56 +179,83 @@ describe("DrawingLayer pixelated redaction preview", () => {
   });
 });
 
-describe("PixelatedRedactionFill live sampling", () => {
-  it("renders the canvas and paints one averaged block-fill per block from the sampled source", () => {
-    // One fake 2D context backs both the offscreen source canvas and the pixel
-    // canvas. getImageData yields all-white pixels → every block mean is 255.
-    const fills: Array<{ style: string; x: number; y: number; w: number; h: number }> = [];
-    let currentStyle = "";
-    const fakeCtx = {
-      drawImage: () => {},
-      clearRect: () => {},
-      getImageData: (_x: number, _y: number, w: number, h: number) => ({
-        data: new Uint8ClampedArray(w * h * 4).fill(255),
-        width: w,
-        height: h,
-      }),
-      set fillStyle(v: string) { currentStyle = v; },
-      get fillStyle() { return currentStyle; },
-      fillRect: (x: number, y: number, w: number, h: number) => fills.push({ style: currentStyle, x, y, w, h }),
-    };
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
-      fakeCtx as unknown as CanvasRenderingContext2D,
-    );
-    class FakeImage {
-      naturalWidth = 100; naturalHeight = 100; onload: (() => void) | null = null;
-      set src(_s: string) { this.onload?.(); }
-    }
-    vi.stubGlobal("Image", FakeImage);
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 1; });
-    vi.stubGlobal("cancelAnimationFrame", () => {});
+// One fake 2D context backs both the offscreen source canvas and the pixel
+// canvas. getImageData yields red and green from pixelAt (white by default).
+function stubLiveSource(pixelAt: (x: number, y: number) => [number, number] = () => [255, 255]) {
+  const fills: Array<{ style: string; x: number; y: number; w: number; h: number }> = [];
+  const reads = { count: 0 };
+  let currentStyle = "";
+  const fakeCtx = {
+    drawImage: () => {},
+    clearRect: () => {},
+    getImageData: (x0: number, y0: number, w: number, h: number) => {
+      reads.count++;
+      const data = new Uint8ClampedArray(w * h * 4).fill(255);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) [data[(y * w + x) * 4], data[(y * w + x) * 4 + 1]] = pixelAt(x0 + x, y0 + y);
+      }
+      return { data, width: w, height: h };
+    },
+    set fillStyle(v: string) { currentStyle = v; },
+    get fillStyle() { return currentStyle; },
+    fillRect: (x: number, y: number, w: number, h: number) => fills.push({ style: currentStyle, x, y, w, h }),
+  };
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+    fakeCtx as unknown as CanvasRenderingContext2D,
+  );
+  class FakeImage {
+    naturalWidth = 100; naturalHeight = 100; onload: (() => void) | null = null;
+    set src(_s: string) { this.onload?.(); }
+  }
+  vi.stubGlobal("Image", FakeImage);
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 1; });
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  return { fills, reads };
+}
 
-    const id = nextRectId();
-    const state: AnnotationsState = {
-      rects: [{ id, x: 10, y: 20, w: 48, h: 36, note: "", kind: "redaction" }],
-      history: [],
-      active: null,
-      lastCreatedId: id,
-    };
-    function Harness() {
-      const [s, dispatch] = useReducer(reducer, state);
-      return (
-        <DrawingLayer
-          state={s}
-          dispatch={dispatch}
-          redactMode
-          redactionStyle="pixelated"
-          sourceImageUrl="blob:x"
-          imageRect={{ x: 0, y: 0, w: 100, h: 100 }}
-        />
-      );
-    }
-    const { container } = render(<Harness />);
+function LivePixelatedHarness({
+  withRect = true,
+  imageRect = { x: 0, y: 0, w: 100, h: 100 },
+}: {
+  withRect?: boolean;
+  imageRect?: { x: number; y: number; w: number; h: number };
+}) {
+  const id = "live-pixelated";
+  const [s, dispatch] = useReducer(reducer, {
+    rects: withRect ? [{ id, x: 10, y: 20, w: 48, h: 36, note: "", kind: "redaction" }] : [],
+    history: [],
+    active: null,
+    lastCreatedId: withRect ? id : null,
+  } satisfies AnnotationsState);
+  return (
+    <DrawingLayer
+      state={s}
+      dispatch={dispatch}
+      redactMode
+      redactionStyle="pixelated"
+      sourceImageUrl="blob:x"
+      imageRect={imageRect}
+    />
+  );
+}
+
+function dragTenMoves(container: HTMLElement) {
+  const surface = container.firstChild as HTMLDivElement;
+  const rect = container.querySelector("[data-rect-id]") as HTMLDivElement;
+  fireEvent.mouseDown(rect, { clientX: 20, clientY: 30, button: 0 });
+  for (let i = 1; i <= 10; i++) fireEvent.mouseMove(surface, { clientX: 20 + i, clientY: 30 + i });
+  fireEvent.mouseUp(surface);
+}
+
+describe("PixelatedRedactionFill live sampling", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("renders the canvas and paints one averaged block-fill per block from the sampled source", () => {
+    const { fills } = stubLiveSource();
+    const { container } = render(<LivePixelatedHarness />);
 
     // Live canvas renders for the pixelated redaction once the source decodes.
     expect(container.querySelector('[data-testid="redaction-pixel-canvas"]')).not.toBeNull();
@@ -238,9 +265,50 @@ describe("PixelatedRedactionFill live sampling", () => {
     expect(fills.length).toBe(12);
     expect(fills.every((f) => f.style === "rgba(255, 255, 255, 1.000)")).toBe(true);
     expect(fills[0]).toMatchObject({ x: 0, y: 0, w: 12, h: 12 });
+  });
 
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
+  it("samples the source pixels under the rect", () => {
+    // Red = source x, green = source y. Rect starts at (10, 20) with block 12,
+    // so the first block covers x 10..21 (mean 15) and y 20..31 (mean 25).
+    const { fills } = stubLiveSource((x, y) => [x, y]);
+    render(<LivePixelatedHarness />);
+    expect(fills[0].style).toBe("rgba(15, 25, 255, 1.000)");
+    expect(fills[1].style).toBe("rgba(27, 25, 255, 1.000)");
+  });
+
+  it("samples from the clipped origin when the rect extends past the image's top-left", () => {
+    // Image starts at (20, 30), rect at (10, 20): 10 px of the rect lie outside on
+    // each axis, so the first block paints at (10, 10) from source x 0..11, y 0..11 (mean 5).
+    const { fills } = stubLiveSource((x, y) => [x, y]);
+    render(<LivePixelatedHarness imageRect={{ x: 20, y: 30, w: 100, h: 100 }} />);
+    expect(fills[0]).toMatchObject({ style: "rgba(5, 5, 255, 1.000)", x: 10, y: 10, w: 12, h: 12 });
+  });
+
+  it("reads the frame back at decode, before any pixelated rect exists", () => {
+    const { reads } = stubLiveSource();
+    render(<LivePixelatedHarness withRect={false} />);
+    expect(reads.count).toBe(1);
+  });
+
+  it("pixelate drag reads back once", () => {
+    const { reads, fills } = stubLiveSource();
+    const { container } = render(<LivePixelatedHarness />);
+    const fillsBeforeDrag = fills.length;
+    dragTenMoves(container);
+    // The moves still repaint; only the source readback is shared.
+    expect(fills.length).toBeGreaterThan(fillsBeforeDrag);
+    expect(reads.count).toBeLessThanOrEqual(1);
+  });
+
+  it("pixelate drag keeps one canvas", () => {
+    stubLiveSource();
+    const widthSets = vi.spyOn(HTMLCanvasElement.prototype, "width", "set");
+    const heightSets = vi.spyOn(HTMLCanvasElement.prototype, "height", "set");
+    const { container } = render(<LivePixelatedHarness />);
+    const widthBefore = widthSets.mock.calls.length;
+    const heightBefore = heightSets.mock.calls.length;
+    dragTenMoves(container);
+    expect(widthSets.mock.calls.length - widthBefore).toBeLessThanOrEqual(1);
+    expect(heightSets.mock.calls.length - heightBefore).toBeLessThanOrEqual(1);
   });
 });
-

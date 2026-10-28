@@ -15,7 +15,9 @@ export function redactionBlockPx(scaleFactor: number): number {
  * partial cells at the right/bottom edges are clamped. The truncating mean
  * matches src-tauri/src/snapshot/redact.rs::pixelate byte-for-byte. Callers
  * either fill a buffer (the bake) or paint per-cell rects (the live preview),
- * so neither path duplicates the averaging.
+ * so neither path duplicates the averaging. `stride` (row width of `src` in px)
+ * and `offset` (pixel index of the region origin) let a caller average a
+ * sub-rectangle of a larger buffer in place.
  */
 export function forEachBlockMean(
   src: Uint8ClampedArray,
@@ -23,6 +25,8 @@ export function forEachBlockMean(
   height: number,
   block: number,
   visit: (bx: number, by: number, bw: number, bh: number, r: number, g: number, b: number, a: number) => void,
+  stride: number = width,
+  offset: number = 0,
 ): void {
   for (let by = 0; by < height; by += block) {
     const byEnd = Math.min(by + block, height)
@@ -31,7 +35,7 @@ export function forEachBlockMean(
       let r = 0, g = 0, b = 0, a = 0, n = 0
       for (let y = by; y < byEnd; y++) {
         for (let x = bx; x < bxEnd; x++) {
-          const i = (y * width + x) * 4
+          const i = (offset + y * stride + x) * 4
           r += src[i]; g += src[i + 1]; b += src[i + 2]; a += src[i + 3]
           n++
         }
