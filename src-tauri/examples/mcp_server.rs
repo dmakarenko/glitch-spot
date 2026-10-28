@@ -2,7 +2,10 @@
 // ABOUTME: Starts the MCP server on 127.0.0.1:7820 with an extra /test/inject endpoint.
 
 use axum::{extract::State, routing::post, Json, Router};
-use glitch_spot::mcp::{server::build_router, store::SnapshotStore};
+use glitch_spot::mcp::{
+    server::{build_router, local_only},
+    store::SnapshotStore,
+};
 use glitch_spot::snapshot::Snapshot;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -23,7 +26,7 @@ async fn main() {
         .route("/test/inject", post(inject))
         .with_state(store.clone());
 
-    let app = build_router(store).merge(inject_router);
+    let app = local_only(build_router(store).merge(inject_router), 7820);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:7820")
         .await
