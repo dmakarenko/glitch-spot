@@ -689,22 +689,13 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
         let state = app.state::<crate::AppState>();
         state.settings.current_tray()
     };
-    let initial_tint = if initial_coloured {
-        Tint::Coloured
-    } else {
-        Tint::Mono
-    };
-    let initial_icon: Image<'_> = match &frames {
-        Some(f) => {
-            let assets = f.assets(initial_tint);
-            let bytes = if initial_animated {
-                &assets.pulse[0]
-            } else {
-                &assets.static_healthy
-            };
-            Image::new(bytes, f.width, f.height)
-        }
-        None => Image::from_bytes(include_bytes!("../icons/tray.png"))?,
+    let initial_key = initial_draw_key(initial_animated, initial_coloured);
+    let initial_bytes = frames
+        .as_ref()
+        .and_then(|f| icon_bytes(f, &initial_key, None));
+    let initial_icon: Image<'_> = match (&frames, &initial_bytes) {
+        (Some(f), Some(bytes)) => Image::new(bytes, f.width, f.height),
+        _ => Image::from_bytes(include_bytes!("../icons/tray.png"))?,
     };
 
     let tray = TrayIconBuilder::with_id(TRAY_ID)
@@ -1134,6 +1125,34 @@ fn initial_draw_key(animated: bool, coloured: bool) -> DrawKey {
     )
 }
 
+/// The icon image for `key`; `None` for a burst key without its step.
+fn icon_bytes<'a>(
+    frames: &'a AnimationFrames,
+    key: &DrawKey,
+    step: Option<&ScanlineStep>,
+) -> Option<std::borrow::Cow<'a, [u8]>> {
+    use std::borrow::Cow;
+    let assets = frames.assets(key.tint);
+    Some(match &key.phase {
+        Phase::Static(true) => Cow::Borrowed(&assets.static_healthy[..]),
+        Phase::Static(false) => Cow::Borrowed(&assets.static_unhealthy[..]),
+        Phase::Pulse(idx) => Cow::Borrowed(&assets.pulse[*idx][..]),
+        Phase::SteadyUnhealthy => Cow::Borrowed(&assets.steady_unhealthy[..]),
+        Phase::Burst { side, .. } => {
+            let base = match side {
+                BurstSide::Healthy => &assets.burst_base_healthy,
+                BurstSide::Unhealthy => &assets.burst_base_unhealthy,
+            };
+            Cow::Owned(apply_scanline_shift(
+                base,
+                frames.width,
+                frames.height,
+                &step?.bands,
+            ))
+        }
+    })
+}
+
 /// Advance one burst state machine by one tick: start a burst when the gap
 /// runs out, step through it, and schedule the next gap when it ends.
 fn advance_burst(
@@ -1185,26 +1204,24 @@ struct TrayAnimator {
     red_state: AnimState,
     next_red_glitch_at: u64,
     // Last icon we asked the OS to render; `set_icon` is skipped when the key matches.
-    last_drawn: Option<DrawKey>,
+    last_drawn: DrawKey,
     // Reset the burst state machines on a mode flip so a stale burst can't resume mid-step.
     last_mode: Option<(bool, bool)>,
     height: u32,
 }
 
 impl TrayAnimator {
-    fn new(mut rng: rand::rngs::StdRng, healthy: bool, drawn: DrawKey, height: u32) -> Self {
-        use rand::Rng;
-        let next_glitch_at = rng.gen_range(GLITCH_GAP_MIN..=GLITCH_GAP_MAX);
-        let next_red_glitch_at = rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
+    fn new(rng: rand::rngs::StdRng, healthy: bool, drawn: DrawKey, height: u32) -> Self {
+        // The gap timers are rolled by the first tick, which sees `last_mode: None`.
         Self {
             rng,
             counter: 0,
             healthy,
             state: AnimState::Pulsing,
-            next_glitch_at,
+            next_glitch_at: 0,
             red_state: AnimState::Pulsing,
-            next_red_glitch_at,
-            last_drawn: Some(drawn),
+            next_red_glitch_at: 0,
+            last_drawn: drawn,
             last_mode: None,
             height,
         }
@@ -1229,13 +1246,14 @@ impl TrayAnimator {
     }
 
     /// Paint the icon if it changed, advance the burst timers, and return the
-    /// delay until the next tick. `paint` gets the burst step for burst keys.
+    /// delay until the next frame, or `None` in static mode, which has no frame
+    /// timer. `paint` gets the burst step for burst keys.
     fn tick(
         &mut self,
         animated: bool,
         coloured: bool,
         mut paint: impl FnMut(&DrawKey, Option<&ScanlineStep>),
-    ) -> std::time::Duration {
+    ) -> Option<std::time::Duration> {
         use rand::Rng;
         if self.last_mode != Some((animated, coloured)) {
             self.state = AnimState::Pulsing;
@@ -1255,12 +1273,12 @@ impl TrayAnimator {
             self.counter,
             PULSE_FRAME_COUNT,
         );
-        let delay = if matches!(want.phase, Phase::Burst { .. }) {
-            BURST_TICK
-        } else {
-            PULSE_TICK
+        let delay = match want.phase {
+            Phase::Static(_) => None,
+            Phase::Burst { .. } => Some(BURST_TICK),
+            _ => Some(PULSE_TICK),
         };
-        if self.last_drawn.as_ref() != Some(&want) {
+        if self.last_drawn != want {
             let step = match &want.phase {
                 Phase::Burst { side, step_idx } => {
                     let glitch_state = match side {
@@ -1275,7 +1293,7 @@ impl TrayAnimator {
                 _ => None,
             };
             paint(&want, step);
-            self.last_drawn = Some(want);
+            self.last_drawn = want;
         }
 
         // Static mode never enters Glitching, so only Animated advances the bursts.
@@ -1347,29 +1365,15 @@ async fn run_tray_animation(
     );
 
     let mut paint = |key: &DrawKey, step: Option<&ScanlineStep>| {
-        let assets = frames.assets(key.tint);
+        let Some(bytes) = icon_bytes(&frames, key, step) else {
+            return;
+        };
         // Mono frames are painted as macOS template images so the system
         // tints the alpha mask to the menu-bar foreground. Use
         // set_icon_with_as_template — set_icon then set_icon_as_template
         // flickers, because set_icon creates an NSImage with template=false.
         let is_template = matches!(key.tint, Tint::Mono);
-        let shifted;
-        let bytes: &[u8] = match &key.phase {
-            Phase::Static(true) => &assets.static_healthy,
-            Phase::Static(false) => &assets.static_unhealthy,
-            Phase::Pulse(idx) => &assets.pulse[*idx],
-            Phase::SteadyUnhealthy => &assets.steady_unhealthy,
-            Phase::Burst { side, .. } => {
-                let Some(step) = step else { return };
-                let base = match side {
-                    BurstSide::Healthy => &assets.burst_base_healthy,
-                    BurstSide::Unhealthy => &assets.burst_base_unhealthy,
-                };
-                shifted = apply_scanline_shift(base, frames.width, frames.height, &step.bands);
-                &shifted
-            }
-        };
-        let img = Image::new(bytes, frames.width, frames.height);
+        let img = Image::new(&bytes, frames.width, frames.height);
         let _ = tray.set_icon_with_as_template(Some(img), is_template);
     };
 
@@ -1378,14 +1382,14 @@ async fn run_tray_animation(
         tray_coloured.load(Ordering::Relaxed),
         &mut paint,
     );
-    let anim_sleep = sleep(first);
+    // Static mode has no frame timer: it redraws only on a health or mode change.
+    let mut frame_timer = first.is_some();
+    let anim_sleep = sleep(first.unwrap_or_default());
     tokio::pin!(anim_sleep);
 
     loop {
-        let animated = tray_animated.load(Ordering::Relaxed);
-        // Static mode has no frame timer: it redraws only on a health or mode change.
         tokio::select! {
-            _ = &mut anim_sleep, if animated => {}
+            _ = &mut anim_sleep, if frame_timer => {}
             _ = tray_changed.notified() => {}
             _ = health_tick.tick() => {
                 let new_healthy = is_healthy(&mcp_bound);
@@ -1404,7 +1408,7 @@ async fn run_tray_animation(
                     refresh_menu(&app);
                 }
                 anim.set_health(new_healthy);
-                if animated {
+                if frame_timer {
                     continue;
                 }
             }
@@ -1414,7 +1418,10 @@ async fn run_tray_animation(
             tray_coloured.load(Ordering::Relaxed),
             &mut paint,
         );
-        anim_sleep.as_mut().reset(Instant::now() + next);
+        frame_timer = next.is_some();
+        if let Some(delay) = next {
+            anim_sleep.as_mut().reset(Instant::now() + delay);
+        }
     }
 }
 
@@ -1921,7 +1928,8 @@ mod tests {
         let mut anim = animator(true, false, true);
         let mut set_icon_calls = 0;
         for _ in 0..100 {
-            anim.tick(false, true, |_, _| set_icon_calls += 1);
+            let next = anim.tick(false, true, |_, _| set_icon_calls += 1);
+            assert_eq!(next, None, "static mode must not arm a frame timer");
         }
         assert_eq!(set_icon_calls, 0);
     }
@@ -1944,7 +1952,9 @@ mod tests {
         let (mut elapsed, mut pulse_calls_in_10s, mut bursts) = (Duration::ZERO, 0, 0);
         for _ in 0..400 {
             let mut phase = None;
-            let delay = anim.tick(true, true, |k, _| phase = Some(k.phase.clone()));
+            let delay = anim
+                .tick(true, true, |k, _| phase = Some(k.phase.clone()))
+                .expect("animated mode arms a frame timer");
             match phase {
                 Some(Phase::Pulse(_)) => assert_eq!(delay, Duration::from_millis(250)),
                 Some(Phase::Burst { .. }) => {
