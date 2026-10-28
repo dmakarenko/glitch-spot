@@ -406,6 +406,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_only_ignores_forwarded_host_headers() {
+        let (app, _) = make_app();
+        let status = initialize_status(
+            app,
+            &[
+                ("host", "evil.example:7820"),
+                ("x-forwarded-host", "127.0.0.1:7820"),
+                ("forwarded", "host=127.0.0.1:7820"),
+            ],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
     async fn local_only_rejects_more_than_one_host_header() {
         let (app, _) = make_app();
         let status = initialize_status(
