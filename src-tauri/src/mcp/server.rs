@@ -1,9 +1,10 @@
 // ABOUTME: MCP JSON-RPC HTTP server exposing Glitch Spot snapshot tools.
-// ABOUTME: Runs on localhost:7820; CC registers it as an MCP server.
+// ABOUTME: Runs on 127.0.0.1 at the configured MCP port; CC registers it as an MCP server.
 
 use axum::{
-    extract::State,
-    http::StatusCode,
+    extract::{Request, State},
+    http::{header, HeaderMap, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Json as AxumJson, Response},
     routing::post,
     Router,
@@ -84,7 +85,7 @@ async fn dispatch(store: Arc<SnapshotStore>, req: RpcRequest) -> RpcResponse {
             id,
             json!({
                 "protocolVersion": "2024-11-05",
-                "serverInfo": { "name": "glitch-spot", "version": "0.4.0" },
+                "serverInfo": { "name": "glitch-spot", "version": env!("CARGO_PKG_VERSION") },
                 "capabilities": { "tools": {} }
             }),
         ),
@@ -99,7 +100,7 @@ async fn dispatch(store: Arc<SnapshotStore>, req: RpcRequest) -> RpcResponse {
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "timeout_seconds": { "type": "integer", "description": "Max seconds to wait per call. Default 600, max 1800." },
+                                "timeout_seconds": { "type": "integer", "description": "Max seconds this call blocks before it returns pending. The server caps each call at 45s, so a longer wait needs retries. Default 600." },
                                 "last_seen_id": { "type": "string", "description": "Optional. ID from the previous pending response's last_id field. If the current latest snapshot differs, it is returned immediately without blocking." }
                             }
                         }
@@ -150,31 +151,11 @@ async fn call_tool(
             // Cap each HTTP round-trip to stay under MCP client connection timeouts.
             // Callers retry immediately on { "pending": true, "last_id": "..." }.
             let chunk = requested.min(45);
-            let last_seen_id = args["last_seen_id"].as_str().map(|s| s.to_string());
-
-            // If a snapshot arrived in the gap between the previous chunk's timeout and this
-            // retry, catch it here before blocking — borrow_and_update() in wait_for_next
-            // would otherwise mark it as seen and miss it.
-            if let Some(ref seen_id) = last_seen_id {
-                if let Some(snap) = store.get_latest() {
-                    if &snap.id != seen_id {
-                        return mcp_text_content(
-                            id,
-                            serde_json::to_value(&snap).unwrap_or(Value::Null),
-                        );
-                    }
-                }
-            }
-
-            // Capture the current latest ID BEFORE waiting. Using the post-wait latest
-            // would include snapshots that arrived during/after the wait, making the
-            // gap-catch skip them on the next retry.
-            let pre_wait_id = store.get_latest().map(|s| s.id).unwrap_or_default();
-            let result = store.wait_for_next(chunk).await;
-            let body = match result {
+            let last_seen_id = args["last_seen_id"].as_str();
+            let body = match store.wait_for_next(chunk, last_seen_id).await {
                 WaitResult::Snapshot(s) => serde_json::to_value(&s).unwrap_or(Value::Null),
                 WaitResult::Cancelled => json!({ "cancelled": true }),
-                WaitResult::TimedOut => json!({ "pending": true, "last_id": pre_wait_id }),
+                WaitResult::TimedOut { last_id } => json!({ "pending": true, "last_id": last_id }),
             };
             mcp_text_content(id, body)
         }
@@ -228,6 +209,46 @@ pub fn build_router(store: Arc<SnapshotStore>) -> Router {
         .with_state(store)
 }
 
+/// Rejects DNS-rebinding requests: a missing or foreign `Host`, or any browser `Origin`.
+pub fn local_only(router: Router, port: u16) -> Router {
+    router.layer(middleware::from_fn_with_state(port, reject_foreign_request))
+}
+
+async fn reject_foreign_request(State(port): State<u16>, req: Request, next: Next) -> Response {
+    match foreign_request_reason(req.headers(), port) {
+        Some(reason) => {
+            eprintln!("[glitch-spot mcp] rejected request: {reason}");
+            (StatusCode::FORBIDDEN, reason).into_response()
+        }
+        None => next.run(req).await,
+    }
+}
+
+// Reads the raw Host header: axum's Host extractor obeys X-Forwarded-Host, which a page can set.
+fn foreign_request_reason(headers: &HeaderMap, port: u16) -> Option<&'static str> {
+    if headers.contains_key(header::ORIGIN) {
+        return Some("browser Origin header is not allowed");
+    }
+    let mut hosts = headers.get_all(header::HOST).iter();
+    let host = match (hosts.next(), hosts.next()) {
+        (None, _) => return Some("missing Host header"),
+        (Some(_), Some(_)) => return Some("more than one Host header"),
+        (Some(host), None) => host,
+    };
+    match host.to_str() {
+        Ok(host) if is_local_host(host, port) => None,
+        _ => Some("Host is not this local server"),
+    }
+}
+
+fn is_local_host(host: &str, port: u16) -> bool {
+    let (name, host_port) = match host.rsplit_once(':') {
+        Some((name, host_port)) => (name, host_port.parse::<u16>().ok()),
+        None => (host, Some(80)),
+    };
+    host_port == Some(port) && (name == "127.0.0.1" || name.eq_ignore_ascii_case("localhost"))
+}
+
 /// Start the MCP server. Binds to 127.0.0.1:port and runs forever. The shared
 /// `bound` flag is set to true on successful bind and cleared if/when serve
 /// returns — the tray uses it as a deterministic health signal (true ⇒ *this*
@@ -238,7 +259,7 @@ pub async fn serve(
     bound: Arc<std::sync::atomic::AtomicBool>,
 ) {
     use std::sync::atomic::Ordering;
-    let app = build_router(store);
+    let app = local_only(build_router(store), port);
     let addr = format!("127.0.0.1:{port}");
     let listener = loop {
         match tokio::net::TcpListener::bind(&addr).await {
@@ -300,16 +321,180 @@ mod tests {
         }
     }
 
+    const TEST_PORT: u16 = 7820;
+
     fn make_app() -> (Router, Arc<SnapshotStore>) {
+        make_app_on_port(TEST_PORT)
+    }
+
+    fn make_app_on_port(port: u16) -> (Router, Arc<SnapshotStore>) {
         let store = Arc::new(SnapshotStore::new());
-        let app = build_router(store.clone());
+        let app = local_only(build_router(store.clone()), port);
         (app, store)
+    }
+
+    /// Sends an `initialize` POST with exactly the given headers.
+    async fn initialize_status(app: Router, headers: &[(&str, &str)]) -> StatusCode {
+        let mut req = Request::builder()
+            .method(Method::POST)
+            .uri("/mcp")
+            .header("content-type", "application/json");
+        for (name, value) in headers {
+            req = req.header(*name, *value);
+        }
+        let body = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}});
+        let req = req.body(Body::from(body.to_string())).unwrap();
+        app.oneshot(req).await.unwrap().status()
+    }
+
+    #[tokio::test]
+    async fn mcp_guard_rejects_foreign_host() {
+        let (app, _) = make_app();
+        let status = initialize_status(app, &[("host", "evil.example:7820")]).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn mcp_guard_rejects_browser_origin() {
+        let (app, _) = make_app();
+        let status = initialize_status(
+            app,
+            &[
+                ("host", "127.0.0.1:7820"),
+                ("origin", "http://evil.example"),
+            ],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn mcp_guard_accepts_localhost_without_origin() {
+        let (app, _) = make_app();
+        let status = initialize_status(app, &[("host", "localhost:7820")]).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn mcp_guard_rejects_missing_host() {
+        let (app, _) = make_app();
+        let status = initialize_status(app, &[]).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn mcp_guard_uses_configured_port() {
+        let (app, _) = make_app_on_port(9090);
+        let status = initialize_status(app.clone(), &[("host", "127.0.0.1:9090")]).await;
+        assert_eq!(status, StatusCode::OK);
+        let status = initialize_status(app, &[("host", "127.0.0.1:7820")]).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn local_only_compares_hostname_without_case() {
+        let (app, _) = make_app();
+        let status = initialize_status(app, &[("host", "LOCALHOST:7820")]).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn local_only_rejects_local_hostname_as_prefix() {
+        let (app, _) = make_app();
+        let status = initialize_status(app, &[("host", "127.0.0.1.evil.com:7820")]).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn local_only_ignores_forwarded_host_headers() {
+        let (app, _) = make_app();
+        let status = initialize_status(
+            app,
+            &[
+                ("host", "evil.example:7820"),
+                ("x-forwarded-host", "127.0.0.1:7820"),
+                ("forwarded", "host=127.0.0.1:7820"),
+            ],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn local_only_rejects_more_than_one_host_header() {
+        let (app, _) = make_app();
+        let status = initialize_status(
+            app,
+            &[("host", "127.0.0.1:7820"), ("host", "evil.example:7820")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn local_only_accepts_portless_host_only_on_port_80() {
+        let (app, _) = make_app();
+        let status = initialize_status(app, &[("host", "127.0.0.1")]).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (app, _) = make_app_on_port(80);
+        let status = initialize_status(app, &[("host", "127.0.0.1")]).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn local_only_rejects_before_routing_and_body_parsing() {
+        let (app, _) = make_app();
+        let requests = [
+            (Method::OPTIONS, "/mcp", ""),
+            (Method::GET, "/unknown", ""),
+            (Method::POST, "/mcp", "not json"),
+        ];
+        for (method, uri, body) in requests {
+            let req = Request::builder()
+                .method(method.clone())
+                .uri(uri)
+                .header("host", "evil.example:7820")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap();
+            let status = app.clone().oneshot(req).await.unwrap().status();
+            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn local_only_rejected_cancel_wait_has_no_side_effect() {
+        let (app, store) = make_app();
+        let store2 = store.clone();
+        let wait = tokio::spawn(async move { store2.wait_for_next(5, None).await });
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cancel_wait","arguments":{}}});
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/mcp")
+            .header("host", "evil.example:7820")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let status = app.oneshot(req).await.unwrap().status();
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        store.publish(fake_snapshot("snap_after_rejected_cancel"));
+        match wait.await.unwrap() {
+            WaitResult::Snapshot(s) => assert_eq!(s.id, "snap_after_rejected_cancel"),
+            other => panic!(
+                "expected Snapshot, got {:?}",
+                std::mem::discriminant(&other)
+            ),
+        }
     }
 
     async fn post_json(app: Router, body: Value) -> Value {
         let req = Request::builder()
             .method(Method::POST)
             .uri("/mcp")
+            .header("host", "127.0.0.1:7820")
             .header("content-type", "application/json")
             .body(Body::from(body.to_string()))
             .unwrap();
@@ -329,6 +514,10 @@ mod tests {
         )
         .await;
         assert_eq!(resp["result"]["serverInfo"]["name"], "glitch-spot");
+        assert_eq!(
+            resp["result"]["serverInfo"]["version"],
+            env!("CARGO_PKG_VERSION")
+        );
     }
 
     #[tokio::test]

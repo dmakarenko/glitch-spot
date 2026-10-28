@@ -25,7 +25,7 @@ pub struct SnapshotStore {
 pub enum WaitResult {
     Snapshot(Snapshot),
     Cancelled,
-    TimedOut,
+    TimedOut { last_id: String },
 }
 
 impl SnapshotStore {
@@ -89,29 +89,37 @@ impl SnapshotStore {
         removed
     }
 
-    /// Wait for the next snapshot or cancel signal, up to `timeout_secs`.
-    pub async fn wait_for_next(&self, timeout_secs: u64) -> WaitResult {
+    /// Wait up to `timeout_secs` for a snapshot newer than `last_seen_id`, or a cancel.
+    pub async fn wait_for_next(&self, timeout_secs: u64, last_seen_id: Option<&str>) -> WaitResult {
         let mut rx = self.rx.clone();
         // Mark current value as seen so changed() only fires on the NEXT send.
         let _ = rx.borrow_and_update();
+        // Read latest only after the mark: a racing publish shows up here or wakes changed().
+        let latest = self.get_latest();
+        if let (Some(seen), Some(snap)) = (last_seen_id, &latest) {
+            if snap.id != seen {
+                return WaitResult::Snapshot(snap.clone());
+            }
+        }
+        let last_id = latest.map(|s| s.id).unwrap_or_default();
 
         let wait = async {
             loop {
                 if rx.changed().await.is_err() {
                     // Sender dropped — treat as timeout.
-                    return WaitResult::TimedOut;
+                    return None;
                 }
                 match rx.borrow().as_ref() {
-                    Some(StoreEvent::Snapshot(s)) => return WaitResult::Snapshot(s.clone()),
-                    Some(StoreEvent::Cancelled) => return WaitResult::Cancelled,
+                    Some(StoreEvent::Snapshot(s)) => return Some(WaitResult::Snapshot(s.clone())),
+                    Some(StoreEvent::Cancelled) => return Some(WaitResult::Cancelled),
                     None => continue, // defensive: should not happen with current senders
                 }
             }
         };
 
         match timeout(Duration::from_secs(timeout_secs), wait).await {
-            Ok(result) => result,
-            Err(_) => WaitResult::TimedOut,
+            Ok(Some(result)) => result,
+            Ok(None) | Err(_) => WaitResult::TimedOut { last_id },
         }
     }
 }
@@ -181,7 +189,7 @@ mod tests {
         let store = Arc::new(SnapshotStore::new());
         let store2 = store.clone();
 
-        let handle = tokio::spawn(async move { store2.wait_for_next(5).await });
+        let handle = tokio::spawn(async move { store2.wait_for_next(5, None).await });
 
         tokio::time::sleep(Duration::from_millis(50)).await;
         store.publish(fake_snapshot("snap_002"));
@@ -200,7 +208,7 @@ mod tests {
         let store = Arc::new(SnapshotStore::new());
         let store2 = store.clone();
 
-        let handle = tokio::spawn(async move { store2.wait_for_next(5).await });
+        let handle = tokio::spawn(async move { store2.wait_for_next(5, None).await });
 
         tokio::time::sleep(Duration::from_millis(50)).await;
         store.cancel();
@@ -217,8 +225,56 @@ mod tests {
     #[tokio::test]
     async fn wait_times_out() {
         let store = SnapshotStore::new();
-        match store.wait_for_next(0).await {
-            WaitResult::TimedOut => {}
+        match store.wait_for_next(0, None).await {
+            WaitResult::TimedOut { .. } => {}
+            other => panic!(
+                "expected TimedOut, got {:?}",
+                std::mem::discriminant(&other)
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn wait_returns_snapshot_published_before_the_wait_subscribes() {
+        // borrow_and_update() marks snap_gap as seen; the cursor check must still return it.
+        let store = SnapshotStore::new();
+        store.publish(fake_snapshot("snap_seen"));
+        store.publish(fake_snapshot("snap_gap"));
+        match store.wait_for_next(5, Some("snap_seen")).await {
+            WaitResult::Snapshot(s) => assert_eq!(s.id, "snap_gap"),
+            other => panic!(
+                "expected Snapshot, got {:?}",
+                std::mem::discriminant(&other)
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn wait_with_empty_cursor_returns_any_latest_snapshot() {
+        let store = SnapshotStore::new();
+        store.publish(fake_snapshot("snap_first"));
+        match store.wait_for_next(5, Some("")).await {
+            WaitResult::Snapshot(s) => assert_eq!(s.id, "snap_first"),
+            other => panic!(
+                "expected Snapshot, got {:?}",
+                std::mem::discriminant(&other)
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn wait_times_out_with_latest_id_as_cursor() {
+        let store = SnapshotStore::new();
+        match store.wait_for_next(0, None).await {
+            WaitResult::TimedOut { last_id } => assert_eq!(last_id, ""),
+            other => panic!(
+                "expected TimedOut, got {:?}",
+                std::mem::discriminant(&other)
+            ),
+        }
+        store.publish(fake_snapshot("snap_cur"));
+        match store.wait_for_next(0, Some("snap_cur")).await {
+            WaitResult::TimedOut { last_id } => assert_eq!(last_id, "snap_cur"),
             other => panic!(
                 "expected TimedOut, got {:?}",
                 std::mem::discriminant(&other)
@@ -278,7 +334,7 @@ mod tests {
 
         for i in 0..3u32 {
             let store2 = store.clone();
-            let handle = tokio::spawn(async move { store2.wait_for_next(5).await });
+            let handle = tokio::spawn(async move { store2.wait_for_next(5, None).await });
             tokio::time::sleep(Duration::from_millis(20)).await;
             store.publish(fake_snapshot(&format!("snap_{i:03}")));
             match handle.await.unwrap() {

@@ -47,15 +47,14 @@ arrives, the wait is cancelled, or it times out.
    exec 2>/dev/null
    PORT=$(sed -n '/^\[mcp\]/,/^\[/{s/^[[:space:]]*port[[:space:]]*=[[:space:]]*\([0-9]\{1,\}\).*/\1/p;}' "$HOME/.glitch-spot/config.toml" 2>/dev/null | head -1); PORT=${PORT:-7820}
    ENDPOINT="http://127.0.0.1:${PORT}/mcp"
-   last=""
+   args='{"timeout_seconds":600}'
    for i in $(seq 1 14); do
-     if [ -n "$last" ]; then args=$(printf '{"timeout_seconds":600,"last_seen_id":"%s"}' "$last"); else args='{"timeout_seconds":600}'; fi
      resp=$(curl -s -m 60 -X POST "$ENDPOINT" -H 'content-type: application/json' \
        -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"wait_for_snapshot\",\"arguments\":$args}}")
      inner=$(printf '%s' "$resp" | jq -r '.result.content[0].text // empty')
      if [ -z "$inner" ]; then printf '{"error":"no response from Glitch Spot MCP server"}'; exit 0; fi
      if [ "$(printf '%s' "$inner" | jq -r '.cancelled // empty')" = "true" ]; then printf '%s' "$inner"; exit 0; fi
-     if [ "$(printf '%s' "$inner" | jq -r '.pending // empty')" = "true" ]; then last=$(printf '%s' "$inner" | jq -r '.last_id // empty'); continue; fi
+     if [ "$(printf '%s' "$inner" | jq -r '.pending // empty')" = "true" ]; then args=$(printf '{"timeout_seconds":600,"last_seen_id":"%s"}' "$(printf '%s' "$inner" | jq -r '.last_id // empty')"); continue; fi
      printf '%s' "$inner"; exit 0
    done
    printf '{"cancelled":true,"reason":"timeout"}'
