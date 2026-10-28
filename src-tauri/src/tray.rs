@@ -57,11 +57,11 @@ pub(crate) fn tint_frame(source_rgba: &[u8], rgb: (u8, u8, u8), alpha_factor: f3
     out
 }
 
-/// Number of frames in the pulse cycle. Combined with `ANIM_TICK_MS`,
-/// determines cycle length: 24 × 100ms = 2.4s gentle pulse.
-pub(crate) const PULSE_FRAME_COUNT: usize = 24;
+/// Number of frames in the pulse cycle. Combined with `PULSE_TICK`,
+/// determines cycle length: 10 × 250ms = 2.5s gentle pulse.
+pub(crate) const PULSE_FRAME_COUNT: usize = 10;
 
-/// 24 frames forming a 2.4s cosine pulse (alpha 30% → 100% → 30%) at the
+/// 10 frames forming a 2.5s cosine pulse (alpha 30% → 100% → 30%) at the
 /// given tint colour. Used for both cyan (coloured mode) and mono tints.
 pub(crate) fn build_pulse_frames(source: &[u8], rgb: (u8, u8, u8)) -> Vec<Vec<u8>> {
     const BASE: f32 = 0.65;
@@ -689,22 +689,13 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
         let state = app.state::<crate::AppState>();
         state.settings.current_tray()
     };
-    let initial_tint = if initial_coloured {
-        Tint::Coloured
-    } else {
-        Tint::Mono
-    };
-    let initial_icon: Image<'_> = match &frames {
-        Some(f) => {
-            let assets = f.assets(initial_tint);
-            let bytes = if initial_animated {
-                &assets.pulse[0]
-            } else {
-                &assets.static_healthy
-            };
-            Image::new(bytes, f.width, f.height)
-        }
-        None => Image::from_bytes(include_bytes!("../icons/tray.png"))?,
+    let initial_key = initial_draw_key(initial_animated, initial_coloured);
+    let initial_bytes = frames
+        .as_ref()
+        .and_then(|f| icon_bytes(f, &initial_key, None));
+    let initial_icon: Image<'_> = match (&frames, &initial_bytes) {
+        (Some(f), Some(bytes)) => Image::new(bytes, f.width, f.height),
+        _ => Image::from_bytes(include_bytes!("../icons/tray.png"))?,
     };
 
     let tray = TrayIconBuilder::with_id(TRAY_ID)
@@ -1020,15 +1011,18 @@ pub(crate) fn setup_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon
     Ok(tray)
 }
 
-const ANIM_TICK_MS: u64 = 100;
+/// Tick between pulse frames: each `set_icon` encodes a PNG, so the pulse
+/// redraws at 4Hz. Glitch bursts keep the faster `BURST_TICK`.
+const PULSE_TICK: std::time::Duration = std::time::Duration::from_millis(250);
+const BURST_TICK: std::time::Duration = std::time::Duration::from_millis(100);
 /// Min/max ticks between glitch bursts during healthy state.
-/// At 100ms/tick: 32-58 ticks ≈ 3.2-5.8s, centred around 4.5s.
-const GLITCH_GAP_MIN: u64 = 32;
-const GLITCH_GAP_MAX: u64 = 58;
+/// At 250ms/tick: 13-23 ticks ≈ 3.25-5.75s, centred around 4.5s.
+const GLITCH_GAP_MIN: u64 = 13;
+const GLITCH_GAP_MAX: u64 = 23;
 /// Min/max ticks between scanline bursts during unhealthy state.
-/// At 100ms/tick: 21-42 ticks ≈ 2.1-4.2s — more agitated than healthy.
-const RED_GAP_MIN: u64 = 21;
-const RED_GAP_MAX: u64 = 42;
+/// At 250ms/tick: 8-17 ticks ≈ 2-4.25s — more agitated than healthy.
+const RED_GAP_MIN: u64 = 8;
+const RED_GAP_MAX: u64 = 17;
 
 enum AnimState {
     Pulsing,
@@ -1118,6 +1112,217 @@ fn select_draw_key(
     DrawKey { tint, phase }
 }
 
+/// The icon `setup_tray` draws before the animation loop starts.
+fn initial_draw_key(animated: bool, coloured: bool) -> DrawKey {
+    select_draw_key(
+        animated,
+        coloured,
+        true,
+        &AnimState::Pulsing,
+        &AnimState::Pulsing,
+        0,
+        PULSE_FRAME_COUNT,
+    )
+}
+
+/// The icon image for `key`; `None` for a burst key without its step.
+fn icon_bytes<'a>(
+    frames: &'a AnimationFrames,
+    key: &DrawKey,
+    step: Option<&ScanlineStep>,
+) -> Option<std::borrow::Cow<'a, [u8]>> {
+    use std::borrow::Cow;
+    let assets = frames.assets(key.tint);
+    Some(match &key.phase {
+        Phase::Static(true) => Cow::Borrowed(&assets.static_healthy[..]),
+        Phase::Static(false) => Cow::Borrowed(&assets.static_unhealthy[..]),
+        Phase::Pulse(idx) => Cow::Borrowed(&assets.pulse[*idx][..]),
+        Phase::SteadyUnhealthy => Cow::Borrowed(&assets.steady_unhealthy[..]),
+        Phase::Burst { side, .. } => {
+            let base = match side {
+                BurstSide::Healthy => &assets.burst_base_healthy,
+                BurstSide::Unhealthy => &assets.burst_base_unhealthy,
+            };
+            Cow::Owned(apply_scanline_shift(
+                base,
+                frames.width,
+                frames.height,
+                &step?.bands,
+            ))
+        }
+    })
+}
+
+/// Advance one burst state machine by one tick: start a burst when the gap
+/// runs out, step through it, and schedule the next gap when it ends.
+fn advance_burst(
+    state: &mut AnimState,
+    next_at: &mut u64,
+    gap: std::ops::RangeInclusive<u64>,
+    counter: u64,
+    rng: &mut rand::rngs::StdRng,
+    height: u32,
+) {
+    use rand::Rng;
+    match state {
+        AnimState::Pulsing => {
+            if counter >= *next_at {
+                *state = AnimState::Glitching {
+                    sequence: random_scanline_sequence(rng, height),
+                    step_idx: 0,
+                    ticks_in_step: 0,
+                };
+            }
+        }
+        AnimState::Glitching {
+            sequence,
+            step_idx,
+            ticks_in_step,
+        } => {
+            *ticks_in_step += 1;
+            if *ticks_in_step >= sequence[*step_idx].ticks {
+                *step_idx += 1;
+                *ticks_in_step = 0;
+                if *step_idx >= sequence.len() {
+                    *state = AnimState::Pulsing;
+                    *next_at = counter + rng.gen_range(gap);
+                }
+            }
+        }
+    }
+}
+
+/// Animation state of the tray icon, kept apart from the `TrayIcon` so tests
+/// can count the `set_icon` calls a sequence of ticks makes.
+struct TrayAnimator {
+    // StdRng is Send, so the loop future is Send; thread_rng() isn't.
+    rng: rand::rngs::StdRng,
+    counter: u64,
+    healthy: bool,
+    state: AnimState,
+    next_glitch_at: u64,
+    red_state: AnimState,
+    next_red_glitch_at: u64,
+    // Last icon we asked the OS to render; `set_icon` is skipped when the key matches.
+    last_drawn: DrawKey,
+    // Reset the burst state machines on a mode flip so a stale burst can't resume mid-step.
+    last_mode: Option<(bool, bool)>,
+    height: u32,
+}
+
+impl TrayAnimator {
+    fn new(rng: rand::rngs::StdRng, healthy: bool, drawn: DrawKey, height: u32) -> Self {
+        // The gap timers are rolled by the first tick, which sees `last_mode: None`.
+        Self {
+            rng,
+            counter: 0,
+            healthy,
+            state: AnimState::Pulsing,
+            next_glitch_at: 0,
+            red_state: AnimState::Pulsing,
+            next_red_glitch_at: 0,
+            last_drawn: drawn,
+            last_mode: None,
+            height,
+        }
+    }
+
+    fn healthy(&self) -> bool {
+        self.healthy
+    }
+
+    fn set_health(&mut self, healthy: bool) {
+        use rand::Rng;
+        if !healthy {
+            // Reset the healthy machine so the cyan pulse resumes cleanly on recovery.
+            self.state = AnimState::Pulsing;
+            if self.healthy {
+                self.red_state = AnimState::Pulsing;
+                self.next_red_glitch_at =
+                    self.counter + self.rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
+            }
+        }
+        self.healthy = healthy;
+    }
+
+    /// Paint the icon if it changed, advance the burst timers, and return the
+    /// delay until the next frame, or `None` in static mode, which has no frame
+    /// timer. `paint` gets the burst step for burst keys.
+    fn tick(
+        &mut self,
+        animated: bool,
+        coloured: bool,
+        mut paint: impl FnMut(&DrawKey, Option<&ScanlineStep>),
+    ) -> Option<std::time::Duration> {
+        use rand::Rng;
+        if self.last_mode != Some((animated, coloured)) {
+            self.state = AnimState::Pulsing;
+            self.red_state = AnimState::Pulsing;
+            self.next_glitch_at =
+                self.counter + self.rng.gen_range(GLITCH_GAP_MIN..=GLITCH_GAP_MAX);
+            self.next_red_glitch_at = self.counter + self.rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
+            self.last_mode = Some((animated, coloured));
+        }
+
+        let want = select_draw_key(
+            animated,
+            coloured,
+            self.healthy,
+            &self.state,
+            &self.red_state,
+            self.counter,
+            PULSE_FRAME_COUNT,
+        );
+        let delay = match want.phase {
+            Phase::Static(_) => None,
+            Phase::Burst { .. } => Some(BURST_TICK),
+            _ => Some(PULSE_TICK),
+        };
+        if self.last_drawn != want {
+            let step = match &want.phase {
+                Phase::Burst { side, step_idx } => {
+                    let glitch_state = match side {
+                        BurstSide::Healthy => &self.state,
+                        BurstSide::Unhealthy => &self.red_state,
+                    };
+                    match glitch_state {
+                        AnimState::Glitching { sequence, .. } => sequence.get(*step_idx),
+                        AnimState::Pulsing => None,
+                    }
+                }
+                _ => None,
+            };
+            paint(&want, step);
+            self.last_drawn = want;
+        }
+
+        // Static mode never enters Glitching, so only Animated advances the bursts.
+        if animated {
+            if self.healthy {
+                advance_burst(
+                    &mut self.state,
+                    &mut self.next_glitch_at,
+                    GLITCH_GAP_MIN..=GLITCH_GAP_MAX,
+                    self.counter,
+                    &mut self.rng,
+                    self.height,
+                );
+            } else {
+                advance_burst(
+                    &mut self.red_state,
+                    &mut self.next_red_glitch_at,
+                    RED_GAP_MIN..=RED_GAP_MAX,
+                    self.counter,
+                    &mut self.rng,
+                    self.height,
+                );
+            }
+        }
+        self.counter = self.counter.wrapping_add(1);
+        delay
+    }
+}
+
 async fn run_tray_animation(
     tray: tauri::tray::TrayIcon,
     frames: AnimationFrames,
@@ -1127,12 +1332,16 @@ async fn run_tray_animation(
     app: AppHandle,
     menu_built_healthy: bool,
 ) {
-    use rand::{Rng, SeedableRng};
+    use rand::SeedableRng;
     use std::sync::atomic::Ordering;
     use tauri::image::Image;
-    use tokio::time::{interval, interval_at, Duration, Instant};
+    use tokio::time::{interval_at, sleep, Duration, Instant};
 
-    let mut anim_tick = interval(Duration::from_millis(ANIM_TICK_MS));
+    let tray_changed = app
+        .state::<crate::AppState>()
+        .settings
+        .tray_changed_signal();
+
     // interval_at so the first tick fires after 3s, not immediately.
     // The initial menu sync deferred to this tick must not race with
     // macOS menu system initialisation at task startup.
@@ -1140,144 +1349,48 @@ async fn run_tray_animation(
         Instant::now() + Duration::from_secs(3),
         Duration::from_secs(3),
     );
-    let mut healthy = is_healthy(&mcp_bound);
     // Tracks whether we've done the one-time startup menu sync. Deferred to
     // the first health_tick (≥3s) so set_menu is never called at task-start
     // while the OS menu system is still initialising (which caused a first-
     // hover glitch on the Tunnel Provider submenu).
     let mut initial_sync_done = false;
-    let mut counter: u64 = 0;
-    // StdRng is Send, so the future is Send and can be scheduled across threads
-    // by tokio. thread_rng() isn't Send because it holds thread-local state.
-    let mut rng = rand::rngs::StdRng::from_entropy();
-    let mut state = AnimState::Pulsing;
-    let mut next_glitch_at: u64 = rng.gen_range(GLITCH_GAP_MIN..=GLITCH_GAP_MAX);
-    let mut red_state = AnimState::Pulsing;
-    let mut next_red_glitch_at: u64 = rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
-    // Last icon we asked the OS to render. Skipping `set_icon` when the key
-    // matches eliminates ~3-4s of redundant set_icon calls every gap between
-    // red bursts, every Static-mode tick once the first frame lands, plus
-    // one redundant call inside any burst step held for 2 ticks.
-    let mut last_drawn: Option<DrawKey> = None;
-    // Detect when the user flips Animated or Coloured so we can reset the
-    // burst state machines — otherwise turning animation back on could
-    // resume a stale burst mid-step with garbled output.
-    let mut last_mode: Option<(bool, bool)> = None;
+    let mut anim = TrayAnimator::new(
+        rand::rngs::StdRng::from_entropy(),
+        is_healthy(&mcp_bound),
+        initial_draw_key(
+            tray_animated.load(Ordering::Relaxed),
+            tray_coloured.load(Ordering::Relaxed),
+        ),
+        frames.height,
+    );
+
+    let mut paint = |key: &DrawKey, step: Option<&ScanlineStep>| {
+        let Some(bytes) = icon_bytes(&frames, key, step) else {
+            return;
+        };
+        // Mono frames are painted as macOS template images so the system
+        // tints the alpha mask to the menu-bar foreground. Use
+        // set_icon_with_as_template — set_icon then set_icon_as_template
+        // flickers, because set_icon creates an NSImage with template=false.
+        let is_template = matches!(key.tint, Tint::Mono);
+        let img = Image::new(&bytes, frames.width, frames.height);
+        let _ = tray.set_icon_with_as_template(Some(img), is_template);
+    };
+
+    let first = anim.tick(
+        tray_animated.load(Ordering::Relaxed),
+        tray_coloured.load(Ordering::Relaxed),
+        &mut paint,
+    );
+    // Static mode has no frame timer: it redraws only on a health or mode change.
+    let mut frame_timer = first.is_some();
+    let anim_sleep = sleep(first.unwrap_or_default());
+    tokio::pin!(anim_sleep);
 
     loop {
         tokio::select! {
-            _ = anim_tick.tick() => {
-                let animated = tray_animated.load(Ordering::Relaxed);
-                let coloured = tray_coloured.load(Ordering::Relaxed);
-                if last_mode != Some((animated, coloured)) {
-                    state = AnimState::Pulsing;
-                    red_state = AnimState::Pulsing;
-                    next_glitch_at = counter + rng.gen_range(GLITCH_GAP_MIN..=GLITCH_GAP_MAX);
-                    next_red_glitch_at = counter + rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
-                    last_mode = Some((animated, coloured));
-                }
-
-                let pulse_len = frames.assets(Tint::Coloured).pulse.len();
-                let want = select_draw_key(
-                    animated, coloured, healthy, &state, &red_state, counter, pulse_len,
-                );
-                if last_drawn.as_ref() != Some(&want) {
-                    let assets = frames.assets(want.tint);
-                    // Mono frames are painted as macOS template images so the
-                    // system tints the alpha mask to the menu-bar foreground.
-                    // Use set_icon_with_as_template — calling set_icon then
-                    // set_icon_as_template separately produces the flicker
-                    // Tauri's own docs warn about, because set_icon creates a
-                    // fresh NSImage whose template flag defaults to false.
-                    let is_template = matches!(want.tint, Tint::Mono);
-                    match &want.phase {
-                        Phase::Static(h) => {
-                            let bytes = if *h { &assets.static_healthy } else { &assets.static_unhealthy };
-                            let img = Image::new(bytes, frames.width, frames.height);
-                            let _ = tray.set_icon_with_as_template(Some(img), is_template);
-                        }
-                        Phase::Pulse(idx) => {
-                            let img = Image::new(&assets.pulse[*idx], frames.width, frames.height);
-                            let _ = tray.set_icon_with_as_template(Some(img), is_template);
-                        }
-                        Phase::SteadyUnhealthy => {
-                            let img = Image::new(&assets.steady_unhealthy, frames.width, frames.height);
-                            let _ = tray.set_icon_with_as_template(Some(img), is_template);
-                        }
-                        Phase::Burst { side, .. } => {
-                            let (base, glitch_state) = match side {
-                                BurstSide::Healthy => (&assets.burst_base_healthy, &state),
-                                BurstSide::Unhealthy => (&assets.burst_base_unhealthy, &red_state),
-                            };
-                            if let AnimState::Glitching { sequence, step_idx, .. } = glitch_state {
-                                let shifted = apply_scanline_shift(
-                                    base, frames.width, frames.height,
-                                    &sequence[*step_idx].bands,
-                                );
-                                let img = Image::new(&shifted, frames.width, frames.height);
-                                let _ = tray.set_icon_with_as_template(Some(img), is_template);
-                            }
-                        }
-                    }
-                    last_drawn = Some(want);
-                }
-
-                // Burst state machines only advance in Animated mode — Static
-                // mode never enters Glitching so the timers would just churn
-                // counters that select_draw_key ignores anyway.
-                if animated {
-                    if !healthy {
-                        match &mut red_state {
-                            AnimState::Pulsing => {
-                                if counter >= next_red_glitch_at {
-                                    red_state = AnimState::Glitching {
-                                        sequence: random_scanline_sequence(&mut rng, frames.height),
-                                        step_idx: 0,
-                                        ticks_in_step: 0,
-                                    };
-                                }
-                            }
-                            AnimState::Glitching { sequence, step_idx, ticks_in_step } => {
-                                *ticks_in_step += 1;
-                                if *ticks_in_step >= sequence[*step_idx].ticks {
-                                    *step_idx += 1;
-                                    *ticks_in_step = 0;
-                                    if *step_idx >= sequence.len() {
-                                        red_state = AnimState::Pulsing;
-                                        next_red_glitch_at = counter
-                                            + rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        match &mut state {
-                            AnimState::Pulsing => {
-                                if counter >= next_glitch_at {
-                                    state = AnimState::Glitching {
-                                        sequence: random_scanline_sequence(&mut rng, frames.height),
-                                        step_idx: 0,
-                                        ticks_in_step: 0,
-                                    };
-                                }
-                            }
-                            AnimState::Glitching { sequence, step_idx, ticks_in_step } => {
-                                *ticks_in_step += 1;
-                                if *ticks_in_step >= sequence[*step_idx].ticks {
-                                    *step_idx += 1;
-                                    *ticks_in_step = 0;
-                                    if *step_idx >= sequence.len() {
-                                        state = AnimState::Pulsing;
-                                        next_glitch_at = counter
-                                            + rng.gen_range(GLITCH_GAP_MIN..=GLITCH_GAP_MAX);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                counter = counter.wrapping_add(1);
-            }
+            _ = &mut anim_sleep, if frame_timer => {}
+            _ = tray_changed.notified() => {}
             _ = health_tick.tick() => {
                 let new_healthy = is_healthy(&mcp_bound);
                 if !initial_sync_done {
@@ -1289,23 +1402,25 @@ async fn run_tray_animation(
                     if new_healthy != menu_built_healthy {
                         refresh_menu(&app);
                     }
-                } else if !new_healthy {
-                    // Always reset the healthy state machine so the cyan pulse
-                    // resumes cleanly when health recovers.
-                    state = AnimState::Pulsing;
-                    if healthy {
-                        // Just transitioned healthy→unhealthy: reset red burst
-                        // state so the gap timer starts fresh from now.
-                        red_state = AnimState::Pulsing;
-                        next_red_glitch_at = counter + rng.gen_range(RED_GAP_MIN..=RED_GAP_MAX);
-                    }
-                } else if !healthy {
+                } else if new_healthy && !anim.healthy() {
                     // Transitioned to healthy after a delayed bind — refresh the
                     // tray menu so the MCP status item shows 🟢 immediately.
                     refresh_menu(&app);
                 }
-                healthy = new_healthy;
+                anim.set_health(new_healthy);
+                if frame_timer {
+                    continue;
+                }
             }
+        }
+        let next = anim.tick(
+            tray_animated.load(Ordering::Relaxed),
+            tray_coloured.load(Ordering::Relaxed),
+            &mut paint,
+        );
+        frame_timer = next.is_some();
+        if let Some(delay) = next {
+            anim_sleep.as_mut().reset(Instant::now() + delay);
         }
     }
 }
@@ -1796,5 +1911,67 @@ mod tests {
                 }
             ),
         );
+    }
+
+    fn animator(healthy: bool, animated: bool, coloured: bool) -> TrayAnimator {
+        use rand::SeedableRng;
+        TrayAnimator::new(
+            rand::rngs::StdRng::seed_from_u64(7),
+            healthy,
+            initial_draw_key(animated, coloured),
+            22,
+        )
+    }
+
+    #[test]
+    fn tray_static_mode_sets_no_icon() {
+        let mut anim = animator(true, false, true);
+        let mut set_icon_calls = 0;
+        for _ in 0..100 {
+            let next = anim.tick(false, true, |_, _| set_icon_calls += 1);
+            assert_eq!(next, None, "static mode must not arm a frame timer");
+        }
+        assert_eq!(set_icon_calls, 0);
+    }
+
+    #[test]
+    fn tray_health_change_sets_icon_once() {
+        let mut anim = animator(true, false, true);
+        anim.set_health(false);
+        let mut drawn = Vec::new();
+        for _ in 0..100 {
+            anim.tick(false, true, |k, _| drawn.push(k.clone()));
+        }
+        assert_eq!(drawn, vec![key(Tint::Coloured, Phase::Static(false))]);
+    }
+
+    #[test]
+    fn tray_pulse_ticks_at_250ms_and_bursts_at_100ms() {
+        use std::time::Duration;
+        let mut anim = animator(true, true, true);
+        let (mut elapsed, mut pulse_calls_in_10s, mut bursts) = (Duration::ZERO, 0, 0);
+        for _ in 0..400 {
+            let mut phase = None;
+            let delay = anim
+                .tick(true, true, |k, _| phase = Some(k.phase.clone()))
+                .expect("animated mode arms a frame timer");
+            match phase {
+                Some(Phase::Pulse(_)) => assert_eq!(delay, Duration::from_millis(250)),
+                Some(Phase::Burst { .. }) => {
+                    bursts += 1;
+                    assert_eq!(delay, Duration::from_millis(100));
+                }
+                _ => {}
+            }
+            if matches!(phase, Some(Phase::Pulse(_))) && elapsed < Duration::from_secs(10) {
+                pulse_calls_in_10s += 1;
+            }
+            elapsed += delay;
+        }
+        assert!(
+            pulse_calls_in_10s <= 40,
+            "pulse_calls_in_10s={pulse_calls_in_10s}"
+        );
+        assert!(bursts > 0, "a burst must occur in 400 ticks");
     }
 }

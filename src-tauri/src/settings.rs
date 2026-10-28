@@ -10,6 +10,7 @@ use std::sync::{
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::Notify;
 
 pub use crate::share::tunnel::provider::ProviderKind;
 
@@ -167,11 +168,13 @@ pub struct Settings {
     provider: RwLock<ProviderKind>,
     mcp_port: u16,
     /// Tray icon flags. `Arc<AtomicBool>` mirrors the `mcp_bound` pattern —
-    /// the animation loop reads these every tick (~10Hz) and the menu handler
+    /// the animation loop reads these every tick and the menu handler
     /// flips them, so an atomic is cheaper than a lock and avoids any chance
     /// of the menu click stalling the animation thread.
     tray_animated: Arc<AtomicBool>,
     tray_coloured: Arc<AtomicBool>,
+    /// Wakes the tray loop, which sleeps between health polls in static mode.
+    tray_changed: Arc<Notify>,
     snapshot_retention: RwLock<SnapshotRetention>,
     clipboard_format: RwLock<ClipboardFormat>,
     redaction_style: RwLock<RedactionStyle>,
@@ -253,6 +256,7 @@ impl Settings {
             mcp_port,
             tray_animated: Arc::new(AtomicBool::new(tray_animated)),
             tray_coloured: Arc::new(AtomicBool::new(tray_coloured)),
+            tray_changed: Arc::new(Notify::new()),
             snapshot_retention: RwLock::new(snapshot_retention),
             clipboard_format: RwLock::new(clipboard_format),
             redaction_style: RwLock::new(redaction_style),
@@ -283,6 +287,9 @@ impl Settings {
     pub fn tray_coloured_flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.tray_coloured)
     }
+    pub fn tray_changed_signal(&self) -> Arc<Notify> {
+        Arc::clone(&self.tray_changed)
+    }
 
     /// Update the in-memory provider AND persist the new value to disk.
     pub fn save_provider(&self, dir: &Path, kind: ProviderKind) -> io::Result<()> {
@@ -302,6 +309,7 @@ impl Settings {
     ) -> io::Result<()> {
         self.tray_animated.store(animated, Ordering::Relaxed);
         self.tray_coloured.store(coloured, Ordering::Relaxed);
+        self.tray_changed.notify_one();
         self.write_config_file(dir)
     }
 
@@ -552,6 +560,20 @@ mod tests {
 
         let reloaded = Settings::load_from(temp.path()).unwrap();
         assert_eq!(reloaded.current_tray(), (false, true));
+    }
+
+    #[tokio::test]
+    async fn save_tray_appearance_wakes_the_tray_loop() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let settings = Settings::load_from(temp.path()).unwrap();
+        let changed = settings.tray_changed_signal();
+        settings
+            .save_tray_appearance(temp.path(), false, true)
+            .unwrap();
+
+        tokio::time::timeout(Duration::from_millis(100), changed.notified())
+            .await
+            .expect("save_tray_appearance must notify the tray loop");
     }
 
     #[test]
