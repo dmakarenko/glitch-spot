@@ -8,13 +8,20 @@ A tool that turns a marked-up screenshot into a structured snapshot that AI codi
 One marked-up screenshot: the clean image, the annotated image, its annotations and redactions, and the context of the device and app.
 _Avoid_: capture, report, bug report
 
+**Frame**:
+The captured screen image that the overlay shows and that a save builds a snapshot from.
+_Avoid_: screenshot, capture
+
 **Annotation**:
 A labelled rectangle on a snapshot with the user's note for that area.
 _Avoid_: markup, comment, pin
 
 **Redaction**:
-An area of a snapshot whose pixels are destroyed in both images before the snapshot is saved or sent.
+A region that the user covers so its pixels do not leave the Mac in either image of a snapshot.
 _Avoid_: mask, blur, censor
+
+**Redaction style**:
+How a redaction covers its region: solid fill, pixelated, or mosaic.
 
 **Desktop app**:
 The Glitch Spot macOS menu-bar app, which captures, stores, and serves snapshots.
@@ -39,3 +46,10 @@ _Avoid_: linking, registration, handshake
 **Sealed snapshot**:
 A snapshot that a Sender encrypts with the Desktop app's public key, so that only the Desktop app can read it.
 _Avoid_: encrypted payload, envelope
+
+**Share link**:
+A public URL, served through a tunnel, that gives one snapshot to a person who has the link.
+_Avoid_: share URL, public link
+
+**Tunnel**:
+The outside program (cloudflared, ngrok, or Tailscale Funnel) that makes the local share server reachable from the internet.

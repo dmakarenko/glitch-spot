@@ -38,4 +38,4 @@ Kill the background `python3` process when done — the icon recovers to cyan wi
 
 ## Plans
 
-Plans live in `docs/plans/`. Completed plans move to `docs/plans/completed/`.
+Plans, seeds, and initiatives live in the project-tracker repo (`~/Projects/private/project-tracker`, repo slug `glitch-spot`), not in this repo.
