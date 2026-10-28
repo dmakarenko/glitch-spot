@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub fn default_agent_prompt() -> String {
-    "Glitch Spot annotation snapshot. Each entry in 'annotations' is a labelled rectangle (by 'label': '01', '02', …) drawn over the captured screenshot. The 'note' field is the user's feedback for that region. 'images.annotated' is the screenshot with rectangles and badges rendered; 'images.clean' is the original. When addressing feedback, reference annotations by their label. Any entries in 'redactions' mark regions the user intentionally hid; their pixels are destroyed in both images — do not attempt to infer their contents.".to_string()
+    "Glitch Spot annotation snapshot. Each entry in 'annotations' is a labelled rectangle (by 'label': '01', '02', …) drawn over the captured screenshot. The 'note' field is the user's feedback for that region. 'images.annotated' is the screenshot with rectangles and badges rendered; 'images.clean' is the original. When addressing feedback, reference annotations by their label. Any entries in 'redactions' mark regions the user intentionally hid in both images. Each region has one of three covers, and the snapshot does not record which: 'solid' (an opaque box) and 'branded' (a glitch pattern) do not depend on the original pixels; 'pixelated', the default, replaces each block with its average color, so coarse color and layout remain. Do not attempt to infer their contents.".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -50,8 +50,8 @@ pub struct Coords {
 }
 
 /// A user-redacted region, physical pixels relative to the captured image. The
-/// pixels are destroyed in the saved images; these coordinates are recorded only
-/// so an agent knows a region was intentionally hidden.
+/// saved images cover its pixels (see `RedactionStyle`); these coordinates are
+/// recorded only so an agent knows a region was intentionally hidden.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RedactionRegion {
     pub x: f32,
